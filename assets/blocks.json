@@ -1,0 +1,76 @@
+{
+    "blocks": [
+        {
+            "name"       : "grass",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : "grass_block_top.png",
+            "bottom"     : "dirt.png",
+            "side"       : "grass_block_side.png"
+        },
+        {
+            "name"       : "dirt",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : "dirt.png",
+            "bottom"     : "dirt.png",
+            "side"       : "dirt.png"
+        },
+        {
+            "name"       : "gravel",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : "gravel.png",
+            "bottom"     : "gravel.png",
+            "side"       : "gravel.png"
+        },
+        {
+            "name"       : "stone",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : "stone.png",
+            "bottom"     : "stone.png",
+            "side"       : "stone.png"
+        },
+        {
+            "name"       : "andesite",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : "andesite.png",
+            "bottom"     : "andesite.png",
+            "side"       : "andesite.png"
+        },
+        {
+            "name"       : "diorite",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : "diorite.png",
+            "bottom"     : "diorite.png",
+            "side"       : "diorite.png"
+        },
+        {
+            "name"       : "granite",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : "granite.png",
+            "bottom"     : "granite.png",
+            "side"       : "granite.png"
+        },
+        {
+            "name"       : "cobblestone",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : "cobblestone.png",
+            "bottom"     : "cobblestone.png",
+            "side"       : "cobblestone.png"
+        },
+        {
+            "name"       : "bedrock",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : "bedrock.png",
+            "bottom"     : "bedrock.png",
+            "side"       : "bedrock.png"
+        }
+    ]
+}
