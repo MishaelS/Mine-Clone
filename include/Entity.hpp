@@ -1,16 +1,16 @@
 #pragma once
 
-#include "GameObject.hpp"
+#include "core/GameObject.hpp"
 
 // Dynamic actors: players, mobs, items, etc.
 class Entity : public GameObject {
 public:
     explicit Entity(Vector3 position = {0.0f, 0.0f, 0.0f});
 
-    void Update(float deltaTime) override;
+    void update(float delta_time) override;
 
-    Vector3 GetVelocity() const { return velocity; }
-    void SetVelocity(Vector3 newVelocity) { velocity = newVelocity; }
+    Vector3 get_velocity() const { return velocity; }
+    void set_velocity(Vector3 new_velocity) { velocity = new_velocity; }
 
 protected:
     Vector3 velocity{0.0f, 0.0f, 0.0f};

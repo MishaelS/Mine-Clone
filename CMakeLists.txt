@@ -10,17 +10,17 @@ add_subdirectory(external/raylib)
 
 add_executable(${PROJECT_NAME}
     src/main.cpp
-    src/GameObject.cpp
     src/WorldObject.cpp
     src/Entity.cpp
     src/Player.cpp
-    src/Block.cpp
-    src/BlockTextures.cpp
     src/Chunk.cpp
-    src/Json.cpp
-    src/IsoCamera.cpp
     src/Skybox.cpp
+    src/core/GameObject.cpp
     src/core/GameEngine.cpp
+    src/core/Json.cpp
+    src/core/IsoCamera.cpp
+    src/core/Block.cpp
+    src/core/TextureManager.cpp
 )
 target_include_directories(${PROJECT_NAME} PRIVATE include)
 target_link_libraries(${PROJECT_NAME} PRIVATE raylib)

@@ -9,14 +9,14 @@ public:
     explicit GameObject(Vector3 position = {0.0f, 0.0f, 0.0f});
     virtual ~GameObject() = default;
 
-    virtual void Update(float deltaTime);
-    virtual void Draw() const;
+    virtual void update(float delta_time);
+    virtual void draw() const;
 
-    Vector3 GetPosition() const { return position; }
-    void SetPosition(Vector3 newPosition) { position = newPosition; }
+    Vector3 get_position() const { return position; }
+    void set_position(Vector3 new_position) { position = new_position; }
 
-    bool IsActive() const { return active; }
-    void SetActive(bool value) { active = value; }
+    bool is_active() const { return active; }
+    void set_active(bool value) { active = value; }
 
 protected:
     Vector3 position;

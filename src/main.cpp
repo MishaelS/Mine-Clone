@@ -5,7 +5,8 @@
 #include "core/GameEngine.hpp"
 #include "Chunk.hpp"
 
-int main() {
+int main()
+{
     srand(static_cast<unsigned>(time(nullptr)));
 
     GameEngine engine(1280, 720, "Mine-Clone");
@@ -23,12 +24,12 @@ int main() {
                 cz * static_cast<float>(CHUNK_SIZE) - CHUNK_SIZE / 2.0f,
             };
             auto chunk = std::make_unique<Chunk>(position);
-            chunk->Randomize();
-            chunk->ComputeLighting();
-            engine.AddObject(std::move(chunk));
+            chunk->randomize();
+            chunk->compute_lighting();
+            engine.add_object(std::move(chunk));
         }
     }
 
-    engine.Run();
+    engine.run();
     return 0;
 }

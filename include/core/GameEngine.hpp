@@ -4,21 +4,21 @@
 #include <vector>
 
 #include "raylib.h"
-#include "GameObject.hpp"
+#include "core/GameObject.hpp"
 
 // Owns the window, the main loop, and every GameObject in the game.
 class GameEngine {
 public:
-    GameEngine(int screenWidth, int screenHeight, const char* title);
+    GameEngine(int screen_width, int screen_height, const char* title);
     ~GameEngine();
 
-    void Run();
+    void run();
 
-    void AddObject(std::unique_ptr<GameObject> object);
+    void add_object(std::unique_ptr<GameObject> object);
 
 private:
-    void Update(float deltaTime);
-    void Draw();
+    void update(float delta_time);
+    void draw();
 
     // Free-look test camera (WASD + mouse). Swap back to IsoCamera once
     // testing doesn't need to fly around and inspect the world freely.

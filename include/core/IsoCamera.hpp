@@ -8,8 +8,8 @@ class IsoCamera {
 public:
     IsoCamera();
 
-    void Update(float deltaTime);
-    const Camera3D& GetCamera() const { return camera; }
+    void update(float deltaTime);
+    const Camera3D& get_camera() const { return camera; }
 
 private:
     Camera3D camera;

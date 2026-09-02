@@ -16,47 +16,48 @@ namespace {
     }
 }
 
-void DrawSkybox(Vector3 cameraPosition) {
+void draw_skybox(Vector3 camera_position)
+{
     rlSetTexture(0);
     rlDisableBackfaceCulling(); // the camera sits inside this cube
     rlDisableDepthTest();       // always render behind everything else
 
     rlBegin(RL_QUADS);
         // Top
-        Vertex(cameraPosition, -SIZE, SIZE, -SIZE, SKY_COLOR);
-        Vertex(cameraPosition, -SIZE, SIZE,  SIZE, SKY_COLOR);
-        Vertex(cameraPosition,  SIZE, SIZE,  SIZE, SKY_COLOR);
-        Vertex(cameraPosition,  SIZE, SIZE, -SIZE, SKY_COLOR);
+        Vertex(camera_position, -SIZE, SIZE, -SIZE, SKY_COLOR);
+        Vertex(camera_position, -SIZE, SIZE,  SIZE, SKY_COLOR);
+        Vertex(camera_position,  SIZE, SIZE,  SIZE, SKY_COLOR);
+        Vertex(camera_position,  SIZE, SIZE, -SIZE, SKY_COLOR);
 
         // Bottom
-        Vertex(cameraPosition, -SIZE, -SIZE,  SIZE, HORIZON_COLOR);
-        Vertex(cameraPosition, -SIZE, -SIZE, -SIZE, HORIZON_COLOR);
-        Vertex(cameraPosition,  SIZE, -SIZE, -SIZE, HORIZON_COLOR);
-        Vertex(cameraPosition,  SIZE, -SIZE,  SIZE, HORIZON_COLOR);
+        Vertex(camera_position, -SIZE, -SIZE,  SIZE, HORIZON_COLOR);
+        Vertex(camera_position, -SIZE, -SIZE, -SIZE, HORIZON_COLOR);
+        Vertex(camera_position,  SIZE, -SIZE, -SIZE, HORIZON_COLOR);
+        Vertex(camera_position,  SIZE, -SIZE,  SIZE, HORIZON_COLOR);
 
         // North (-Z), sky at the top edge fading to horizon at the bottom edge
-        Vertex(cameraPosition, -SIZE,  SIZE, -SIZE, SKY_COLOR);
-        Vertex(cameraPosition,  SIZE,  SIZE, -SIZE, SKY_COLOR);
-        Vertex(cameraPosition,  SIZE, -SIZE, -SIZE, HORIZON_COLOR);
-        Vertex(cameraPosition, -SIZE, -SIZE, -SIZE, HORIZON_COLOR);
+        Vertex(camera_position, -SIZE,  SIZE, -SIZE, SKY_COLOR);
+        Vertex(camera_position,  SIZE,  SIZE, -SIZE, SKY_COLOR);
+        Vertex(camera_position,  SIZE, -SIZE, -SIZE, HORIZON_COLOR);
+        Vertex(camera_position, -SIZE, -SIZE, -SIZE, HORIZON_COLOR);
 
         // South (+Z)
-        Vertex(cameraPosition,  SIZE,  SIZE,  SIZE, SKY_COLOR);
-        Vertex(cameraPosition, -SIZE,  SIZE,  SIZE, SKY_COLOR);
-        Vertex(cameraPosition, -SIZE, -SIZE,  SIZE, HORIZON_COLOR);
-        Vertex(cameraPosition,  SIZE, -SIZE,  SIZE, HORIZON_COLOR);
+        Vertex(camera_position,  SIZE,  SIZE,  SIZE, SKY_COLOR);
+        Vertex(camera_position, -SIZE,  SIZE,  SIZE, SKY_COLOR);
+        Vertex(camera_position, -SIZE, -SIZE,  SIZE, HORIZON_COLOR);
+        Vertex(camera_position,  SIZE, -SIZE,  SIZE, HORIZON_COLOR);
 
         // East (+X)
-        Vertex(cameraPosition,  SIZE,  SIZE, -SIZE, SKY_COLOR);
-        Vertex(cameraPosition,  SIZE,  SIZE,  SIZE, SKY_COLOR);
-        Vertex(cameraPosition,  SIZE, -SIZE,  SIZE, HORIZON_COLOR);
-        Vertex(cameraPosition,  SIZE, -SIZE, -SIZE, HORIZON_COLOR);
+        Vertex(camera_position,  SIZE,  SIZE, -SIZE, SKY_COLOR);
+        Vertex(camera_position,  SIZE,  SIZE,  SIZE, SKY_COLOR);
+        Vertex(camera_position,  SIZE, -SIZE,  SIZE, HORIZON_COLOR);
+        Vertex(camera_position,  SIZE, -SIZE, -SIZE, HORIZON_COLOR);
 
         // West (-X)
-        Vertex(cameraPosition, -SIZE,  SIZE,  SIZE, SKY_COLOR);
-        Vertex(cameraPosition, -SIZE,  SIZE, -SIZE, SKY_COLOR);
-        Vertex(cameraPosition, -SIZE, -SIZE, -SIZE, HORIZON_COLOR);
-        Vertex(cameraPosition, -SIZE, -SIZE,  SIZE, HORIZON_COLOR);
+        Vertex(camera_position, -SIZE,  SIZE,  SIZE, SKY_COLOR);
+        Vertex(camera_position, -SIZE,  SIZE, -SIZE, SKY_COLOR);
+        Vertex(camera_position, -SIZE, -SIZE, -SIZE, HORIZON_COLOR);
+        Vertex(camera_position, -SIZE, -SIZE,  SIZE, HORIZON_COLOR);
     rlEnd();
 
     rlEnableDepthTest();

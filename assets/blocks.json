@@ -17,6 +17,30 @@
             "side"       : "dirt.png"
         },
         {
+            "name"       : "oak_planks",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : "oak_planks.png",
+            "bottom"     : "oak_planks.png",
+            "side"       : "oak_planks.png"
+        },
+        {
+            "name"       : "oak_log",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : "oak_planks.png",
+            "bottom"     : "oak_planks.png",
+            "side"       : "oak_log.png"
+        },
+        {
+            "name"       : "sand",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : "sand.png",
+            "bottom"     : "sand.png",
+            "side"       : "sand.png"
+        },
+        {
             "name"       : "gravel",
             "solid"      : true,
             "transparent": false,
@@ -63,6 +87,62 @@
             "top"        : "cobblestone.png",
             "bottom"     : "cobblestone.png",
             "side"       : "cobblestone.png"
+        },
+        {
+            "name"       : "coal_ore",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : "coal_ore.png",
+            "bottom"     : "coal_ore.png",
+            "side"       : "coal_ore.png"
+        },
+        {
+            "name"       : "copper_ore",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : "copper_ore.png",
+            "bottom"     : "copper_ore.png",
+            "side"       : "copper_ore.png"
+        },
+        {
+            "name"       : "diamond_ore",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : "diamond_ore.png",
+            "bottom"     : "diamond_ore.png",
+            "side"       : "diamond_ore.png"
+        },
+        {
+            "name"       : "emerald_ore",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : "emerald_ore.png",
+            "bottom"     : "emerald_ore.png",
+            "side"       : "emerald_ore.png"
+        },
+        {
+            "name"       : "gold_ore",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : "gold_ore.png",
+            "bottom"     : "gold_ore.png",
+            "side"       : "gold_ore.png"
+        },
+        {
+            "name"       : "iron_ore",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : "iron_ore.png",
+            "bottom"     : "iron_ore.png",
+            "side"       : "iron_ore.png"
+        },
+        {
+            "name"       : "lapis_ore",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : "lapis_ore.png",
+            "bottom"     : "lapis_ore.png",
+            "side"       : "lapis_ore.png"
         },
         {
             "name"       : "bedrock",
