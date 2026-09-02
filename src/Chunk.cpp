@@ -1,15 +1,29 @@
 #include "Chunk.hpp"
+#include "core/PerlinNoise.hpp"
 
-#include "rlgl.h"
+#include "raymath.h"
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <queue>
+#include <vector>
 
 namespace {
     constexpr float HALF = 0.5f;
-    constexpr int FILL_CHANCE_PERCENT = 15;
     constexpr int MAX_LIGHT = 15;
+
+    // Terrain shape: a wavelength-~96-block rolling hill signal, layered 4
+    // octaves deep for detail, mapped onto a height band centered on
+    // BASE_HEIGHT. The band has to fit inside the chunk's 0..CHUNK_SIZE-1
+    // column (no vertical chunk stacking yet), so it's kept well within that.
+    constexpr float NOISE_FREQUENCY = 1.0f / 96.0f;
+    constexpr int NOISE_OCTAVES = 4;
+    constexpr int BASE_HEIGHT = 8;
+    constexpr int HEIGHT_VARIATION = 5;
+    constexpr int DIRT_DEPTH = 3; // layers of dirt just under the grass top
 
     // AO level (0..3, from vertex_ao) -> brightness multiplier.
     constexpr float AO_BRIGHTNESS[4] = {0.5f, 0.65f, 0.8f, 1.0f};
@@ -70,50 +84,65 @@ namespace {
         return cells;
     }
 
-    void draw_face(const Face& face, Vector3 center, Texture2D texture, const float brightness[4]) {
-        rlSetTexture(texture.id);
-        rlBegin(RL_QUADS);
-            rlNormal3f(face.normal.x, face.normal.y, face.normal.z);
+    // Growable CPU-side buffers a chunk's mesh is assembled into, one block
+    // face at a time, before a single upload to the GPU.
+    struct MeshData {
+        std::vector<float> positions;
+        std::vector<float> normals;
+        std::vector<float> texcoords;
+        std::vector<unsigned char> colors;
+    };
 
-            // V=0 is the image's top row (raylib doesn't flip on load), so the
-            // top edge of the face (v1, v2) must sample V=0, not V=1.
-            unsigned char b0 = static_cast<unsigned char>(brightness[0] * 255.0f);
-            rlColor4ub(b0, b0, b0, 255);
-            rlTexCoord2f(0.0f, 0.0f);
-            rlVertex3f(
-                center.x + face.v1.x,
-                center.y + face.v1.y,
-                center.z + face.v1.z
-            );
+    // Appends one face as two triangles (0,1,2) and (0,2,3) — the same quad,
+    // split for a Mesh's plain (non-quad) triangle list.
+    void append_face(MeshData& mesh_data, const Face& face, Vector3 center, Rectangle uv, const float brightness[4]) {
+        Vector3 corners[4] = {face.v1, face.v2, face.v3, face.v4};
+        // V=0 is the image's top row (raylib doesn't flip on load), so the
+        // top edge of the face (corners 0, 1) must sample V=0, not V=1.
+        float u[4] = {uv.x,              uv.x + uv.width, uv.x + uv.width, uv.x};
+        float v[4] = {uv.y,              uv.y,             uv.y + uv.height, uv.y + uv.height};
 
-            unsigned char b1 = static_cast<unsigned char>(brightness[1] * 255.0f);
-            rlColor4ub(b1, b1, b1, 255);
-            rlTexCoord2f(1.0f, 0.0f);
-            rlVertex3f(
-                center.x + face.v2.x,
-                center.y + face.v2.y,
-                center.z + face.v2.z
-            );
+        static constexpr int TRIANGLE[6] = {0, 1, 2, 0, 2, 3};
+        for (int corner : TRIANGLE) {
+            mesh_data.positions.push_back(center.x + corners[corner].x);
+            mesh_data.positions.push_back(center.y + corners[corner].y);
+            mesh_data.positions.push_back(center.z + corners[corner].z);
 
-            unsigned char b2 = static_cast<unsigned char>(brightness[2] * 255.0f);
-            rlColor4ub(b2, b2, b2, 255);
-            rlTexCoord2f(1.0f, 1.0f);
-            rlVertex3f(
-                center.x + face.v3.x,
-                center.y + face.v3.y,
-                center.z + face.v3.z
-            );
+            mesh_data.normals.push_back(face.normal.x);
+            mesh_data.normals.push_back(face.normal.y);
+            mesh_data.normals.push_back(face.normal.z);
 
-            unsigned char b3 = static_cast<unsigned char>(brightness[3] * 255.0f);
-            rlColor4ub(b3, b3, b3, 255);
-            rlTexCoord2f(0.0f, 1.0f);
-            rlVertex3f(
-                center.x + face.v4.x,
-                center.y + face.v4.y,
-                center.z + face.v4.z
-            );
-        rlEnd();
-        rlSetTexture(0);
+            mesh_data.texcoords.push_back(u[corner]);
+            mesh_data.texcoords.push_back(v[corner]);
+
+            unsigned char b = static_cast<unsigned char>(brightness[corner] * 255.0f);
+            mesh_data.colors.push_back(b);
+            mesh_data.colors.push_back(b);
+            mesh_data.colors.push_back(b);
+            mesh_data.colors.push_back(255);
+        }
+    }
+
+    // Every chunk's mesh samples the same block texture atlas, so they all
+    // share one Material — built lazily so it's only touched once
+    // Load_block_definitions() (and so the atlas texture) has already run.
+    Material& get_chunk_material() {
+        static Material material = [] {
+            Material m = LoadMaterialDefault();
+            SetMaterialTexture(&m, MATERIAL_MAP_DIFFUSE, get_block_atlas_texture());
+            return m;
+        }();
+        return material;
+    }
+
+    // Copies a std::vector into a malloc'd buffer sized to match — Mesh
+    // fields must be malloc-compatible since UnloadMesh() frees them with
+    // RL_FREE (== free() with raylib's default allocator).
+    template <typename T>
+    T* to_mesh_buffer(const std::vector<T>& data) {
+        T* buffer = static_cast<T*>(std::malloc(data.size() * sizeof(T)));
+        std::memcpy(buffer, data.data(), data.size() * sizeof(T));
+        return buffer;
     }
 }
 
@@ -127,20 +156,40 @@ Chunk::Chunk(Vector3 position) : WorldObject(position)
     blocks.fill(BlockType::Air);
 }
 
-void Chunk::randomize()
+Chunk::~Chunk()
 {
-    for (int x = 0; x < CHUNK_SIZE; ++x) {
-        for (int y = 0; y < CHUNK_SIZE; ++y) {
-            for (int z = 0; z < CHUNK_SIZE; ++z) {
-                bool filled = (rand() % 100) < FILL_CHANCE_PERCENT;
-                if (!filled) {
-                    set_block(x, y, z, BlockType::Air);
-                    continue;
-                }
+    if (mesh_uploaded) {
+        UnloadMesh(mesh);
+    }
+}
 
-                // Any non-air BlockType (index 0 is Air, skipped).
-                constexpr int BLOCK_TYPE_COUNT = static_cast<int>(BlockType::Count);
-                set_block(x, y, z, static_cast<BlockType>(1 + rand() % (BLOCK_TYPE_COUNT - 1)));
+void Chunk::generate_terrain(const PerlinNoise& noise)
+{
+    Vector3 origin = get_position();
+
+    for (int x = 0; x < CHUNK_SIZE; ++x) {
+        for (int z = 0; z < CHUNK_SIZE; ++z) {
+            float world_x = origin.x + x;
+            float world_z = origin.z + z;
+            float sample = noise.fractal(world_x * NOISE_FREQUENCY, world_z * NOISE_FREQUENCY, NOISE_OCTAVES);
+
+            int height = BASE_HEIGHT + static_cast<int>(std::lround(sample * HEIGHT_VARIATION));
+            height = std::clamp(height, 1, CHUNK_SIZE - 1);
+
+            for (int y = 0; y < CHUNK_SIZE; ++y) {
+                BlockType type;
+                if (y == 0) {
+                    type = BlockType::Bedrock;
+                } else if (y > height) {
+                    type = BlockType::Air;
+                } else if (y == height) {
+                    type = BlockType::Grass;
+                } else if (y > height - DIRT_DEPTH) {
+                    type = BlockType::Dirt;
+                } else {
+                    type = BlockType::Stone;
+                }
+                set_block(x, y, z, type);
             }
         }
     }
@@ -308,33 +357,89 @@ float Chunk::vertex_light(int x, int y, int z, Vector3 normal, Vector3 corner) c
     return (total / 4.0f) / MAX_LIGHT;
 }
 
-void Chunk::draw() const
+void Chunk::build_mesh(const Chunk* west, const Chunk* east, const Chunk* north, const Chunk* south)
 {
-    Vector3 origin = get_position();
+    if (mesh_uploaded) {
+        UnloadMesh(mesh);
+        mesh = Mesh{};
+        mesh_uploaded = false;
+    }
+
+    MeshData mesh_data;
+
+    // Like is_opaque(), but a coordinate that steps outside this chunk's own
+    // 0..CHUNK_SIZE-1 range is looked up in the appropriate neighbor instead
+    // of being treated as open — that neighbor's own block data has already
+    // been generated by the time build_mesh() runs. A null neighbor (the
+    // edge of the world) still counts as open, same as before.
+    auto neighbor_opaque = [&](int x, int y, int z) {
+        if (y < 0 || y >= CHUNK_SIZE) return false; // no vertical chunk stacking yet
+
+        const Chunk* neighbor = nullptr;
+        if (x < 0)              { neighbor = west;  x += CHUNK_SIZE; }
+        else if (x >= CHUNK_SIZE) { neighbor = east;  x -= CHUNK_SIZE; }
+        else if (z < 0)          { neighbor = north; z += CHUNK_SIZE; }
+        else if (z >= CHUNK_SIZE) { neighbor = south; z -= CHUNK_SIZE; }
+        else return is_opaque(x, y, z); // still inside this chunk
+
+        if (neighbor == nullptr) return false;
+        return !get_block_properties(neighbor->get_block(x, y, z)).transparent;
+    };
+
     for (int x = 0; x < CHUNK_SIZE; ++x) {
         for (int y = 0; y < CHUNK_SIZE; ++y) {
             for (int z = 0; z < CHUNK_SIZE; ++z) {
                 BlockType type = get_block(x, y, z);
                 if (type == BlockType::Air) continue;
 
-                Vector3 center = {
-                    origin.x + x + 0.5f,
-                    origin.y + y + 0.5f,
-                    origin.z + z + 0.5f,
-                };
+                // Mesh-local, not world-space: draw()'s transform matrix
+                // places the whole mesh at this chunk's world position.
+                Vector3 center = {x + 0.5f, y + 0.5f, z + 0.5f};
+
                 const BlockProperties& properties = get_block_properties(type);
                 for (int face = 0; face < 6; ++face) {
                     const Face& f = CUBE_FACES[face];
+
+                    // Hidden-face culling: a face whose neighbor is opaque
+                    // can never be seen, so it's left out of the mesh
+                    // entirely rather than drawn and hidden behind it.
+                    int nx = x + static_cast<int>(f.normal.x);
+                    int ny = y + static_cast<int>(f.normal.y);
+                    int nz = z + static_cast<int>(f.normal.z);
+                    if (neighbor_opaque(nx, ny, nz)) continue;
+
                     Vector3 corners[4] = {f.v1, f.v2, f.v3, f.v4};
                     float brightness[4];
                     for (int i = 0; i < 4; ++i) {
                         int ao = vertex_ao(x, y, z, f.normal, corners[i]);
-                        float lightFraction = vertex_light(x, y, z, f.normal, corners[i]);
-                        brightness[i] = AO_BRIGHTNESS[ao] * lightFraction;
+                        float light_fraction = vertex_light(x, y, z, f.normal, corners[i]);
+                        brightness[i] = AO_BRIGHTNESS[ao] * light_fraction;
                     }
-                    draw_face(f, center, properties.textures[face], brightness);
+                    append_face(mesh_data, f, center, properties.texture_uvs[face], brightness);
                 }
             }
         }
     }
+
+    mesh.vertexCount = static_cast<int>(mesh_data.positions.size() / 3);
+    mesh.triangleCount = mesh.vertexCount / 3;
+    if (mesh.vertexCount == 0) {
+        return; // an all-air chunk (e.g. above the terrain height): nothing to draw
+    }
+
+    mesh.vertices = to_mesh_buffer(mesh_data.positions);
+    mesh.normals = to_mesh_buffer(mesh_data.normals);
+    mesh.texcoords = to_mesh_buffer(mesh_data.texcoords);
+    mesh.colors = to_mesh_buffer(mesh_data.colors);
+
+    UploadMesh(&mesh, false);
+    mesh_uploaded = true;
+}
+
+void Chunk::draw() const
+{
+    if (!mesh_uploaded) return;
+
+    Vector3 origin = get_position();
+    DrawMesh(mesh, get_chunk_material(), MatrixTranslate(origin.x, origin.y, origin.z));
 }

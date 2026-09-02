@@ -1,8 +1,9 @@
 #include "core/Block.hpp"
 #include "core/Json.hpp"
-#include "core/TextureManager.hpp"
+#include "core/TextureAtlas.hpp"
 
 #include <array>
+#include <memory>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -15,9 +16,15 @@ namespace {
     // art — so shrink all the way to Minecraft's actual block resolution.
     constexpr int BLOCK_TEXTURE_SIZE = 16;
 
-    const Texture2D& GetBlockTexture(const std::string& file_name) {
-        return TextureManager::get_resized("sprites/" + file_name, BLOCK_TEXTURE_SIZE);
-    }
+    // 8x8 tiles is far more than the ~20 sprites blocks.json currently
+    // references, leaving headroom for new blocks without resizing the atlas.
+    constexpr int ATLAS_GRID_SIZE = 8;
+
+    // Constructed inside Load_block_definitions() rather than at static-init
+    // time, since uploading it needs a GL context that only exists once
+    // InitWindow() has run — kept alive afterward so chunks can read
+    // get_block_atlas_texture() at any point.
+    std::unique_ptr<TextureAtlas> block_atlas;
 
     const std::unordered_map<std::string, BlockType> NAME_TO_TYPE = {
         {"grass",       BlockType::Grass},
@@ -47,6 +54,8 @@ void Load_block_definitions()
     // Air: never drawn, so its texture slots are left unused.
     block_table[static_cast<uint8_t>(BlockType::Air)] = {false, true, 0, {}};
 
+    block_atlas = std::make_unique<TextureAtlas>(BLOCK_TEXTURE_SIZE, ATLAS_GRID_SIZE);
+
     char* fileText = LoadFileText(ASSETS_PATH "blocks.json");
     if (fileText == nullptr) {
         throw std::runtime_error("Could not load " ASSETS_PATH "blocks.json");
@@ -61,27 +70,34 @@ void Load_block_definitions()
             throw std::runtime_error("blocks.json: unknown block name '" + name + "'");
         }
 
-        const Texture2D& top    = GetBlockTexture(entry["top"].as_string());
-        const Texture2D& bottom = GetBlockTexture(entry["bottom"].as_string());
-        const Texture2D& side   = GetBlockTexture(entry["side"].as_string());
+        Rectangle top    = block_atlas->get_uv(entry["top"].as_string());
+        Rectangle bottom = block_atlas->get_uv(entry["bottom"].as_string());
+        Rectangle side   = block_atlas->get_uv(entry["side"].as_string());
 
         BlockProperties properties;
         properties.solid = entry["solid"].as_bool(true);
         properties.transparent = entry["transparent"].as_bool(false);
         properties.luminance = static_cast<int>(entry["luminance"].as_number(0.0));
         // Order: Top, Bottom, North, South, East, West.
-        properties.textures[0] = top;
-        properties.textures[1] = bottom;
-        properties.textures[2] = side;
-        properties.textures[3] = side;
-        properties.textures[4] = side;
-        properties.textures[5] = side;
+        properties.texture_uvs[0] = top;
+        properties.texture_uvs[1] = bottom;
+        properties.texture_uvs[2] = side;
+        properties.texture_uvs[3] = side;
+        properties.texture_uvs[4] = side;
+        properties.texture_uvs[5] = side;
 
         block_table[static_cast<uint8_t>(it->second)] = properties;
     }
+
+    block_atlas->upload();
 }
 
 const BlockProperties& get_block_properties(BlockType type)
 {
     return block_table[static_cast<uint8_t>(type)];
+}
+
+const Texture2D& get_block_atlas_texture()
+{
+    return block_atlas->texture();
 }

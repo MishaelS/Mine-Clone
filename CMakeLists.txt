@@ -4,6 +4,11 @@ project(Mine-Clone CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Lets editor tooling (VS Code's C/C++ extension, clangd, ...) pick up the
+# real compiler flags — including target_compile_definitions below — instead
+# of guessing and flagging things like ASSETS_PATH as undefined.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BUILD_GAMES OFF CACHE BOOL "" FORCE)
 add_subdirectory(external/raylib)
@@ -21,6 +26,8 @@ add_executable(${PROJECT_NAME}
     src/core/IsoCamera.cpp
     src/core/Block.cpp
     src/core/TextureManager.cpp
+    src/core/TextureAtlas.cpp
+    src/core/PerlinNoise.cpp
 )
 target_include_directories(${PROJECT_NAME} PRIVATE include)
 target_link_libraries(${PROJECT_NAME} PRIVATE raylib)

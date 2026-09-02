@@ -28,8 +28,8 @@
             "name"       : "oak_log",
             "solid"      : true,
             "transparent": false,
-            "top"        : "oak_planks.png",
-            "bottom"     : "oak_planks.png",
+            "top"        : "oak_log.png",
+            "bottom"     : "oak_log.png",
             "side"       : "oak_log.png"
         },
         {

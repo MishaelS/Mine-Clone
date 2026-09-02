@@ -7,8 +7,8 @@ namespace {
     // plane (1000 units) so it never gets clipped away.
     constexpr float SIZE = 500.0f;
 
-    constexpr Color SKY_COLOR = {110, 165, 235, 255};
-    constexpr Color HORIZON_COLOR = {205, 225, 240, 255};
+    constexpr Color SKY_COLOR = {135, 190, 235, 255};
+    constexpr Color HORIZON_COLOR = {215, 235, 245, 255};
 
     void Vertex(Vector3 center, float x, float y, float z, Color color) {
         rlColor4ub(color.r, color.g, color.b, color.a);
@@ -59,6 +59,14 @@ void draw_skybox(Vector3 camera_position)
         Vertex(camera_position, -SIZE, -SIZE, -SIZE, HORIZON_COLOR);
         Vertex(camera_position, -SIZE, -SIZE,  SIZE, HORIZON_COLOR);
     rlEnd();
+
+    // rlEnableDepthTest/rlEnableBackfaceCulling below flip GL state
+    // immediately, but rlEnd() doesn't flush these quads to the GPU by
+    // itself — without this, they'd get rasterized later (whenever the
+    // batch actually flushes) with depth test and culling back on, and
+    // vanish: back-face culling would discard them since the camera sits
+    // inside the cube, facing their back side.
+    rlDrawRenderBatchActive();
 
     rlEnableDepthTest();
     rlEnableBackfaceCulling();

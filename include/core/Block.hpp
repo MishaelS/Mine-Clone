@@ -49,11 +49,19 @@ struct BlockProperties {
     bool transparent;  // doesn't block light or occlude neighbors (air, later: glass/water)
     int  luminance;    // 0-15, block light emitted by this block (0 = none)
 
-    Texture2D textures[6]; // indexed by BlockFace
+    // UV rectangle (0..1) within get_block_atlas_texture(), indexed by
+    // BlockFace — every block's faces share one atlas texture, so a whole
+    // chunk mesh draws with a single bound texture.
+    Rectangle texture_uvs[6];
 };
 
-// Parses assets/blocks.json and fills the BlockType -> BlockProperties table.
+// Parses assets/blocks.json and fills the BlockType -> BlockProperties table,
+// packing every referenced sprite into the shared block texture atlas.
 // Call once after the window exists (texture loads need a GL context).
 void Load_block_definitions();
 
 const BlockProperties& get_block_properties(BlockType type);
+
+// The single texture every BlockProperties::texture_uvs rectangle indexes
+// into. Valid only after Load_block_definitions().
+const Texture2D& get_block_atlas_texture();

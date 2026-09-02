@@ -14,8 +14,10 @@ GameEngine::GameEngine(int screen_width, int screen_height, const char* title)
     SetTargetFPS(60);
     Load_block_definitions(); // needs a GL context, so only after InitWindow
 
-    camera.position = {0.0f, 10.0f, 25.0f};
-    camera.target = {0.0f, 8.0f, 0.0f}; // roughly the starting chunk's center
+    // World Generation covers world X/Z [0, 512); start roughly above its
+    // center, looking down at it.
+    camera.position = {256.0f, 30.0f, 281.0f};
+    camera.target = {256.0f, 10.0f, 256.0f};
     camera.up = {0.0f, 1.0f, 0.0f};
     camera.fovy = 60.0f;
     camera.projection = CAMERA_PERSPECTIVE;
