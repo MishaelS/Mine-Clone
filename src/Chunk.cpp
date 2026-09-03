@@ -13,7 +13,6 @@
 
 namespace {
     constexpr float HALF = 0.5f;
-    constexpr int MAX_LIGHT = 15;
 
     // Terrain shape: a wavelength-~96-block rolling hill signal, layered 4
     // octaves deep for detail, mapped onto a height band centered on
@@ -43,6 +42,60 @@ namespace {
         { { HALF,  HALF, -HALF}, { HALF,  HALF,  HALF}, { HALF, -HALF,  HALF}, { HALF, -HALF, -HALF}, { 1.0f,  0.0f,  0.0f} }, // East
         { {-HALF,  HALF,  HALF}, {-HALF,  HALF, -HALF}, {-HALF, -HALF, -HALF}, {-HALF, -HALF,  HALF}, {-1.0f,  0.0f,  0.0f} }, // West
     }};
+
+    // The 9 chunks (this one plus its 8 border neighbors) a face-corner
+    // AO/light sample might land in. A face's own normal steps one cell
+    // past one edge; a diagonal corner-of-corner sample (used for AO/light
+    // at a convex vertex) steps past two edges at once when the block is
+    // also at the chunk's edge on that other axis, landing in a diagonal
+    // neighbor rather than a side one. Any entry may be null — the edge of
+    // the loaded world — same as a missing side neighbor.
+    struct Neighborhood {
+        const Chunk* self;
+        const Chunk* west, *east, *north, *south;
+        const Chunk* northwest, *northeast, *southwest, *southeast;
+
+        // Rewrites a possibly out-of-range (x, z) in place to the same cell
+        // expressed in whichever of the above 9 chunks actually owns it,
+        // and returns that chunk (nullptr if it isn't loaded). `y` never
+        // crosses a chunk boundary (no vertical chunk stacking yet) and
+        // isn't touched here.
+        const Chunk* resolve(int& x, int& z) const {
+            int dx = (x < 0) ? -1 : (x >= CHUNK_SIZE ? 1 : 0);
+            int dz = (z < 0) ? -1 : (z >= CHUNK_SIZE ? 1 : 0);
+            if (dx != 0) x += (dx < 0) ? CHUNK_SIZE : -CHUNK_SIZE;
+            if (dz != 0) z += (dz < 0) ? CHUNK_SIZE : -CHUNK_SIZE;
+
+            if (dx == 0 && dz == 0) return self;
+            if (dx == 0) return dz < 0 ? north : south;
+            if (dz == 0) return dx < 0 ? west : east;
+            if (dx < 0) return dz < 0 ? northwest : southwest;
+            return dz < 0 ? northeast : southeast;
+        }
+    };
+
+    // AO occupancy check, resolved through a Neighborhood so a sample that
+    // steps outside the chunk being meshed reads the real neighbor chunk's
+    // blocks instead of the chunk-local "nothing out there" default.
+    // Out-of-range on y (no vertical stacking) or a missing neighbor chunk
+    // still counts as not solid, same as before.
+    bool solid_at(const Neighborhood& nb, int x, int y, int z) {
+        if (y < 0 || y >= CHUNK_SIZE) return false;
+        const Chunk* chunk = nb.resolve(x, z);
+        if (chunk == nullptr) return false;
+        return get_block_properties(chunk->get_block(x, y, z)).solid;
+    }
+
+    // Light lookup, resolved the same way — a sample that steps outside the
+    // chunk being meshed reads the neighbor's real computed light instead
+    // of assuming full sky light. Out-of-range on y or a missing neighbor
+    // still reads as open, sunlit space, same as before.
+    int light_at(const Neighborhood& nb, int x, int y, int z) {
+        if (y < 0 || y >= CHUNK_SIZE) return MAX_LIGHT;
+        const Chunk* chunk = nb.resolve(x, z);
+        if (chunk == nullptr) return MAX_LIGHT;
+        return chunk->get_light(x, y, z);
+    }
 
     // The 4 cells relevant to one face-corner's vertex: the cell right
     // outside the face, the two edge-adjacent ("side") cells, and the
@@ -82,6 +135,35 @@ namespace {
         cells.corner[axis2] += c[axis2];
 
         return cells;
+    }
+
+    // Minecraft-style vertex AO: 0 (darkest) to 3 (no occlusion), based on the
+    // two blocks sharing this face-corner's edges and the one at its diagonal.
+    int vertex_ao(const Neighborhood& nb, int x, int y, int z, Vector3 normal, Vector3 corner) {
+        NeighborCells cells = compute_neighbor_cells(x, y, z, normal, corner);
+
+        bool s1 = solid_at(nb, cells.side1[0] , cells.side1[1] , cells.side1[2] );
+        bool s2 = solid_at(nb, cells.side2[0] , cells.side2[1] , cells.side2[2] );
+        bool cc = solid_at(nb, cells.corner[0], cells.corner[1], cells.corner[2]);
+
+        // Two occupied edge-neighbors darken a vertex fully, even if the corner
+        // is empty — otherwise convex corners get a visible bright seam.
+        if (s1 && s2) return 0;
+        return 3 - (static_cast<int>(s1) + static_cast<int>(s2) + static_cast<int>(cc));
+    }
+
+    // Average light (0..1) of the same three neighbor cells used for AO, plus
+    // the cell right outside the face — the same per-vertex sampling
+    // Minecraft calls "smooth lighting".
+    float vertex_light(const Neighborhood& nb, int x, int y, int z, Vector3 normal, Vector3 corner) {
+        NeighborCells cells = compute_neighbor_cells(x, y, z, normal, corner);
+
+        int total = light_at(nb, cells.base[0]  , cells.base[1]  , cells.base[2]  )
+                  + light_at(nb, cells.side1[0] , cells.side1[1] , cells.side1[2] )
+                  + light_at(nb, cells.side2[0] , cells.side2[1] , cells.side2[2] )
+                  + light_at(nb, cells.corner[0], cells.corner[1], cells.corner[2]);
+
+        return (total / 4.0f) / MAX_LIGHT;
     }
 
     // Growable CPU-side buffers a chunk's mesh is assembled into, one block
@@ -205,14 +287,6 @@ void Chunk::set_block(int x, int y, int z, BlockType type)
     blocks[index(x, y, z)] = type;
 }
 
-bool Chunk::is_solid(int x, int y, int z) const
-{
-    if (x < 0 || x >= CHUNK_SIZE || y < 0 || y >= CHUNK_SIZE || z < 0 || z >= CHUNK_SIZE) {
-        return false;
-    }
-    return get_block_properties(get_block(x, y, z)).solid;
-}
-
 bool Chunk::is_opaque(int x, int y, int z) const
 {
     if (x < 0 || x >= CHUNK_SIZE || y < 0 || y >= CHUNK_SIZE || z < 0 || z >= CHUNK_SIZE) {
@@ -224,7 +298,7 @@ bool Chunk::is_opaque(int x, int y, int z) const
 int Chunk::get_sky_light(int x, int y, int z) const
 {
     if (x < 0 || x >= CHUNK_SIZE || y < 0 || y >= CHUNK_SIZE || z < 0 || z >= CHUNK_SIZE) {
-        // No neighbor-chunk data yet (same as is_solid/is_opaque) — assume open,
+        // No neighbor-chunk data yet (same as is_opaque) — assume open,
         // sunlit space rather than reading as pitch black at chunk edges.
         return MAX_LIGHT;
     }
@@ -331,33 +405,9 @@ void Chunk::compute_lighting()
     }
 }
 
-int Chunk::vertex_ao(int x, int y, int z, Vector3 normal, Vector3 corner) const
-{
-    NeighborCells cells = compute_neighbor_cells(x, y, z, normal, corner);
-
-    bool s1 = is_solid(cells.side1[0] , cells.side1[1] , cells.side1[2] );
-    bool s2 = is_solid(cells.side2[0] , cells.side2[1] , cells.side2[2] );
-    bool cc = is_solid(cells.corner[0], cells.corner[1], cells.corner[2]);
-
-    // Two occupied edge-neighbors darken a vertex fully, even if the corner
-    // is empty — otherwise convex corners get a visible bright seam.
-    if (s1 && s2) return 0;
-    return 3 - (static_cast<int>(s1) + static_cast<int>(s2) + static_cast<int>(cc));
-}
-
-float Chunk::vertex_light(int x, int y, int z, Vector3 normal, Vector3 corner) const
-{
-    NeighborCells cells = compute_neighbor_cells(x, y, z, normal, corner);
-
-    int total = get_light(cells.base[0]  , cells.base[1]  , cells.base[2]  )
-              + get_light(cells.side1[0] , cells.side1[1] , cells.side1[2] )
-              + get_light(cells.side2[0] , cells.side2[1] , cells.side2[2] )
-              + get_light(cells.corner[0], cells.corner[1], cells.corner[2]);
-
-    return (total / 4.0f) / MAX_LIGHT;
-}
-
-void Chunk::build_mesh(const Chunk* west, const Chunk* east, const Chunk* north, const Chunk* south)
+void Chunk::build_mesh(const Chunk* west, const Chunk* east, const Chunk* north, const Chunk* south,
+                        const Chunk* northwest, const Chunk* northeast,
+                        const Chunk* southwest, const Chunk* southeast)
 {
     if (mesh_uploaded) {
         UnloadMesh(mesh);
@@ -366,12 +416,16 @@ void Chunk::build_mesh(const Chunk* west, const Chunk* east, const Chunk* north,
     }
 
     MeshData mesh_data;
+    Neighborhood nb{this, west, east, north, south, northwest, northeast, southwest, southeast};
 
     // Like is_opaque(), but a coordinate that steps outside this chunk's own
     // 0..CHUNK_SIZE-1 range is looked up in the appropriate neighbor instead
     // of being treated as open — that neighbor's own block data has already
     // been generated by the time build_mesh() runs. A null neighbor (the
-    // edge of the world) still counts as open, same as before.
+    // edge of the world) still counts as open, same as before. A face's own
+    // normal only ever steps one axis at a time, so the diagonal neighbors
+    // in `nb` never come into play here (they matter for vertex_ao/
+    // vertex_light below, whose corner samples can step two axes at once).
     auto neighbor_opaque = [&](int x, int y, int z) {
         if (y < 0 || y >= CHUNK_SIZE) return false; // no vertical chunk stacking yet
 
@@ -411,8 +465,8 @@ void Chunk::build_mesh(const Chunk* west, const Chunk* east, const Chunk* north,
                     Vector3 corners[4] = {f.v1, f.v2, f.v3, f.v4};
                     float brightness[4];
                     for (int i = 0; i < 4; ++i) {
-                        int ao = vertex_ao(x, y, z, f.normal, corners[i]);
-                        float light_fraction = vertex_light(x, y, z, f.normal, corners[i]);
+                        int ao = vertex_ao(nb, x, y, z, f.normal, corners[i]);
+                        float light_fraction = vertex_light(nb, x, y, z, f.normal, corners[i]);
                         brightness[i] = AO_BRIGHTNESS[ao] * light_fraction;
                     }
                     append_face(mesh_data, f, center, properties.texture_uvs[face], brightness);

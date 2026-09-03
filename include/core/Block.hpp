@@ -3,6 +3,7 @@
 #include "raylib.h"
 
 #include <cstdint>
+#include <string>
 
 // The id a Chunk stores per voxel cell. Kept tiny (1 byte) since a single
 // 16x16x16 chunk holds 4096 of these. Every value except Air must have a
@@ -61,6 +62,11 @@ struct BlockProperties {
 void Load_block_definitions();
 
 const BlockProperties& get_block_properties(BlockType type);
+
+// The blocks.json "name" a BlockType was loaded from (e.g. "oak_planks"),
+// for display purposes (the debug overlay's "Looking at" line). "air" for
+// BlockType::Air, which has no blocks.json entry of its own.
+const std::string& get_block_name(BlockType type);
 
 // The single texture every BlockProperties::texture_uvs rectangle indexes
 // into. Valid only after Load_block_definitions().

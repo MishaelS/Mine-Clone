@@ -9,6 +9,7 @@
 
 namespace {
     std::array<BlockProperties, static_cast<size_t>(BlockType::Count)> block_table;
+    std::array<std::string, static_cast<size_t>(BlockType::Count)> block_names;
 
     // The source sprites are 4000x4000 photo-scanned textures. Downscaling
     // only to something like 256 still leaves the smooth gradients that
@@ -53,6 +54,7 @@ void Load_block_definitions()
 {
     // Air: never drawn, so its texture slots are left unused.
     block_table[static_cast<uint8_t>(BlockType::Air)] = {false, true, 0, {}};
+    block_names[static_cast<uint8_t>(BlockType::Air)] = "air";
 
     block_atlas = std::make_unique<TextureAtlas>(BLOCK_TEXTURE_SIZE, ATLAS_GRID_SIZE);
 
@@ -87,6 +89,7 @@ void Load_block_definitions()
         properties.texture_uvs[5] = side;
 
         block_table[static_cast<uint8_t>(it->second)] = properties;
+        block_names[static_cast<uint8_t>(it->second)] = name;
     }
 
     block_atlas->upload();
@@ -95,6 +98,11 @@ void Load_block_definitions()
 const BlockProperties& get_block_properties(BlockType type)
 {
     return block_table[static_cast<uint8_t>(type)];
+}
+
+const std::string& get_block_name(BlockType type)
+{
+    return block_names[static_cast<uint8_t>(type)];
 }
 
 const Texture2D& get_block_atlas_texture()

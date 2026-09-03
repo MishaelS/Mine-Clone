@@ -19,6 +19,8 @@ add_executable(${PROJECT_NAME}
     src/Entity.cpp
     src/Player.cpp
     src/Chunk.cpp
+    src/World.cpp
+    src/DebugOverlay.cpp
     src/Skybox.cpp
     src/core/GameObject.cpp
     src/core/GameEngine.cpp

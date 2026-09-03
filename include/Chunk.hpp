@@ -11,6 +11,12 @@ class PerlinNoise;
 
 constexpr int CHUNK_SIZE = 16;
 
+// Brightest possible sky/block light level (see Chunk::get_light);
+// exported so anything sampling light outside a Chunk (World, the debug
+// overlay) can express its own out-of-range fallback in the same units
+// rather than a bare magic number.
+constexpr int MAX_LIGHT = 15;
+
 // A CHUNK_SIZE^3 grid of blocks, positioned in the world by WorldObject's
 // position (its min corner, not its center). Block data builds into a single
 // GPU mesh (build_mesh()) with hidden faces culled out, so a whole chunk
@@ -38,45 +44,44 @@ public:
     // Rebuilds the GPU mesh from the current block/light data, skipping any
     // face whose neighbor is opaque — hidden faces never make it into the
     // mesh at all. At the chunk's own edges, that neighbor lives in an
-    // adjacent chunk, so the 4 side neighbors (any may be null, at the edge
-    // of the world) are consulted too — without them, every boundary face
-    // would be drawn as an (unnecessary, and visibly wrong from inside solid
-    // ground) wall. Call once after generate_terrain()/compute_lighting(),
-    // once every neighbor's block data is also ready; call again after any
-    // future in-place block edit.
-    void build_mesh(const Chunk* west, const Chunk* east, const Chunk* north, const Chunk* south);
+    // adjacent chunk, so the 4 side neighbors are consulted too — without
+    // them, every boundary face would be drawn as an (unnecessary, and
+    // visibly wrong from inside solid ground) wall. Vertex AO and smooth
+    // lighting sample one cell past a face too, which for a corner vertex
+    // can land in a diagonal neighbor instead of a side one, so all 8
+    // border chunks are taken — any may be null, at the edge of the world,
+    // in which case that side reads as open/fully sunlit as before. Call
+    // once after generate_terrain()/compute_lighting(), once every
+    // neighbor's block data is also ready; call again after any future
+    // in-place block edit.
+    void build_mesh(const Chunk* west, const Chunk* east, const Chunk* north, const Chunk* south,
+                     const Chunk* northwest, const Chunk* northeast,
+                     const Chunk* southwest, const Chunk* southeast);
 
     void draw() const override;
 
     BlockType get_block(int x, int y, int z) const;
     void set_block(int x, int y, int z, BlockType type);
 
+    // max(sky, block) light, 0..15. Public so a neighboring chunk's
+    // build_mesh() can sample real light data across a chunk border instead
+    // of guessing — bounds-checked to MAX_LIGHT (open, sunlit space)
+    // outside this chunk, since there's no neighbor-chunk data to fall back
+    // on here; the caller is expected to resolve cross-chunk coordinates
+    // itself and call this only with this chunk's own local coordinates.
+    int get_light(int x, int y, int z) const;
+
 private:
     static int index(int x, int y, int z);
-
-    // Chunk-local solid check for ambient occlusion; out-of-range counts as
-    // not solid since there's no neighbor-chunk data yet.
-    bool is_solid(int x, int y, int z) const;
 
     // Chunk-local opacity check for light propagation (transparent blocks,
     // including air, let light pass through). Out-of-range counts as open.
     bool is_opaque(int x, int y, int z) const;
 
-    // Minecraft-style vertex AO: 0 (darkest) to 3 (no occlusion), based on the
-    // two blocks sharing this face-corner's edges and the one at its diagonal.
-    int vertex_ao(int x, int y, int z, Vector3 normal, Vector3 corner) const;
-
-    // Average light (0..1) of the same three neighbor cells used for AO, plus
-    // the cell right outside the face — the same per-vertex sampling
-    // Minecraft calls "smooth lighting".
-    float vertex_light(int x, int y, int z, Vector3 normal, Vector3 corner) const;
-
     int get_sky_light(int x, int y, int z) const;
     void set_sky_light(int x, int y, int z, int value);
     int get_block_light(int x, int y, int z) const;
     void set_block_light(int x, int y, int z, int value);
-    // max(sky, block), bounds-checked to 0 outside the chunk.
-    int get_light(int x, int y, int z) const;
 
     std::array<BlockType, CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE> blocks;
 
