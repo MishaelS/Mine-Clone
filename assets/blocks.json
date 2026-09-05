@@ -4,153 +4,113 @@
             "name"       : "grass",
             "solid"      : true,
             "transparent": false,
-            "top"        : "grass_block_top.png",
-            "bottom"     : "dirt.png",
-            "side"       : "grass_block_side.png"
+            "top"        : { "x": 0, "y": 0, "color": [124, 189, 107] },
+            "bottom"     : { "x": 2, "y": 0 },
+            "side"       : { "x": 3, "y": 0 }
         },
         {
             "name"       : "dirt",
             "solid"      : true,
             "transparent": false,
-            "top"        : "dirt.png",
-            "bottom"     : "dirt.png",
-            "side"       : "dirt.png"
-        },
-        {
-            "name"       : "oak_planks",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : "oak_planks.png",
-            "bottom"     : "oak_planks.png",
-            "side"       : "oak_planks.png"
-        },
-        {
-            "name"       : "oak_log",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : "oak_log.png",
-            "bottom"     : "oak_log.png",
-            "side"       : "oak_log.png"
+            "top"        : { "x": 2, "y": 0 },
+            "bottom"     : { "x": 2, "y": 0 },
+            "side"       : { "x": 2, "y": 0 }
         },
         {
             "name"       : "sand",
             "solid"      : true,
             "transparent": false,
-            "top"        : "sand.png",
-            "bottom"     : "sand.png",
-            "side"       : "sand.png"
+            "top"        : { "x": 3, "y": 1 },
+            "bottom"     : { "x": 3, "y": 1 },
+            "side"       : { "x": 3, "y": 1 }
         },
         {
             "name"       : "gravel",
             "solid"      : true,
             "transparent": false,
-            "top"        : "gravel.png",
-            "bottom"     : "gravel.png",
-            "side"       : "gravel.png"
+            "top"        : { "x": 4, "y": 1 },
+            "bottom"     : { "x": 4, "y": 1 },
+            "side"       : { "x": 4, "y": 1 }
+        },
+        {
+            "name"       : "oak_log",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : { "x": 6, "y": 1 },
+            "bottom"     : { "x": 6, "y": 1 },
+            "side"       : { "x": 5, "y": 1 }
+        },
+        {
+            "name"       : "oak_planks",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : { "x": 5, "y": 0 },
+            "bottom"     : { "x": 5, "y": 0 },
+            "side"       : { "x": 5, "y": 0 }
         },
         {
             "name"       : "stone",
             "solid"      : true,
             "transparent": false,
-            "top"        : "stone.png",
-            "bottom"     : "stone.png",
-            "side"       : "stone.png"
-        },
-        {
-            "name"       : "andesite",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : "andesite.png",
-            "bottom"     : "andesite.png",
-            "side"       : "andesite.png"
-        },
-        {
-            "name"       : "diorite",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : "diorite.png",
-            "bottom"     : "diorite.png",
-            "side"       : "diorite.png"
-        },
-        {
-            "name"       : "granite",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : "granite.png",
-            "bottom"     : "granite.png",
-            "side"       : "granite.png"
+            "top"        : { "x": 1, "y": 0 },
+            "bottom"     : { "x": 1, "y": 0 },
+            "side"       : { "x": 1, "y": 0 }
         },
         {
             "name"       : "cobblestone",
             "solid"      : true,
             "transparent": false,
-            "top"        : "cobblestone.png",
-            "bottom"     : "cobblestone.png",
-            "side"       : "cobblestone.png"
+            "top"        : { "x": 0, "y": 1 },
+            "bottom"     : { "x": 0, "y": 1 },
+            "side"       : { "x": 0, "y": 1 }
         },
         {
             "name"       : "coal_ore",
             "solid"      : true,
             "transparent": false,
-            "top"        : "coal_ore.png",
-            "bottom"     : "coal_ore.png",
-            "side"       : "coal_ore.png"
-        },
-        {
-            "name"       : "copper_ore",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : "copper_ore.png",
-            "bottom"     : "copper_ore.png",
-            "side"       : "copper_ore.png"
-        },
-        {
-            "name"       : "diamond_ore",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : "diamond_ore.png",
-            "bottom"     : "diamond_ore.png",
-            "side"       : "diamond_ore.png"
-        },
-        {
-            "name"       : "emerald_ore",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : "emerald_ore.png",
-            "bottom"     : "emerald_ore.png",
-            "side"       : "emerald_ore.png"
-        },
-        {
-            "name"       : "gold_ore",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : "gold_ore.png",
-            "bottom"     : "gold_ore.png",
-            "side"       : "gold_ore.png"
+            "top"        : { "x": 3, "y": 3 },
+            "bottom"     : { "x": 3, "y": 3 },
+            "side"       : { "x": 3, "y": 3 }
         },
         {
             "name"       : "iron_ore",
             "solid"      : true,
             "transparent": false,
-            "top"        : "iron_ore.png",
-            "bottom"     : "iron_ore.png",
-            "side"       : "iron_ore.png"
+            "top"        : { "x": 2, "y": 3 },
+            "bottom"     : { "x": 2, "y": 3 },
+            "side"       : { "x": 2, "y": 3 }
         },
         {
-            "name"       : "lapis_ore",
+            "name"       : "gold_ore",
             "solid"      : true,
             "transparent": false,
-            "top"        : "lapis_ore.png",
-            "bottom"     : "lapis_ore.png",
-            "side"       : "lapis_ore.png"
+            "top"        : { "x": 0, "y": 3 },
+            "bottom"     : { "x": 0, "y": 3 },
+            "side"       : { "x": 0, "y": 3 }
+        },
+        {
+            "name"       : "diamond_ore",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : { "x": 3, "y": 4 },
+            "bottom"     : { "x": 3, "y": 4 },
+            "side"       : { "x": 3, "y": 4 }
+        },
+        {
+            "name"       : "redstone_ore",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : { "x": 4, "y": 4 },
+            "bottom"     : { "x": 4, "y": 4 },
+            "side"       : { "x": 4, "y": 4 }
         },
         {
             "name"       : "bedrock",
             "solid"      : true,
             "transparent": false,
-            "top"        : "bedrock.png",
-            "bottom"     : "bedrock.png",
-            "side"       : "bedrock.png"
+            "top"        : { "x": 1, "y": 1 },
+            "bottom"     : { "x": 1, "y": 1 },
+            "side"       : { "x": 1, "y": 1 }
         }
     ]
 }

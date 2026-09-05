@@ -13,6 +13,12 @@ set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BUILD_GAMES OFF CACHE BOOL "" FORCE)
 add_subdirectory(external/raylib)
 
+# Terrain noise generation (core/PerlinNoise). Only the library itself is
+# needed — not its "Node Editor" GUI tool or its own test suite.
+set(FASTNOISE2_TOOLS OFF CACHE BOOL "" FORCE)
+set(FASTNOISE2_TESTS OFF CACHE BOOL "" FORCE)
+add_subdirectory(external/FastNoise2)
+
 add_executable(${PROJECT_NAME}
     src/main.cpp
     src/WorldObject.cpp
@@ -28,11 +34,11 @@ add_executable(${PROJECT_NAME}
     src/core/IsoCamera.cpp
     src/core/Block.cpp
     src/core/TextureManager.cpp
-    src/core/TextureAtlas.cpp
+    src/core/FontManager.cpp
     src/core/PerlinNoise.cpp
 )
 target_include_directories(${PROJECT_NAME} PRIVATE include)
-target_link_libraries(${PROJECT_NAME} PRIVATE raylib)
+target_link_libraries(${PROJECT_NAME} PRIVATE raylib FastNoise)
 target_compile_definitions(${PROJECT_NAME} PRIVATE ASSETS_PATH="${CMAKE_SOURCE_DIR}/assets/")
 
 if(APPLE)

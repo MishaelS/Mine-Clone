@@ -12,22 +12,17 @@ enum class BlockType : uint8_t {
     Air,
     Grass,
     Dirt,
-    OakPlanks,
     OakLog,
+    OakPlanks,
     Sand,
     Gravel,
     Stone,
-    Andesite,
-    Diorite,
-    Granite,
     Cobblestone,
     CoalOre,
-    CopperOre,
-    DiamondOre,
-    EmeraldOre,
-    GoldOre,
     IronOre,
-    LapisOre,
+    GoldOre,
+    DiamondOre,
+    RedstoneOre,
     Bedrock,
     Count, // not a real block; sentinel for table/array sizing
 };
@@ -54,10 +49,20 @@ struct BlockProperties {
     // BlockFace — every block's faces share one atlas texture, so a whole
     // chunk mesh draws with a single bound texture.
     Rectangle texture_uvs[6];
+
+    // Per-face tint, indexed by BlockFace, multiplied into the sampled texel
+    // alongside AO/light shading (see Chunk::append_face). WHITE leaves the
+    // tile's own colors untouched; blocks.json sets anything else only for a
+    // tile that's deliberately colorless art meant to be recolored in code
+    // (e.g. grass top), same idea as Minecraft's biome-tinted grass overlay.
+    Color texture_tints[6];
 };
 
-// Parses assets/blocks.json and fills the BlockType -> BlockProperties table,
-// packing every referenced sprite into the shared block texture atlas.
+// Parses assets/blocks.json and fills the BlockType -> BlockProperties table.
+// Each face entry ("top"/"bottom"/"side") gives the (x, y) grid position of
+// its tile within assets/sprites/terrain.png — a fixed 16x16 grid of 16px
+// tiles, shared by every block, no per-sprite packing needed — plus an
+// optional "color" tint (see BlockProperties::texture_tints).
 // Call once after the window exists (texture loads need a GL context).
 void Load_block_definitions();
 
@@ -68,6 +73,6 @@ const BlockProperties& get_block_properties(BlockType type);
 // BlockType::Air, which has no blocks.json entry of its own.
 const std::string& get_block_name(BlockType type);
 
-// The single texture every BlockProperties::texture_uvs rectangle indexes
-// into. Valid only after Load_block_definitions().
+// assets/sprites/terrain.png — the single texture every BlockProperties::
+// texture_uvs rectangle indexes into. Valid only after Load_block_definitions().
 const Texture2D& get_block_atlas_texture();

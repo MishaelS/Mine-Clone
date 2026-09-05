@@ -1,6 +1,7 @@
 #include "DebugOverlay.hpp"
 #include "World.hpp"
 #include "core/Block.hpp"
+#include "core/FontManager.hpp"
 
 #include "raymath.h"
 
@@ -9,6 +10,7 @@
 
 namespace {
     constexpr int FONT_SIZE    = 18;
+    constexpr float TEXT_SPACING = 1.0f; // pixels between glyphs, DrawTextEx-style
     constexpr int LINE_SPACING = 4;
     constexpr int PADDING      = 6;
     constexpr int MARGIN       = 8;
@@ -62,9 +64,11 @@ void draw_debug_overlay(const Camera3D& camera, const World& world, float aim_re
     std::snprintf(lines[line_count++], sizeof(lines[0]), "Looking at: %s", looking_at);
     std::snprintf(lines[line_count++], sizeof(lines[0]), "Speed: %.1f blocks/s (scroll to change)", move_speed);
 
+    const Font& font = FontManager::get();
+
     int text_width = 0;
     for (int i = 0; i < line_count; ++i) {
-        int width = MeasureText(lines[i], FONT_SIZE);
+        int width = static_cast<int>(MeasureTextEx(font, lines[i], FONT_SIZE, TEXT_SPACING).x);
         if (width > text_width) text_width = width;
     }
 
@@ -73,6 +77,7 @@ void draw_debug_overlay(const Camera3D& camera, const World& world, float aim_re
     DrawRectangle(MARGIN, MARGIN, box_width, box_height, BACKGROUND);
 
     for (int i = 0; i < line_count; ++i) {
-        DrawText(lines[i], MARGIN + PADDING, MARGIN + PADDING + i * (FONT_SIZE + LINE_SPACING), FONT_SIZE, WHITE);
+        Vector2 position = {static_cast<float>(MARGIN + PADDING), static_cast<float>(MARGIN + PADDING + i * (FONT_SIZE + LINE_SPACING))};
+        DrawTextEx(font, lines[i], position, FONT_SIZE, TEXT_SPACING, WHITE);
     }
 }

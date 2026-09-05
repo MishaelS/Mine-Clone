@@ -1,6 +1,7 @@
 #include "core/GameEngine.hpp"
 #include "core/Block.hpp"
 #include "core/TextureManager.hpp"
+#include "core/FontManager.hpp"
 #include "Skybox.hpp"
 #include "DebugOverlay.hpp"
 
@@ -81,6 +82,7 @@ GameEngine::GameEngine(int screen_width, int screen_height, const char* title)
     InitWindow(screen_width, screen_height, title);
     SetTargetFPS(60);
     Load_block_definitions(); // needs a GL context, so only after InitWindow
+    FontManager::get(); // load the game's text font up front, same reason
 
     // World Generation covers world X/Z [0, 512); start roughly above its
     // center, looking down at it.
@@ -96,6 +98,7 @@ GameEngine::~GameEngine()
 {
     EnableCursor();
     TextureManager::unload_all();
+    FontManager::unload();
     CloseWindow();
 }
 

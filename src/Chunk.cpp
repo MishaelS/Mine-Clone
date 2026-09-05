@@ -176,8 +176,11 @@ namespace {
     };
 
     // Appends one face as two triangles (0,1,2) and (0,2,3) — the same quad,
-    // split for a Mesh's plain (non-quad) triangle list.
-    void append_face(MeshData& mesh_data, const Face& face, Vector3 center, Rectangle uv, const float brightness[4]) {
+    // split for a Mesh's plain (non-quad) triangle list. `tint` (typically
+    // WHITE) is multiplied into each vertex color alongside AO/light
+    // brightness — see BlockProperties::texture_tints for why a face would
+    // ever need anything other than white.
+    void append_face(MeshData& mesh_data, const Face& face, Vector3 center, Rectangle uv, const float brightness[4], Color tint) {
         Vector3 corners[4] = {face.v1, face.v2, face.v3, face.v4};
         // V=0 is the image's top row (raylib doesn't flip on load), so the
         // top edge of the face (corners 0, 1) must sample V=0, not V=1.
@@ -197,10 +200,9 @@ namespace {
             mesh_data.texcoords.push_back(u[corner]);
             mesh_data.texcoords.push_back(v[corner]);
 
-            unsigned char b = static_cast<unsigned char>(brightness[corner] * 255.0f);
-            mesh_data.colors.push_back(b);
-            mesh_data.colors.push_back(b);
-            mesh_data.colors.push_back(b);
+            mesh_data.colors.push_back(static_cast<unsigned char>(brightness[corner] * tint.r));
+            mesh_data.colors.push_back(static_cast<unsigned char>(brightness[corner] * tint.g));
+            mesh_data.colors.push_back(static_cast<unsigned char>(brightness[corner] * tint.b));
             mesh_data.colors.push_back(255);
         }
     }
@@ -469,7 +471,7 @@ void Chunk::build_mesh(const Chunk* west, const Chunk* east, const Chunk* north,
                         float light_fraction = vertex_light(nb, x, y, z, f.normal, corners[i]);
                         brightness[i] = AO_BRIGHTNESS[ao] * light_fraction;
                     }
-                    append_face(mesh_data, f, center, properties.texture_uvs[face], brightness);
+                    append_face(mesh_data, f, center, properties.texture_uvs[face], brightness, properties.texture_tints[face]);
                 }
             }
         }
