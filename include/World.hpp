@@ -8,22 +8,25 @@
 #include <memory>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 
 class PerlinNoise;
 
 // Owns every currently-loaded chunk in the world (streamed in/out around an
-// observer position, see update_chunk_states — nothing is loaded up front),
-// and everything that needs to see across chunk borders: generation order,
-// camera raycasts, and block edits (which must relight and re-mesh not just
-// the edited chunk but its neighbors too).
+// observer position, see update_chunk_states — nothing is loaded up front,
+// and there's no fixed world size: any (x, z) within WORLD_BORDER_CHUNKS of
+// the origin — see the .cpp — can have a chunk generated for it on demand,
+// same as Minecraft's own "technically bounded, practically infinite" world
+// border), and everything that needs to see across chunk borders:
+// generation order, camera raycasts, and block edits (which must relight
+// and re-mesh not just the edited chunk but its neighbors too).
 class World {
 public:
-    // `size_in_blocks` must be a multiple of CHUNK_SIZE; it's rounded down
-    // to the nearest one otherwise. Loads nothing by itself — chunks appear
-    // (and disappear) as update_chunk_states() is called, same as any other
-    // point in the game's lifetime; construct after the window exists,
-    // since the first generated chunk's mesh needs a GL context.
-    World(int size_in_blocks, uint32_t seed);
+    // Loads nothing by itself — chunks appear (and disappear) as
+    // update_chunk_states() is called, same as any other point in the
+    // game's lifetime; construct after the window exists, since the first
+    // generated chunk's mesh needs a GL context.
+    explicit World(uint32_t seed);
 
     // Declared (and defined in World.cpp) even though it's just =default:
     // terrain_noise is a unique_ptr<PerlinNoise> with PerlinNoise only
@@ -76,11 +79,18 @@ public:
 
     // Brings every chunk within LOADED_RADIUS/ACTIVE_RADIUS chunks of
     // `observer_position` (see the .cpp) up to its correct ChunkState:
-    // generates and meshes anything newly in range, flips the Active/Loaded
-    // tick flag on anything that crossed that inner boundary, and unloads
-    // anything that fell out of range entirely. Cheap to call every tick —
-    // it only rescans when the observer has moved into a different chunk
-    // since the last call.
+    // generates anything newly in range (world data only), flips the
+    // Active/Loaded tick flag on anything that crossed that inner boundary,
+    // and unloads anything that fell out of range entirely (world data and
+    // GPU mesh both) — then meshes whatever that actually touched, exactly
+    // once each, as a last pass (see the .cpp: generating or unloading one
+    // chunk can also change how up to 8 neighbors should look, and doing
+    // that immediately per chunk instead of batching it meant meshing the
+    // same chunk repeatedly, once per neighbor that came or went — measured
+    // at 1345 mesh rebuilds for 289 chunks' worth of initial world
+    // generation). Cheap to call every tick either way — it only rescans
+    // when the observer has moved into a different chunk since the last
+    // call.
     //
     // Takes one position because there's one local player today, not a
     // list — see desired_state_for()'s comment for why nothing else here
@@ -98,10 +108,13 @@ private:
     void rebuild_mesh(int chunk_x, int chunk_z);
 
     // rebuild_mesh() on (chunk_x, chunk_z) and all 8 of its neighbors —
-    // shared by set_block_and_rebuild() (a block edit can affect a
-    // neighbor's own AO/smooth-lighting samples one cell in) and
-    // load_chunk()/unload_chunk() (a chunk appearing or disappearing
-    // changes whether its neighbors' border faces should be culled).
+    // shared by set_block_and_rebuild(): a single block edit can affect a
+    // neighbor's own AO/smooth-lighting samples one cell in, and there's
+    // only ever one edit to react to per call, so meshing its neighborhood
+    // immediately doesn't waste anything. update_chunk_states() (many
+    // chunks appearing/disappearing per call) instead batches this same
+    // 3x3-per-change footprint into one dedup'd pass at the end — see its
+    // comment for why doing it per-change there would be wasteful.
     void rebuild_mesh_neighborhood(int chunk_x, int chunk_z);
 
     // Shared by break_block()/place_block(): writes the new block, marks
@@ -119,17 +132,17 @@ private:
     // either way — they just apply whatever state they're told.
     ChunkState desired_state_for(int chunk_x, int chunk_z, ChunkCoordinates observer_chunk) const;
 
-    // Unloaded -> Loaded/Active: generates terrain + lighting (world data)
-    // for a chunk that doesn't exist yet, then meshes it and its
-    // neighborhood (client/rendering work).
-    void load_chunk(int chunk_x, int chunk_z);
+    // Unloaded -> Loaded/Active: generates terrain + lighting (world data
+    // only, no mesh — see update_chunk_states) for a chunk that doesn't
+    // exist yet.
+    void generate_chunk(int chunk_x, int chunk_z);
 
-    // Loaded/Active -> Unloaded: frees the chunk's GPU mesh and block data,
-    // then remeshes its neighborhood. TODO: persist a modified chunk's data
-    // first — not implemented, so its edits are lost once it unloads.
+    // Loaded/Active -> Unloaded: frees the chunk's GPU mesh and block data
+    // (no neighborhood remesh here — see update_chunk_states). TODO:
+    // persist a modified chunk's data first — not implemented, so its
+    // edits are lost once it unloads.
     void unload_chunk(int chunk_x, int chunk_z);
 
-    int chunks_per_axis;
     std::unique_ptr<PerlinNoise> terrain_noise;
     ChunkMap chunks;
 

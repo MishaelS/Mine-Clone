@@ -100,17 +100,20 @@ GameEngine::GameEngine(int screen_width, int screen_height, const char* title)
     Load_block_definitions(); // needs a GL context, so only after InitWindow
     FontManager::get(); // load the game's text font up front, same reason
 
-    // World Generation covers world X/Z [0, 512); start above and back from
-    // its center, looking down at it. The downward angle (~20 degrees below
-    // horizontal, from the position/target offsets below) is deliberately
-    // kept under half of fovy (30 degrees): if it weren't, every ray in the
-    // frustum would point below the horizon and the view would be 100%
-    // nearby ground with no sky at all — a mistake made and caught while
-    // tuning this for the new, much taller hills (see BASE_HEIGHT/
-    // HEIGHT_VARIATION in Chunk.cpp, ~50..90; water at 64) — regardless of
-    // how far terrain is actually loaded/rendered out to.
-    camera.position = {256.0f, 110.0f, 366.0f};
-    camera.target = {256.0f, 70.0f, 256.0f};
+    // World Generation has no fixed size any more (chunks stream in around
+    // wherever the camera is, out to World's WORLD_BORDER_BLOCKS) — start
+    // near world origin (0, 0), same as Minecraft's own spawn convention,
+    // above and back from it, looking down. The downward angle (~20 degrees
+    // below horizontal, from the position/target offsets below) is
+    // deliberately kept under half of fovy (30 degrees): if it weren't,
+    // every ray in the frustum would point below the horizon and the view
+    // would be 100% nearby ground with no sky at all — a mistake made and
+    // caught while tuning this for the game's much taller hills (see
+    // BASE_HEIGHT/HEIGHT_VARIATION in Chunk.cpp, world Y ~50..90; water at
+    // 64) — regardless of how far terrain is actually loaded/rendered out
+    // to.
+    camera.position = {0.0f, 110.0f, 110.0f};
+    camera.target = {0.0f, 70.0f, 0.0f};
     camera.up = {0.0f, 1.0f, 0.0f};
     camera.fovy = 60.0f;
     camera.projection = CAMERA_PERSPECTIVE;

@@ -10,7 +10,15 @@
 class PerlinNoise;
 
 constexpr int CHUNK_SIZE = 16;    // width/depth (X/Z) — chunks are still only streamed in the X/Z grid (World::update_chunk_states), no vertical stacking
-constexpr int CHUNK_HEIGHT = 256; // Y — a single chunk spans the whole world height, Minecraft's own build limit
+constexpr int CHUNK_HEIGHT = 384; // Y — a single chunk spans the whole world height, Minecraft 1.18+'s build limit (-64..319)
+
+// World-space Y of a chunk's own local index 0 — Minecraft's own world
+// floor (bedrock generates here). A Chunk's internal block/light arrays and
+// loops stay plainly 0-based (0..CHUNK_HEIGHT-1), same as X/Z; World is the
+// only place that translates a world-space Y to/from that local index, by
+// subtracting/adding this — see World::get_block()/get_light()/
+// set_block_and_rebuild() and World::generate_chunk()'s own Y position.
+constexpr int MIN_WORLD_Y = -64;
 
 // Brightest possible sky/block light level (see Chunk::get_light);
 // exported so anything sampling light outside a Chunk (World, the debug
@@ -118,6 +126,17 @@ private:
     // Packed per-cell light: upper nibble = sky light, lower nibble = block
     // light, each 0-15.
     std::array<uint8_t, CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE> light{};
+
+    // Highest Y with a non-Air block anywhere in this chunk (generation
+    // tracks it; set_block() only ever raises it, never lowers it — cheap
+    // and safe, since overestimating just means scanning a few extra
+    // guaranteed-air rows, while underestimating would hide real blocks).
+    // With CHUNK_HEIGHT now 256 but actual terrain rarely reaching much
+    // above 90, build_mesh() and compute_lighting() use this to skip the
+    // rest of the column instead of always walking the full 256, since it's
+    // guaranteed air up there — see get_sky_light() for the one place that
+    // needs to know the difference between "above this" and "out of chunk".
+    int highest_block_y = 0;
 
     // vertexCount == 0 (and mesh_uploaded == false) until build_mesh() runs.
     Mesh mesh{};

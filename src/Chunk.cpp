@@ -16,17 +16,21 @@ namespace {
 
     // Terrain shape: a wavelength-~96-block rolling hill signal, layered 4
     // octaves deep for detail, mapped onto a height band centered on
-    // BASE_HEIGHT (comfortably inside the chunk's 0..CHUNK_HEIGHT-1 column).
+    // BASE_HEIGHT (comfortably inside the chunk's own local 0..CHUNK_HEIGHT-1
+    // column). Chunk stays plainly 0-based internally (see MIN_WORLD_Y in
+    // Chunk.hpp) — these are LOCAL heights, offset by -MIN_WORLD_Y (+64)
+    // from the world-space heights they're meant to represent, so e.g.
+    // BASE_HEIGHT here means world Y ~70, not local Y 70.
     constexpr float NOISE_FREQUENCY = 1.0f / 96.0f;
     constexpr int NOISE_OCTAVES = 4;
-    constexpr int BASE_HEIGHT = 70;       // just above WATER_LEVEL, so most terrain is dry land
-    constexpr int HEIGHT_VARIATION = 20;  // +/- around BASE_HEIGHT -> roughly 50..90
-    constexpr int DIRT_DEPTH = 3;         // layers of dirt just under the grass top
+    constexpr int BASE_HEIGHT = 70 - MIN_WORLD_Y;       // world Y ~70, just above sea level, so most terrain is dry land
+    constexpr int HEIGHT_VARIATION = 20;                // +/- around BASE_HEIGHT -> world Y roughly 50..90 (amplitude, not itself a height, needs no offset)
+    constexpr int DIRT_DEPTH = 3;                       // layers of dirt just under the grass top
 
     // Sea level: any column whose terrain height falls below this fills the
-    // gap with water up to it, same idea (and same block coordinate) as
-    // Minecraft's own sea level.
-    constexpr int WATER_LEVEL = 64;
+    // gap with water up to it. World Y 64, same idea (and the same absolute
+    // coordinate) as Minecraft's own sea level.
+    constexpr int WATER_LEVEL = 64 - MIN_WORLD_Y;
 
     // AO level (0..3, from vertex_ao) -> brightness multiplier.
     constexpr float AO_BRIGHTNESS[4] = {0.5f, 0.65f, 0.8f, 1.0f};
@@ -264,15 +268,20 @@ void Chunk::generate_terrain(const PerlinNoise& noise)
             int height = BASE_HEIGHT + static_cast<int>(std::lround(sample * HEIGHT_VARIATION));
             height = std::clamp(height, 1, CHUNK_HEIGHT - 1);
 
-            for (int y = 0; y < CHUNK_HEIGHT; ++y) {
+            // Everything past this column's own content is already Air
+            // (blocks.fill(BlockType::Air) in the constructor), so the loop
+            // can stop there instead of walking all the way to
+            // CHUNK_HEIGHT; set_block() tracks the chunk-wide high point
+            // (highest_block_y) that build_mesh()/compute_lighting() bound
+            // their own loops to.
+            int column_top = std::max(height, WATER_LEVEL);
+
+            for (int y = 0; y <= column_top; ++y) {
                 BlockType type;
                 if (y == 0) {
                     type = BlockType::Bedrock;
                 } else if (y > height) {
-                    // Above this column's own terrain: water up to sea
-                    // level for a low-lying (underwater) column, open air
-                    // above that either way.
-                    type = (y <= WATER_LEVEL) ? BlockType::Water : BlockType::Air;
+                    type = BlockType::Water; // the underwater gap up to sea level
                 } else if (y == height) {
                     type = BlockType::Grass;
                 } else if (y > height - DIRT_DEPTH) {
@@ -294,6 +303,13 @@ BlockType Chunk::get_block(int x, int y, int z) const
 void Chunk::set_block(int x, int y, int z, BlockType type)
 {
     blocks[index(x, y, z)] = type;
+    // Only ever raises highest_block_y, never lowers it — see its
+    // declaration in Chunk.hpp for why that's the safe direction to be
+    // wrong in. Covers both generation (each column's own content) and any
+    // later player-placed block above it (e.g. a tower).
+    if (type != BlockType::Air && y > highest_block_y) {
+        highest_block_y = y;
+    }
 }
 
 bool Chunk::is_opaque(int x, int y, int z) const
@@ -309,6 +325,14 @@ int Chunk::get_sky_light(int x, int y, int z) const
     if (x < 0 || x >= CHUNK_SIZE || y < 0 || y >= CHUNK_HEIGHT || z < 0 || z >= CHUNK_SIZE) {
         // No neighbor-chunk data yet (same as is_opaque) — assume open,
         // sunlit space rather than reading as pitch black at chunk edges.
+        return MAX_LIGHT;
+    }
+    if (y > highest_block_y) {
+        // compute_lighting()'s top-down scan starts at highest_block_y, not
+        // CHUNK_HEIGHT-1, since everything above it is guaranteed air in
+        // every column of this chunk — so it never actually writes a value
+        // up here. That's still genuinely open sky, same as the out-of-
+        // chunk case above, not the light[]'s untouched 0 default.
         return MAX_LIGHT;
     }
     return light[index(x, y, z)] >> 4;
@@ -343,7 +367,15 @@ int Chunk::get_light(int x, int y, int z) const
 
 void Chunk::compute_lighting()
 {
-    light.fill(0);
+    // Only y <= highest_block_y is ever read back (get_sky_light() reports
+    // MAX_LIGHT, without touching the array, for anything above it) — and
+    // since y is the slowest-varying index in Chunk::index(), every cell
+    // with y <= highest_block_y occupies one contiguous prefix of this flat
+    // array. No need to reset (or, below, scan) anything past that; called
+    // after generate_terrain(), which has already set highest_block_y for
+    // this call to use, including on a later re-light after a placed block
+    // raised it.
+    std::fill_n(light.begin(), (highest_block_y + 1) * CHUNK_SIZE * CHUNK_SIZE, uint8_t{0});
 
     using Cell = std::array<int, 3>;
     std::queue<Cell> skyQueue;
@@ -351,10 +383,13 @@ void Chunk::compute_lighting()
 
     // Direct sky exposure: scan each column from the top, stop at the first
     // opaque block. Cells below it get lit later, if at all, by the BFS
-    // spreading sideways from a neighboring open column.
+    // spreading sideways from a neighboring open column. Starts at
+    // highest_block_y, not CHUNK_HEIGHT-1 — every cell above that is
+    // guaranteed air in every column of this chunk (get_sky_light() reports
+    // MAX_LIGHT up there without this scan ever needing to visit it).
     for (int x = 0; x < CHUNK_SIZE; ++x) {
         for (int z = 0; z < CHUNK_SIZE; ++z) {
-            for (int y = CHUNK_HEIGHT - 1; y >= 0; --y) {
+            for (int y = highest_block_y; y >= 0; --y) {
                 if (is_opaque(x, y, z)) break;
                 set_sky_light(x, y, z, MAX_LIGHT);
                 skyQueue.push({x, y, z});
@@ -362,9 +397,10 @@ void Chunk::compute_lighting()
         }
     }
 
-    // Block light sources: any block with luminance > 0.
+    // Block light sources: any block with luminance > 0. Bounded the same
+    // way — no block exists above highest_block_y to be a light source.
     for (int x = 0; x < CHUNK_SIZE; ++x) {
-        for (int y = 0; y < CHUNK_HEIGHT; ++y) {
+        for (int y = 0; y <= highest_block_y; ++y) {
             for (int z = 0; z < CHUNK_SIZE; ++z) {
                 int luminance = get_block_properties(get_block(x, y, z)).luminance;
                 if (luminance > 0) {
@@ -449,8 +485,11 @@ void Chunk::build_mesh(const Chunk* west, const Chunk* east, const Chunk* north,
         return !get_block_properties(neighbor->get_block(x, y, z)).transparent;
     };
 
+    // Bounded to highest_block_y, not CHUNK_HEIGHT: everything above it is
+    // guaranteed air in every column of this chunk, so there's nothing
+    // there to ever emit a face.
     for (int x = 0; x < CHUNK_SIZE; ++x) {
-        for (int y = 0; y < CHUNK_HEIGHT; ++y) {
+        for (int y = 0; y <= highest_block_y; ++y) {
             for (int z = 0; z < CHUNK_SIZE; ++z) {
                 BlockType type = get_block(x, y, z);
                 if (type == BlockType::Air) continue;
