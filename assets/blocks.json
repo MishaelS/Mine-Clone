@@ -111,6 +111,14 @@
             "top"        : { "x": 1, "y": 1 },
             "bottom"     : { "x": 1, "y": 1 },
             "side"       : { "x": 1, "y": 1 }
+        },
+        {
+            "name"       : "water",
+            "solid"      : false,
+            "transparent": true,
+            "top"        : { "x": 13, "y": 12 },
+            "bottom"     : { "x": 13, "y": 12 },
+            "side"       : { "x": 13, "y": 12 }
         }
     ]
 }

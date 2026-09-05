@@ -16,13 +16,17 @@ namespace {
 
     // Terrain shape: a wavelength-~96-block rolling hill signal, layered 4
     // octaves deep for detail, mapped onto a height band centered on
-    // BASE_HEIGHT. The band has to fit inside the chunk's 0..CHUNK_SIZE-1
-    // column (no vertical chunk stacking yet), so it's kept well within that.
+    // BASE_HEIGHT (comfortably inside the chunk's 0..CHUNK_HEIGHT-1 column).
     constexpr float NOISE_FREQUENCY = 1.0f / 96.0f;
     constexpr int NOISE_OCTAVES = 4;
-    constexpr int BASE_HEIGHT = 8;
-    constexpr int HEIGHT_VARIATION = 5;
-    constexpr int DIRT_DEPTH = 3; // layers of dirt just under the grass top
+    constexpr int BASE_HEIGHT = 70;       // just above WATER_LEVEL, so most terrain is dry land
+    constexpr int HEIGHT_VARIATION = 20;  // +/- around BASE_HEIGHT -> roughly 50..90
+    constexpr int DIRT_DEPTH = 3;         // layers of dirt just under the grass top
+
+    // Sea level: any column whose terrain height falls below this fills the
+    // gap with water up to it, same idea (and same block coordinate) as
+    // Minecraft's own sea level.
+    constexpr int WATER_LEVEL = 64;
 
     // AO level (0..3, from vertex_ao) -> brightness multiplier.
     constexpr float AO_BRIGHTNESS[4] = {0.5f, 0.65f, 0.8f, 1.0f};
@@ -80,7 +84,7 @@ namespace {
     // Out-of-range on y (no vertical stacking) or a missing neighbor chunk
     // still counts as not solid, same as before.
     bool solid_at(const Neighborhood& nb, int x, int y, int z) {
-        if (y < 0 || y >= CHUNK_SIZE) return false;
+        if (y < 0 || y >= CHUNK_HEIGHT) return false;
         const Chunk* chunk = nb.resolve(x, z);
         if (chunk == nullptr) return false;
         return get_block_properties(chunk->get_block(x, y, z)).solid;
@@ -91,7 +95,7 @@ namespace {
     // of assuming full sky light. Out-of-range on y or a missing neighbor
     // still reads as open, sunlit space, same as before.
     int light_at(const Neighborhood& nb, int x, int y, int z) {
-        if (y < 0 || y >= CHUNK_SIZE) return MAX_LIGHT;
+        if (y < 0 || y >= CHUNK_HEIGHT) return MAX_LIGHT;
         const Chunk* chunk = nb.resolve(x, z);
         if (chunk == nullptr) return MAX_LIGHT;
         return chunk->get_light(x, y, z);
@@ -258,14 +262,17 @@ void Chunk::generate_terrain(const PerlinNoise& noise)
             float sample = noise.fractal(world_x * NOISE_FREQUENCY, world_z * NOISE_FREQUENCY, NOISE_OCTAVES);
 
             int height = BASE_HEIGHT + static_cast<int>(std::lround(sample * HEIGHT_VARIATION));
-            height = std::clamp(height, 1, CHUNK_SIZE - 1);
+            height = std::clamp(height, 1, CHUNK_HEIGHT - 1);
 
-            for (int y = 0; y < CHUNK_SIZE; ++y) {
+            for (int y = 0; y < CHUNK_HEIGHT; ++y) {
                 BlockType type;
                 if (y == 0) {
                     type = BlockType::Bedrock;
                 } else if (y > height) {
-                    type = BlockType::Air;
+                    // Above this column's own terrain: water up to sea
+                    // level for a low-lying (underwater) column, open air
+                    // above that either way.
+                    type = (y <= WATER_LEVEL) ? BlockType::Water : BlockType::Air;
                 } else if (y == height) {
                     type = BlockType::Grass;
                 } else if (y > height - DIRT_DEPTH) {
@@ -291,7 +298,7 @@ void Chunk::set_block(int x, int y, int z, BlockType type)
 
 bool Chunk::is_opaque(int x, int y, int z) const
 {
-    if (x < 0 || x >= CHUNK_SIZE || y < 0 || y >= CHUNK_SIZE || z < 0 || z >= CHUNK_SIZE) {
+    if (x < 0 || x >= CHUNK_SIZE || y < 0 || y >= CHUNK_HEIGHT || z < 0 || z >= CHUNK_SIZE) {
         return false;
     }
     return !get_block_properties(get_block(x, y, z)).transparent;
@@ -299,7 +306,7 @@ bool Chunk::is_opaque(int x, int y, int z) const
 
 int Chunk::get_sky_light(int x, int y, int z) const
 {
-    if (x < 0 || x >= CHUNK_SIZE || y < 0 || y >= CHUNK_SIZE || z < 0 || z >= CHUNK_SIZE) {
+    if (x < 0 || x >= CHUNK_SIZE || y < 0 || y >= CHUNK_HEIGHT || z < 0 || z >= CHUNK_SIZE) {
         // No neighbor-chunk data yet (same as is_opaque) — assume open,
         // sunlit space rather than reading as pitch black at chunk edges.
         return MAX_LIGHT;
@@ -315,7 +322,7 @@ void Chunk::set_sky_light(int x, int y, int z, int value)
 
 int Chunk::get_block_light(int x, int y, int z) const
 {
-    if (x < 0 || x >= CHUNK_SIZE || y < 0 || y >= CHUNK_SIZE || z < 0 || z >= CHUNK_SIZE) {
+    if (x < 0 || x >= CHUNK_SIZE || y < 0 || y >= CHUNK_HEIGHT || z < 0 || z >= CHUNK_SIZE) {
         return 0;
     }
     return light[index(x, y, z)] & 0x0F;
@@ -347,7 +354,7 @@ void Chunk::compute_lighting()
     // spreading sideways from a neighboring open column.
     for (int x = 0; x < CHUNK_SIZE; ++x) {
         for (int z = 0; z < CHUNK_SIZE; ++z) {
-            for (int y = CHUNK_SIZE - 1; y >= 0; --y) {
+            for (int y = CHUNK_HEIGHT - 1; y >= 0; --y) {
                 if (is_opaque(x, y, z)) break;
                 set_sky_light(x, y, z, MAX_LIGHT);
                 skyQueue.push({x, y, z});
@@ -357,7 +364,7 @@ void Chunk::compute_lighting()
 
     // Block light sources: any block with luminance > 0.
     for (int x = 0; x < CHUNK_SIZE; ++x) {
-        for (int y = 0; y < CHUNK_SIZE; ++y) {
+        for (int y = 0; y < CHUNK_HEIGHT; ++y) {
             for (int z = 0; z < CHUNK_SIZE; ++z) {
                 int luminance = get_block_properties(get_block(x, y, z)).luminance;
                 if (luminance > 0) {
@@ -377,7 +384,7 @@ void Chunk::compute_lighting()
 
         for (const auto& offset : OFFSETS) {
             int nx = cell[0] + offset[0], ny = cell[1] + offset[1], nz = cell[2] + offset[2];
-            if (nx < 0 || nx >= CHUNK_SIZE || ny < 0 || ny >= CHUNK_SIZE || nz < 0 || nz >= CHUNK_SIZE) continue;
+            if (nx < 0 || nx >= CHUNK_SIZE || ny < 0 || ny >= CHUNK_HEIGHT || nz < 0 || nz >= CHUNK_SIZE) continue;
             if (is_opaque(nx, ny, nz)) continue;
 
             int newLevel = level - 1;
@@ -395,7 +402,7 @@ void Chunk::compute_lighting()
 
         for (const auto& offset : OFFSETS) {
             int nx = cell[0] + offset[0], ny = cell[1] + offset[1], nz = cell[2] + offset[2];
-            if (nx < 0 || nx >= CHUNK_SIZE || ny < 0 || ny >= CHUNK_SIZE || nz < 0 || nz >= CHUNK_SIZE) continue;
+            if (nx < 0 || nx >= CHUNK_SIZE || ny < 0 || ny >= CHUNK_HEIGHT || nz < 0 || nz >= CHUNK_SIZE) continue;
             if (is_opaque(nx, ny, nz)) continue;
 
             int newLevel = level - 1;
@@ -429,7 +436,7 @@ void Chunk::build_mesh(const Chunk* west, const Chunk* east, const Chunk* north,
     // in `nb` never come into play here (they matter for vertex_ao/
     // vertex_light below, whose corner samples can step two axes at once).
     auto neighbor_opaque = [&](int x, int y, int z) {
-        if (y < 0 || y >= CHUNK_SIZE) return false; // no vertical chunk stacking yet
+        if (y < 0 || y >= CHUNK_HEIGHT) return false; // above/below the world, not a neighbor chunk
 
         const Chunk* neighbor = nullptr;
         if (x < 0)              { neighbor = west;  x += CHUNK_SIZE; }
@@ -443,7 +450,7 @@ void Chunk::build_mesh(const Chunk* west, const Chunk* east, const Chunk* north,
     };
 
     for (int x = 0; x < CHUNK_SIZE; ++x) {
-        for (int y = 0; y < CHUNK_SIZE; ++y) {
+        for (int y = 0; y < CHUNK_HEIGHT; ++y) {
             for (int z = 0; z < CHUNK_SIZE; ++z) {
                 BlockType type = get_block(x, y, z);
                 if (type == BlockType::Air) continue;

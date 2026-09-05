@@ -9,7 +9,8 @@
 
 class PerlinNoise;
 
-constexpr int CHUNK_SIZE = 16;
+constexpr int CHUNK_SIZE = 16;    // width/depth (X/Z) — chunks are still only streamed in the X/Z grid (World::update_chunk_states), no vertical stacking
+constexpr int CHUNK_HEIGHT = 256; // Y — a single chunk spans the whole world height, Minecraft's own build limit
 
 // Brightest possible sky/block light level (see Chunk::get_light);
 // exported so anything sampling light outside a Chunk (World, the debug
@@ -17,10 +18,27 @@ constexpr int CHUNK_SIZE = 16;
 // rather than a bare magic number.
 constexpr int MAX_LIGHT = 15;
 
-// A CHUNK_SIZE^3 grid of blocks, positioned in the world by WorldObject's
-// position (its min corner, not its center). Block data builds into a single
-// GPU mesh (build_mesh()) with hidden faces culled out, so a whole chunk
-// draws in one call instead of one draw per visible block face.
+// A chunk's simulation/render tier, based on distance from an observer (see
+// World::update_chunk_states). There's no Chunk object for an Unloaded
+// coordinate at all — World reports that state itself for any (x, z) it
+// has no Chunk for; a live Chunk is always at least Loaded.
+//
+// This is also the seam a future client/server split grows from: Loaded
+// vs. Active already means exactly "the client should draw this, but not
+// simulate it" vs. "draw and simulate" — a server deciding that instead of
+// each client's own distance check, and sending the result over the
+// network, wouldn't need this enum or anything that reads it to change.
+enum class ChunkState : uint8_t {
+    Unloaded,
+    Loaded,
+    Active,
+};
+
+// A CHUNK_SIZE x CHUNK_HEIGHT x CHUNK_SIZE grid of blocks, positioned in the
+// world by WorldObject's position (its min corner, not its center). Block
+// data builds into a single GPU mesh (build_mesh()) with hidden faces culled
+// out, so a whole chunk draws in one call instead of one draw per visible
+// block face.
 class Chunk : public WorldObject {
 public:
     explicit Chunk(Vector3 position = {0.0f, 0.0f, 0.0f});
@@ -71,6 +89,18 @@ public:
     // itself and call this only with this chunk's own local coordinates.
     int get_light(int x, int y, int z) const;
 
+    // Always Loaded or Active for a live Chunk (see ChunkState) — World is
+    // the only writer, via update_chunk_states()'s transition handling.
+    ChunkState get_state() const { return state; }
+    void set_state(ChunkState new_state) { state = new_state; }
+
+    // Set by World whenever a block here changes after generation
+    // (break_block/place_block), so a future unload can tell a chunk that
+    // needs its edits saved apart from one that can just be regenerated.
+    // Not acted on yet — see World::unload_chunk's TODO.
+    bool is_modified() const { return modified; }
+    void mark_modified() { modified = true; }
+
 private:
     static int index(int x, int y, int z);
 
@@ -83,13 +113,18 @@ private:
     int get_block_light(int x, int y, int z) const;
     void set_block_light(int x, int y, int z, int value);
 
-    std::array<BlockType, CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE> blocks;
+    std::array<BlockType, CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE> blocks;
 
     // Packed per-cell light: upper nibble = sky light, lower nibble = block
     // light, each 0-15.
-    std::array<uint8_t, CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE> light{};
+    std::array<uint8_t, CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE> light{};
 
     // vertexCount == 0 (and mesh_uploaded == false) until build_mesh() runs.
     Mesh mesh{};
     bool mesh_uploaded = false;
+
+    // A live Chunk is always at least Loaded (see ChunkState) — Unloaded is
+    // never stored, only reported by World for a coordinate with no Chunk.
+    ChunkState state = ChunkState::Loaded;
+    bool modified = false;
 };

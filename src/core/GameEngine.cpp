@@ -18,6 +18,22 @@ namespace {
     constexpr float BREAK_REACH = 10.0f; // max block-breaking distance, in blocks
     constexpr float PLACE_REACH = 15.0f; // max block-placing distance, in blocks
 
+    // Minecraft's tick rate: game logic (once there is any beyond the
+    // counter itself) runs at a fixed 20 steps per second, independent of
+    // however fast frames are actually rendering.
+    constexpr int TICKS_PER_SECOND = 20;
+    constexpr float TICK_DURATION = 1.0f / TICKS_PER_SECOND; // seconds per tick (50ms)
+
+    // Caps how many catch-up ticks run() will run in a single frame after a
+    // stall (a dropped frame, the window being dragged, a breakpoint).
+    // Without this, a long-enough stall leaves a backlog so big that
+    // draining it makes every subsequent frame slow too, which creates more
+    // backlog than it drains — a "spiral of death". Instead, past this many
+    // ticks, the rest of the backlog is dropped (see run()): time is lost,
+    // same as it would visibly be anyway, but the game recovers in one
+    // frame instead of never.
+    constexpr int MAX_TICKS_PER_FRAME = 5;
+
     // No inventory/block-selection system yet, so placing always uses this
     // one block type — Cobblestone rather than a natural block so a
     // player-placed block is visually obvious against the terrain.
@@ -84,10 +100,17 @@ GameEngine::GameEngine(int screen_width, int screen_height, const char* title)
     Load_block_definitions(); // needs a GL context, so only after InitWindow
     FontManager::get(); // load the game's text font up front, same reason
 
-    // World Generation covers world X/Z [0, 512); start roughly above its
-    // center, looking down at it.
-    camera.position = {256.0f, 30.0f, 281.0f};
-    camera.target = {256.0f, 10.0f, 256.0f};
+    // World Generation covers world X/Z [0, 512); start above and back from
+    // its center, looking down at it. The downward angle (~20 degrees below
+    // horizontal, from the position/target offsets below) is deliberately
+    // kept under half of fovy (30 degrees): if it weren't, every ray in the
+    // frustum would point below the horizon and the view would be 100%
+    // nearby ground with no sky at all — a mistake made and caught while
+    // tuning this for the new, much taller hills (see BASE_HEIGHT/
+    // HEIGHT_VARIATION in Chunk.cpp, ~50..90; water at 64) — regardless of
+    // how far terrain is actually loaded/rendered out to.
+    camera.position = {256.0f, 110.0f, 366.0f};
+    camera.target = {256.0f, 70.0f, 256.0f};
     camera.up = {0.0f, 1.0f, 0.0f};
     camera.fovy = 60.0f;
     camera.projection = CAMERA_PERSPECTIVE;
@@ -110,6 +133,24 @@ void GameEngine::add_object(std::unique_ptr<GameObject> object)
 void GameEngine::set_world(std::unique_ptr<World> new_world)
 {
     world = std::move(new_world);
+    if (world) {
+        // Populate around the starting position immediately, rather than
+        // leaving the world empty for the handful of frames before
+        // tick_accumulator first reaches a full tick.
+        world->update_chunk_states(camera.position);
+    }
+}
+
+void GameEngine::tick()
+{
+    ++game_tick;
+    // Chunk loading/unloading is the first real occupant of this clock —
+    // see World::update_chunk_states. Everything else (day/night,
+    // scheduled block updates, random ticks) hooks in the same way, from
+    // here.
+    if (world) {
+        world->update_chunk_states(camera.position);
+    }
 }
 
 void GameEngine::update(float delta_time)
@@ -201,7 +242,7 @@ void GameEngine::draw()
     draw_crosshair(GetScreenWidth(), GetScreenHeight());
 
     if (show_debug_overlay && world) {
-        draw_debug_overlay(camera, *world, BREAK_REACH, camera_move_speed);
+        draw_debug_overlay(camera, *world, BREAK_REACH, camera_move_speed, game_tick);
     }
 
     EndDrawing();
@@ -211,6 +252,23 @@ void GameEngine::run()
 {
     while (!WindowShouldClose()) {
         float delta_time = GetFrameTime();
+
+        // Fixed-timestep tick loop: run as many 50ms ticks as delta_time
+        // has accumulated (usually 0 or 1 at 60+ FPS, more only after a
+        // stall), each one always the same fixed size — game logic that
+        // reads game_tick sees a steady 20/second clock no matter the
+        // frame rate. See MAX_TICKS_PER_FRAME for the catch-up cap.
+        tick_accumulator += delta_time;
+        int ticks_this_frame = 0;
+        while (tick_accumulator >= TICK_DURATION && ticks_this_frame < MAX_TICKS_PER_FRAME) {
+            tick();
+            tick_accumulator -= TICK_DURATION;
+            ++ticks_this_frame;
+        }
+        if (ticks_this_frame == MAX_TICKS_PER_FRAME) {
+            tick_accumulator = 0.0f; // drop the rest of the backlog instead of chasing it forever
+        }
+
         update(delta_time);
         draw();
     }

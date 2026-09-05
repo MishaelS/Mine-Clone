@@ -6,8 +6,9 @@
 #include <string>
 
 // The id a Chunk stores per voxel cell. Kept tiny (1 byte) since a single
-// 16x16x16 chunk holds 4096 of these. Every value except Air must have a
-// matching "name" entry in assets/blocks.json.
+// chunk column (CHUNK_SIZE x CHUNK_HEIGHT x CHUNK_SIZE) holds tens of
+// thousands of these. Every value except Air must have a matching "name"
+// entry in assets/blocks.json.
 enum class BlockType : uint8_t {
     Air,
     Grass,
@@ -24,6 +25,7 @@ enum class BlockType : uint8_t {
     DiamondOre,
     RedstoneOre,
     Bedrock,
+    Water,
     Count, // not a real block; sentinel for table/array sizing
 };
 

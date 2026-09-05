@@ -12,30 +12,31 @@ namespace {
 
     constexpr const char* TERRAIN_TEXTURE_PATH = "sprites/terrain.png";
 
-    // terrain.png is a fixed 16x16 grid of 16px tiles (256x256 total) — every
-    // block face's "x"/"y" in blocks.json is a (column, row) index into it.
-    constexpr int TERRAIN_GRID_SIZE = 16;
-    constexpr float TERRAIN_ATLAS_PIXELS = 256.0f;
-
-    // Tiles sit edge-to-edge with no padding between them, unlike a packed
-    // atlas. Nearest-filtering can sample a neighboring tile's edge texel
-    // when a UV lands exactly on 0 or 1 due to floating-point rounding, so
-    // each tile's UV rect is inset by half a texel on every side to keep
-    // sampling safely inside the intended tile.
-    constexpr float HALF_TEXEL = 0.5f / TERRAIN_ATLAS_PIXELS;
+    // terrain.png is a 16x16 grid of 16px tiles (256x256 pixels total) —
+    // every block face's "x"/"y" in blocks.json is a tile's column/row in
+    // that grid.
+    constexpr int TILE_PIXELS = 16;   // one tile's width/height, in pixels
+    constexpr int GRID_TILES  = 16;   // tiles per row/column in terrain.png
+    constexpr float ATLAS_PIXELS = static_cast<float>(TILE_PIXELS * GRID_TILES); // 256
 
     // Set once Load_block_definitions() has loaded terrain.png (needs a GL
     // context, so this can't happen at static-init time) — kept alive
     // afterward so chunks can read get_block_atlas_texture() at any point.
     const Texture2D* block_atlas_texture = nullptr;
 
+    // Turns a tile's (column, row) into the UV rectangle (0..1) raylib/OpenGL
+    // expects. The tile's position and size stay whole pixels right up to
+    // the last step — the division by ATLAS_PIXELS — which is unavoidable:
+    // the GPU only understands texture coordinates normalized to 0..1,
+    // whatever the texture's actual pixel size.
     Rectangle tile_uv(int col, int row) {
-        float tile = 1.0f / TERRAIN_GRID_SIZE;
+        int x = col * TILE_PIXELS;
+        int y = row * TILE_PIXELS;
         return {
-            col * tile + HALF_TEXEL,
-            row * tile + HALF_TEXEL,
-            tile - 2.0f * HALF_TEXEL,
-            tile - 2.0f * HALF_TEXEL,
+            x / ATLAS_PIXELS,
+            y / ATLAS_PIXELS,
+            TILE_PIXELS / ATLAS_PIXELS,
+            TILE_PIXELS / ATLAS_PIXELS,
         };
     }
 
@@ -79,6 +80,7 @@ namespace {
         {"diamond_ore" , BlockType::DiamondOre },
         {"redstone_ore", BlockType::RedstoneOre},
         {"bedrock"     , BlockType::Bedrock    },
+        {"water"       , BlockType::Water      },
     };
 }
 

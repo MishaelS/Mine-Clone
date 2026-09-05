@@ -33,7 +33,7 @@ namespace {
     }
 }
 
-void draw_debug_overlay(const Camera3D& camera, const World& world, float aim_reach, float move_speed)
+void draw_debug_overlay(const Camera3D& camera, const World& world, float aim_reach, float move_speed, uint64_t game_tick)
 {
     Vector3 forward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
 
@@ -44,6 +44,14 @@ void draw_debug_overlay(const Camera3D& camera, const World& world, float aim_re
     World::ChunkCoordinates chunk = world.chunk_coordinates(block_x, block_z);
     int light = world.get_light(block_x, block_y, block_z);
 
+    // Position within the chunk itself, not just which chunk (world-space
+    // Block: line above) or which chunk grid cell (chunk.x/z) — same three-
+    // tier breakdown Minecraft's own F3 "Chunk:" line shows (local x/y/z
+    // "in" chunk x/z). Y doesn't wrap per chunk here (a chunk spans the
+    // whole world height, no vertical stacking), so local_y == block_y.
+    int local_x = block_x - chunk.x * CHUNK_SIZE;
+    int local_z = block_z - chunk.z * CHUNK_SIZE;
+
     char looking_at[64];
     if (auto hit = world.raycast(camera.position, forward, aim_reach)) {
         std::snprintf(looking_at, sizeof(looking_at), "%s (%d, %d, %d)",
@@ -53,12 +61,13 @@ void draw_debug_overlay(const Camera3D& camera, const World& world, float aim_re
         std::snprintf(looking_at, sizeof(looking_at), "None");
     }
 
-    char lines[8][96];
+    char lines[9][96];
     int line_count = 0;
     std::snprintf(lines[line_count++], sizeof(lines[0]), "%d fps", GetFPS());
+    std::snprintf(lines[line_count++], sizeof(lines[0]), "Ticks: %llu (20/s)", static_cast<unsigned long long>(game_tick));
     std::snprintf(lines[line_count++], sizeof(lines[0]), "XYZ: %.3f / %.3f / %.3f", camera.position.x, camera.position.y, camera.position.z);
     std::snprintf(lines[line_count++], sizeof(lines[0]), "Block: %d %d %d", block_x, block_y, block_z);
-    std::snprintf(lines[line_count++], sizeof(lines[0]), "Chunk: %d %d", chunk.x, chunk.z);
+    std::snprintf(lines[line_count++], sizeof(lines[0]), "Chunk: %d %d %d in %d %d", local_x, block_y, local_z, chunk.x, chunk.z);
     std::snprintf(lines[line_count++], sizeof(lines[0]), "Facing: %s (%.2f / %.2f / %.2f)", cardinal_direction(forward), forward.x, forward.y, forward.z);
     std::snprintf(lines[line_count++], sizeof(lines[0]), "Light: %d", light);
     std::snprintf(lines[line_count++], sizeof(lines[0]), "Looking at: %s", looking_at);
