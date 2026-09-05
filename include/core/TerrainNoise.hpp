@@ -46,6 +46,13 @@ public:
     // winds rather than following a straight or grid-aligned line.
     float river(float world_x, float world_z) const;
 
+    // Small-scale noise, roughly in [-1, 1] — Chunk::generate_terrain turns
+    // a patch of underwater sand into clay wherever this crosses above a
+    // threshold, the high frequency keeping each patch small ("small
+    // chunks of clay"), same idea as real Minecraft's shallow-water clay
+    // deposits.
+    float clay(float world_x, float world_z) const;
+
 private:
     // Wavelength ~900 blocks: biomes need to span whole regions, not
     // flicker chunk to chunk, so this samples much lower frequency than
@@ -66,10 +73,15 @@ private:
     // coastline instead of the entire coastline sharing one character.
     static constexpr float COAST_FREQUENCY = 1.0f / 250.0f;
 
+    // Wavelength ~12 blocks — small enough that a patch crossing the clay
+    // threshold only spans a handful of blocks, not a whole beach.
+    static constexpr float CLAY_FREQUENCY = 1.0f / 12.0f;
+
     PerlinNoise height_noise;
     PerlinNoise temperature_noise;
     PerlinNoise humidity_noise;
     PerlinNoise continent_noise;
     PerlinNoise river_noise;
     PerlinNoise coast_noise;
+    PerlinNoise clay_noise;
 };

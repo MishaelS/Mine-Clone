@@ -79,6 +79,7 @@ namespace {
         {"oak_planks"  , BlockType::OakPlanks  },
         {"sand"        , BlockType::Sand       },
         {"gravel"      , BlockType::Gravel     },
+        {"clay"        , BlockType::Clay       },
         {"stone"       , BlockType::Stone      },
         {"cobblestone" , BlockType::Cobblestone},
         {"iron_ore"    , BlockType::IronOre    },

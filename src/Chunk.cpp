@@ -88,8 +88,9 @@ namespace {
                 // around sea level.
                 return {62 - MIN_WORLD_Y, 6, 6, BlockType::Sand, BlockType::Sand};
             case Biome::Forest:
-                // Noticeably hillier than Plains but not dramatic — world Y ~54..90.
-                return {72 - MIN_WORLD_Y, 18, DEFAULT_SURFACE_DEPTH, BlockType::Grass, BlockType::Dirt};
+                // Mostly a smooth, gentle roll (closer to Plains than to
+                // Hills) — world Y ~62..82.
+                return {72 - MIN_WORLD_Y, 10, DEFAULT_SURFACE_DEPTH, BlockType::Grass, BlockType::Dirt};
             case Biome::Hills:
                 // The roughest terrain this generates — world Y ~50..114 —
                 // but still gentle by modern-Minecraft standards, on purpose.
@@ -118,6 +119,25 @@ namespace {
     // own RIVER_FREQUENCY is what actually sets the width in blocks.
     constexpr float RIVER_WIDTH = 0.04f;
     constexpr int RIVER_BED = WATER_LEVEL - 3; // a few blocks under sea level, so a river reliably fills with water
+
+    // A river only carves the *surface* down into a valley when its bed is
+    // within this many blocks of the natural (pre-river) terrain height.
+    // Where the land is already taller than that above RIVER_BED — a ridge
+    // the river's course happens to cross — generate_terrain leaves the
+    // surface alone and instead tunnels a flooded channel through the rock
+    // at RIVER_BED's own elevation, the same river continuing underground
+    // rather than cutting an ever-deeper canyon to stay at the surface.
+    constexpr int RIVER_TUNNEL_DEPTH = 10;
+    constexpr int RIVER_TUNNEL_HALF_HEIGHT = 3; // the underground channel is this many blocks tall above and below RIVER_BED
+
+    // Clay: TerrainNoise::clay() is a small-scale noise field: wherever it
+    // crosses above CLAY_THRESHOLD, a patch of otherwise-Sand surface
+    // (always underwater — see generate_terrain) becomes Clay instead,
+    // matching real Minecraft's small shallow-water clay deposits. Only
+    // ever replaces the surface block itself, not whatever's under it, so
+    // a patch reads as a thin clay deposit sitting in the sand rather than
+    // a solid clay column.
+    constexpr float CLAY_THRESHOLD = 0.55f;
 
     // Beach: land within a few blocks of sea level, close enough to Sea or
     // Ocean to notice, gets a shoreline material instead of its own
@@ -506,10 +526,34 @@ void Chunk::generate_terrain(const TerrainNoise& noise)
             // into the sea instead of vanishing at the biome border.
             bool near_desert_border = weights.desert > 0.1f && weights.desert < 0.9f;
             bool near_coast = (weights.sea + weights.ocean) > BEACH_COAST_WEIGHT;
+            bool river_tunnel = false;
             if (near_desert_border || near_coast) {
                 float river_distance = std::fabs(noise.river(world_x, world_z));
                 float carve = std::clamp(1.0f - river_distance / RIVER_WIDTH, 0.0f, 1.0f);
-                height_f = height_f * (1.0f - carve) + RIVER_BED * carve;
+                if (carve > 0.0f) {
+                    // How much of the surface-carving strength above still
+                    // applies here, fading from 1 (full open valley) at
+                    // RIVER_BED itself down to 0 by RIVER_TUNNEL_DEPTH
+                    // blocks above it — a *gradual* handoff to the
+                    // underground channel below as the natural land
+                    // rises, instead of the two switching all-or-nothing
+                    // at a single depth (which, since real terrain crosses
+                    // that depth repeatedly along a winding river, made
+                    // the river flicker between a visible valley and a
+                    // fully hidden tunnel every few blocks — reading as
+                    // scattered points from above rather than one
+                    // continuous line).
+                    float surface_ratio = 1.0f - std::clamp((height_f - RIVER_BED) / RIVER_TUNNEL_DEPTH, 0.0f, 1.0f);
+                    float surface_carve = carve * surface_ratio;
+                    height_f = height_f * (1.0f - surface_carve) + RIVER_BED * surface_carve;
+                    // Always try the underground channel too, not just
+                    // where the surface carve above faded out completely
+                    // — it naturally has no visible effect wherever the
+                    // (possibly still-lowered) surface already reaches
+                    // down that far, since the fill loop below clamps the
+                    // tunnel to stay under the actual surface.
+                    river_tunnel = true;
+                }
             }
 
             int height = std::clamp(static_cast<int>(std::lround(height_f)), 1, CHUNK_HEIGHT - 1);
@@ -538,6 +582,26 @@ void Chunk::generate_terrain(const TerrainNoise& noise)
                 subsurface_block = surface_block;
             }
 
+            // Grass never generates underwater — same as real Minecraft,
+            // where a grass block needs open air/sunlight above it and
+            // reverts to dirt without that. A land column's own blended
+            // height can still dip below WATER_LEVEL from height noise
+            // alone, well away from an actual coastline (so the beach
+            // override above never triggers for it); this catches that
+            // general case, not just the coastal one.
+            if (height < WATER_LEVEL && surface_block == BlockType::Grass) {
+                surface_block = BlockType::Dirt;
+            }
+
+            // Clay: small patches within underwater sand only (a beach
+            // shelf, or Desert dipping below sea level) — see CLAY_
+            // THRESHOLD above. Never touches subsurface_block, so a patch
+            // reads as a thin deposit sitting in the sand.
+            if (surface_block == BlockType::Sand && height < WATER_LEVEL &&
+                noise.clay(world_x, world_z) > CLAY_THRESHOLD) {
+                surface_block = BlockType::Clay;
+            }
+
             // Everything past this column's own content is already Air
             // (blocks.fill(BlockType::Air) in the constructor), so the loop
             // can stop there instead of walking all the way to
@@ -561,6 +625,19 @@ void Chunk::generate_terrain(const TerrainNoise& noise)
                 }
                 set_block(x, y, z, type);
             }
+
+            // River tunnel: carved after the column above is already
+            // filled solid, so it reads as a channel bored straight
+            // through the rock rather than a shape generate_terrain built
+            // in from the start — flooded the same way a river itself is
+            // filled with water above.
+            if (river_tunnel) {
+                int tunnel_bottom = std::max(1, RIVER_BED - RIVER_TUNNEL_HALF_HEIGHT);
+                int tunnel_top = std::min(RIVER_BED + RIVER_TUNNEL_HALF_HEIGHT, height - 2);
+                for (int y = tunnel_bottom; y <= tunnel_top; ++y) {
+                    set_block(x, y, z, BlockType::Water);
+                }
+            }
         }
     }
 }
@@ -580,6 +657,16 @@ void Chunk::set_block(int x, int y, int z, BlockType type)
     if (type != BlockType::Air && y > highest_block_y) {
         highest_block_y = y;
     }
+}
+
+uint8_t Chunk::get_fluid_level(int x, int y, int z) const
+{
+    return fluid_level[index(x, y, z)];
+}
+
+void Chunk::set_fluid_level(int x, int y, int z, uint8_t level)
+{
+    fluid_level[index(x, y, z)] = level;
 }
 
 bool Chunk::is_opaque(int x, int y, int z) const

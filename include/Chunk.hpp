@@ -42,6 +42,18 @@ enum class ChunkState : uint8_t {
     Active,
 };
 
+// Per-cell fluid state (Chunk::get_fluid_level/set_fluid_level), matching
+// real Minecraft's own water: a SOURCE never dries up and always spreads
+// at full strength; FLOWING water is 1-7 blocks of horizontal distance
+// from the nearest effective source and dries up (World::update_fluids)
+// the moment nothing feeds it any more; FALLING is water with more water
+// directly above it — acts like a fresh source for spreading sideways
+// *from this layer*, but unlike a real source it dries up if that feed
+// from above stops. Meaningless wherever the block itself isn't Water.
+constexpr uint8_t FLUID_LEVEL_SOURCE = 0;
+constexpr uint8_t FLUID_LEVEL_MAX_FLOW = 7;  // farthest a FLOWING level can reach; one more step than this can't flow at all
+constexpr uint8_t FLUID_LEVEL_FALLING = 8;
+
 // Compiles assets/shaders/chunk.{vs,fs} — raylib's own default mesh shader
 // (texture*vertexColor, so AO/tint already baked into vertex colors by
 // Chunk::build_mesh keeps working unchanged) plus linear distance fog.
@@ -141,6 +153,19 @@ public:
     BlockType get_block(int x, int y, int z) const;
     void set_block(int x, int y, int z, BlockType type);
 
+    // FLUID_LEVEL_SOURCE/FLOWING(1-7)/FALLING — see the constants' own
+    // comments. Only meaningful where get_block() is Water; garbage
+    // (whatever this cell's array slot happens to hold) otherwise, since
+    // nothing reads it except code that already checked the block type
+    // first (World::compute_fluid_level, Chunk::build_mesh's neighbor
+    // checks don't need it at all). Defaults to FLUID_LEVEL_SOURCE (0) for
+    // every cell, so terrain-generated water — never explicitly written
+    // here — reads as a source without generate_terrain needing to set it
+    // itself, matching how a generated body of water in Minecraft is all
+    // source blocks.
+    uint8_t get_fluid_level(int x, int y, int z) const;
+    void set_fluid_level(int x, int y, int z, uint8_t level);
+
     // max(sky, block) light, 0..15. Public so a neighboring chunk's
     // build_mesh() can sample real light data across a chunk border instead
     // of guessing — bounds-checked to MAX_LIGHT (open, sunlit space)
@@ -178,6 +203,10 @@ private:
     // Packed per-cell light: upper nibble = sky light, lower nibble = block
     // light, each 0-15.
     std::array<uint8_t, CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE> light{};
+
+    // See get_fluid_level()/set_fluid_level() and the FLUID_LEVEL_*
+    // constants above.
+    std::array<uint8_t, CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE> fluid_level{};
 
     // Grass top tint for each (x, z) column, blended across every grass-
     // bearing biome's own tint by that column's BiomeWeights when

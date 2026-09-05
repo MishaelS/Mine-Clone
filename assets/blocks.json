@@ -33,6 +33,14 @@
             "side"       : { "x": 3, "y": 1 }
         },
         {
+            "name"       : "clay",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : { "x": 8, "y": 4 },
+            "bottom"     : { "x": 8, "y": 4 },
+            "side"       : { "x": 8, "y": 4 }
+        },
+        {
             "name"       : "oak_log",
             "solid"      : true,
             "transparent": false,

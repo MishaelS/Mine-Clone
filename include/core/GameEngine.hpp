@@ -44,6 +44,18 @@ private:
     bool show_wireframe = false;     // toggled by F5 — wireframe chunk meshes instead of textured, for inspecting mesh/culling
     float camera_move_speed;         // world units/second; mouse wheel adjusts this
 
+    // Counts down to 0 over the first few update() calls right after
+    // set_world() places the camera at its spawn orientation (facing
+    // north) — each of those calls skips applying the mouse's rotation
+    // delta instead of just the very first. DisableCursor() capturing the
+    // cursor takes a couple of frames to settle (measured: frame 0 reports
+    // a delta from wherever the OS cursor physically was to the window's
+    // center, and frame 1 reports a second, still-spurious jump before
+    // GetMouseDelta() actually reads (0, 0) from frame 2 on) — one skipped
+    // frame alone still let that second jump rotate the camera away from
+    // the exact orientation just set.
+    int spawn_settle_frames = 0;
+
     // Fixed-timestep accumulator (see run()): seconds of real frame time not
     // yet consumed by a tick. Carries any leftover fraction of a tick
     // forward to the next frame instead of dropping it, so the tick rate

@@ -17,6 +17,7 @@ enum class BlockType : uint8_t {
     OakPlanks,
     Sand,
     Gravel,
+    Clay,
     Stone,
     Cobblestone,
     CoalOre,

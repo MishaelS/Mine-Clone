@@ -31,6 +31,20 @@ namespace {
         return {static_cast<int>(key >> 32), static_cast<int>(static_cast<uint32_t>(key))};
     }
 
+    // Packs one block's world-space (x, y, z) into a single key for
+    // World::scheduled_fluid_cells — biased to non-negative first since a
+    // bitwise packing needs every field's range to start at 0. x/z fit in
+    // 25 bits (comfortably covering WORLD_BORDER_BLOCKS, defined further
+    // down); y in 11 (the world is nowhere near 2000 blocks tall).
+    int64_t fluid_key(int x, int y, int z) {
+        constexpr int64_t BIAS_XZ = 10'000'000;
+        constexpr int64_t BIAS_Y = 1000;
+        int64_t bx = x + BIAS_XZ;
+        int64_t by = y + BIAS_Y;
+        int64_t bz = z + BIAS_XZ;
+        return (bx << 36) | (by << 25) | bz;
+    }
+
     // How far, in chunks, a chunk is drawn (LOADED_RADIUS) vs. drawn *and*
     // ticking (ACTIVE_RADIUS) around an observer — Minecraft's own render
     // vs. simulation distance split. Square (Chebyshev) radius, same shape
@@ -38,22 +52,27 @@ namespace {
     constexpr int LOADED_RADIUS = 8;
     constexpr int ACTIVE_RADIUS = 4;
 
-    // Water flow (World::update_fluids/queue_fluid_neighbors): how far
-    // (in blocks) flowing water spreads sideways from whatever it's
-    // resting against before stopping, matching classic Minecraft's own
-    // water spread distance. Falling water (straight down into an empty
-    // cell) isn't limited by this at all — only sideways spread is.
-    constexpr int MAX_FLUID_SPREAD = 7;
+    // Water flow (World::update_fluids): how many ticks after a cell is
+    // scheduled before it's actually re-evaluated — the same idea as real
+    // Minecraft's own liquid tick rate (5 game ticks in Java Edition), so
+    // a flow visibly advances outward one step at a time instead of
+    // instantly resolving the moment something changes.
+    constexpr int FLUID_TICK_DELAY = 5;
 
-    // Caps how many queued fluid cells update_fluids() resolves in a
-    // single tick — the same "spiral of death" caution MAX_TICKS_PER_FRAME
-    // uses elsewhere (GameEngine.cpp), here against a large flood (e.g.
-    // breaking a wall that was holding back an entire lake) turning one
-    // tick into a multi-chunk remesh storm. The rest of the queue simply
-    // waits for later ticks instead — a big flood visibly spreads over a
-    // couple of seconds rather than all at once, which reads as more
-    // water-like anyway.
+    // Caps how many due fluid cells update_fluids() resolves in a single
+    // tick — the same "spiral of death" caution MAX_TICKS_PER_FRAME uses
+    // elsewhere (GameEngine.cpp), here against an enormous number of cells
+    // all coming due on the same tick (e.g. draining a whole lake) turning
+    // one tick into a multi-chunk remesh storm. Anything past this limit
+    // is simply left due (its due_tick already <= fluid_tick) and picked
+    // up first thing on the very next call instead of being delayed
+    // further or dropped.
     constexpr int MAX_FLUID_UPDATES_PER_TICK = 64;
+
+    // Same "spiral of death" caution as MAX_FLUID_UPDATES_PER_TICK, for
+    // Sand/Gravel gravity (World::update_falling_blocks) — against, say, a
+    // huge floating platform losing its support all at once.
+    constexpr int MAX_FALLING_UPDATES_PER_TICK = 128;
 
     // Fog (see World::draw/set_chunk_fog) fully hides everything by
     // FOG_END_FRACTION of LOADED_RADIUS's own distance, not right at it —
@@ -378,13 +397,16 @@ void World::break_block(int x, int y, int z)
 {
     if (!get_block_properties(get_block(x, y, z)).solid) return; // nothing there to break
     set_block_and_rebuild(x, y, z, BlockType::Air);
-    queue_fluid_neighbors(x, y, z);
+    schedule_fluid_neighbors(x, y, z);
+    schedule_falling_check(x, y + 1, z);
 }
 
 void World::place_block(int x, int y, int z, BlockType type)
 {
     if (get_block_properties(get_block(x, y, z)).solid) return; // something's already there
     set_block_and_rebuild(x, y, z, type);
+    schedule_fluid_neighbors(x, y, z);
+    schedule_falling_check(x, y, z);
 }
 
 void World::set_block_and_rebuild(int x, int y, int z, BlockType type)
@@ -405,30 +427,60 @@ void World::set_block_and_rebuild(int x, int y, int z, BlockType type)
     rebuild_mesh_neighborhood(chunk_x, chunk_z);
 }
 
-void World::queue_fluid_neighbors(int x, int y, int z)
+namespace {
+    constexpr int FLUID_NEIGHBOR_OFFSETS[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+}
+
+std::optional<uint8_t> World::compute_fluid_level(int x, int y, int z) const
 {
-    // Water directly above falls into the new gap — takes priority over
-    // (and, since it'll re-check its own neighbors once it lands, makes
-    // redundant) spreading sideways from any water beside this cell too.
+    // Water directly above always feeds this cell, regardless of its own
+    // level — a falling column doesn't care how far *that* water is from
+    // its own source, only that it's there.
     if (get_block(x, y + 1, z) == BlockType::Water) {
-        pending_fluid_updates.push_back({x, y, z, 0});
-        return;
+        return FLUID_LEVEL_FALLING;
     }
 
-    static constexpr int OFFSETS[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
-    for (const auto& offset : OFFSETS) {
-        if (get_block(x + offset[0], y, z + offset[1]) == BlockType::Water) {
-            // One queued entry is enough regardless of how many of the 4
-            // sides actually have water — update_fluids() re-derives the
-            // full spread from this cell once it's filled.
-            pending_fluid_updates.push_back({x, y, z, 1});
-            return;
-        }
+    int best = 255;
+    for (const auto& offset : FLUID_NEIGHBOR_OFFSETS) {
+        int nx = x + offset[0];
+        int nz = z + offset[1];
+        if (get_block(nx, y, nz) != BlockType::Water) continue;
+
+        int chunk_x = floor_div(nx, CHUNK_SIZE);
+        int chunk_z = floor_div(nz, CHUNK_SIZE);
+        const Chunk* chunk = chunk_at(chunk_x, chunk_z);
+        uint8_t neighbor_level = chunk->get_fluid_level(nx - chunk_x * CHUNK_SIZE, y - MIN_WORLD_Y, nz - chunk_z * CHUNK_SIZE);
+        // A SOURCE or FALLING neighbor is as good as being right next to
+        // the source itself for spread-distance purposes — only a
+        // FLOWING neighbor's own distance actually costs anything extra.
+        int effective = (neighbor_level == FLUID_LEVEL_SOURCE || neighbor_level == FLUID_LEVEL_FALLING) ? 0 : neighbor_level;
+        best = std::min(best, effective + 1);
+    }
+
+    if (best <= FLUID_LEVEL_MAX_FLOW) return static_cast<uint8_t>(best);
+    return std::nullopt; // nothing feeds this cell -- it should be dry
+}
+
+void World::schedule_fluid_update(int x, int y, int z)
+{
+    int64_t key = fluid_key(x, y, z);
+    if (!scheduled_fluid_cells.insert(key).second) return; // already pending
+    pending_fluid_updates.push_back({x, y, z, fluid_tick + FLUID_TICK_DELAY});
+}
+
+void World::schedule_fluid_neighbors(int x, int y, int z)
+{
+    schedule_fluid_update(x, y, z);
+    schedule_fluid_update(x, y - 1, z);
+    schedule_fluid_update(x, y + 1, z);
+    for (const auto& offset : FLUID_NEIGHBOR_OFFSETS) {
+        schedule_fluid_update(x + offset[0], y, z + offset[1]);
     }
 }
 
 void World::update_fluids()
 {
+    ++fluid_tick;
     if (pending_fluid_updates.empty()) return;
 
     // Same batching idea as update_chunk_states(): a chunk relit/remeshed
@@ -445,42 +497,146 @@ void World::update_fluids()
         }
     };
 
+    // Entries not yet due (due_tick still in the future) go back for a
+    // later call; the rest are popped off the front and, if still due
+    // after MAX_FLUID_UPDATES_PER_TICK of them have been resolved this
+    // call, left for the very next one instead (their due_tick already
+    // <= fluid_tick, so update_fluids() picks them straight back up).
+    std::deque<PendingFluidUpdate> still_pending;
     int processed = 0;
-    while (processed < MAX_FLUID_UPDATES_PER_TICK && !pending_fluid_updates.empty()) {
-        FluidUpdate update = pending_fluid_updates.front();
+    while (!pending_fluid_updates.empty()) {
+        PendingFluidUpdate update = pending_fluid_updates.front();
         pending_fluid_updates.pop_front();
-        ++processed;
 
-        // Already filled (by an earlier update this same batch) or built
-        // over since this was queued — either way, nothing to do here.
-        if (get_block(update.x, update.y, update.z) != BlockType::Air) continue;
+        if (update.due_tick > fluid_tick || processed >= MAX_FLUID_UPDATES_PER_TICK) {
+            still_pending.push_back(update);
+            continue;
+        }
+        ++processed;
+        scheduled_fluid_cells.erase(fluid_key(update.x, update.y, update.z));
+
+        BlockType current = get_block(update.x, update.y, update.z);
+        if (current != BlockType::Water && current != BlockType::Air) continue; // solid now -- not our concern
 
         int chunk_x = floor_div(update.x, CHUNK_SIZE);
         int chunk_z = floor_div(update.z, CHUNK_SIZE);
         Chunk* chunk = chunk_at(chunk_x, chunk_z);
-        if (chunk == nullptr) continue; // unloaded since this was queued
+        if (chunk == nullptr) continue; // unloaded since this was scheduled
 
-        chunk->set_block(update.x - chunk_x * CHUNK_SIZE, update.y - MIN_WORLD_Y, update.z - chunk_z * CHUNK_SIZE, BlockType::Water);
+        int local_x = update.x - chunk_x * CHUNK_SIZE;
+        int local_y = update.y - MIN_WORLD_Y;
+        int local_z = update.z - chunk_z * CHUNK_SIZE;
+
+        // A SOURCE never changes -- it's the one level compute_fluid_level()
+        // is never asked to re-derive.
+        if (current == BlockType::Water && chunk->get_fluid_level(local_x, local_y, local_z) == FLUID_LEVEL_SOURCE) {
+            continue;
+        }
+
+        std::optional<uint8_t> new_level = compute_fluid_level(update.x, update.y, update.z);
+        bool changed = false;
+        if (new_level.has_value()) {
+            if (current != BlockType::Water || chunk->get_fluid_level(local_x, local_y, local_z) != *new_level) {
+                chunk->set_block(local_x, local_y, local_z, BlockType::Water);
+                chunk->set_fluid_level(local_x, local_y, local_z, *new_level);
+                changed = true;
+            }
+        } else if (current == BlockType::Water) {
+            // Nothing feeds this FLOWING/FALLING cell any more -- dry up.
+            chunk->set_block(local_x, local_y, local_z, BlockType::Air);
+            changed = true;
+        }
+
+        if (changed) {
+            chunk->mark_modified();
+            relit_chunks.insert(chunk_key(chunk_x, chunk_z));
+            mark_dirty(chunk_x, chunk_z);
+            schedule_fluid_neighbors(update.x, update.y, update.z);
+        }
+    }
+    pending_fluid_updates = std::move(still_pending);
+
+    for (int64_t key : relit_chunks) {
+        auto [cx, cz] = unpack_chunk_key(key);
+        Chunk* chunk = chunk_at(cx, cz);
+        if (chunk != nullptr) chunk->compute_lighting();
+    }
+    for (int64_t key : needs_mesh) {
+        auto [cx, cz] = unpack_chunk_key(key);
+        rebuild_mesh(cx, cz);
+    }
+}
+
+void World::schedule_falling_check(int x, int y, int z)
+{
+    BlockType type = get_block(x, y, z);
+    if (type != BlockType::Sand && type != BlockType::Gravel) return;
+
+    int64_t key = fluid_key(x, y, z); // same generic (x, y, z) packing the fluid system already uses
+    if (!scheduled_falling_cells.insert(key).second) return; // already pending
+    pending_falling_blocks.push_back({x, y, z});
+}
+
+void World::update_falling_blocks()
+{
+    if (pending_falling_blocks.empty()) return;
+
+    std::unordered_set<int64_t> relit_chunks;
+    std::unordered_set<int64_t> needs_mesh;
+    auto mark_dirty = [&needs_mesh](int chunk_x, int chunk_z) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            for (int dz = -1; dz <= 1; ++dz) {
+                needs_mesh.insert(chunk_key(chunk_x + dx, chunk_z + dz));
+            }
+        }
+    };
+
+    // Only entries already queued *before* this call started get resolved
+    // this tick (hence a fixed iteration count taken up front, not a
+    // while-loop draining the deque) — schedule_falling_check() below,
+    // called on a block right after it falls, queues its new position for
+    // the *next* update_falling_blocks() call, not this one. Without that
+    // distinction, a block would keep re-entering this same pass and fall
+    // its entire distance in a single tick instead of one cell at a time.
+    int initial_count = std::min(static_cast<int>(pending_falling_blocks.size()), MAX_FALLING_UPDATES_PER_TICK);
+    for (int i = 0; i < initial_count; ++i) {
+        std::array<int, 3> cell = pending_falling_blocks.front();
+        pending_falling_blocks.pop_front();
+
+        int x = cell[0], y = cell[1], z = cell[2];
+        scheduled_falling_cells.erase(fluid_key(x, y, z));
+
+        BlockType type = get_block(x, y, z);
+        if (type != BlockType::Sand && type != BlockType::Gravel) continue; // no longer relevant
+        if (y - 1 < MIN_WORLD_Y) continue; // already resting on the world floor (shouldn't happen given bedrock, but be safe)
+        if (get_block_properties(get_block(x, y - 1, z)).solid) continue; // already supported
+
+        int chunk_x = floor_div(x, CHUNK_SIZE);
+        int chunk_z = floor_div(z, CHUNK_SIZE);
+        Chunk* chunk = chunk_at(chunk_x, chunk_z);
+        if (chunk == nullptr) continue; // unloaded since this was scheduled
+
+        int local_x = x - chunk_x * CHUNK_SIZE;
+        int local_z = z - chunk_z * CHUNK_SIZE;
+        // Falls straight down within the same chunk column — no vertical
+        // chunk stacking, so both cells always share one chunk.
+        chunk->set_block(local_x, y - MIN_WORLD_Y, local_z, BlockType::Air);
+        chunk->set_block(local_x, (y - 1) - MIN_WORLD_Y, local_z, type);
         chunk->mark_modified();
         relit_chunks.insert(chunk_key(chunk_x, chunk_z));
         mark_dirty(chunk_x, chunk_z);
 
-        if (get_block(update.x, update.y - 1, update.z) == BlockType::Air) {
-            // Keep falling — waterfalls have no spread-distance limit.
-            pending_fluid_updates.push_back({update.x, update.y - 1, update.z, 0});
-        } else if (update.level < MAX_FLUID_SPREAD) {
-            // Can't fall any further here (solid ground, or already
-            // water) — spread sideways instead, one level further from
-            // whatever this water is resting against.
-            static constexpr int OFFSETS[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
-            for (const auto& offset : OFFSETS) {
-                int nx = update.x + offset[0];
-                int nz = update.z + offset[1];
-                if (get_block(nx, update.y, nz) == BlockType::Air) {
-                    pending_fluid_updates.push_back({nx, update.y, nz, update.level + 1});
-                }
-            }
-        }
+        // Whatever water this displaced (or is now newly adjacent to the
+        // cell it vacated) should react — same as real Minecraft, sand/
+        // gravel isn't stopped by water, it falls through and replaces it.
+        schedule_fluid_neighbors(x, y, z);
+        schedule_fluid_neighbors(x, y - 1, z);
+
+        // Keep falling next tick if still unsupported, and let whatever
+        // was resting on top of this block — if it's also Sand or Gravel —
+        // know it may have just lost its own support in turn.
+        schedule_falling_check(x, y - 1, z);
+        schedule_falling_check(x, y + 1, z);
     }
 
     for (int64_t key : relit_chunks) {
@@ -578,6 +734,58 @@ void World::update_chunk_states(Vector3 observer_position)
         auto [cx, cz] = unpack_chunk_key(key);
         rebuild_mesh(cx, cz);
     }
+}
+
+Vector3 World::find_spawn_position()
+{
+    // Cheap first (just a noise sample, no chunk needed): reject Sea/Ocean
+    // outright before ever generating anything for this candidate. Land
+    // covers roughly half the world, so this alone already succeeds on the
+    // very first or second ring tried in practice.
+    auto is_land = [this](int x, int z) {
+        Biome biome = get_biome(x, z);
+        return biome != Biome::Sea && biome != Biome::Ocean;
+    };
+
+    // Only once a candidate passes that check do we pay for generating its
+    // area, so this can actually confirm real, clear ground to stand on —
+    // not just "probably land" — before accepting it.
+    auto try_candidate = [this](int x, int z) -> std::optional<Vector3> {
+        update_chunk_states({static_cast<float>(x), 0.0f, static_cast<float>(z)});
+
+        for (int y = MIN_WORLD_Y + CHUNK_HEIGHT - 2; y >= MIN_WORLD_Y; --y) {
+            if (!get_block_properties(get_block(x, y, z)).solid) continue;
+            // Found the ground. Only actually a valid spawn if there's
+            // room to stand in above it — a beach column can dip just
+            // under a nearby Sea's water level despite reading as "land"
+            // by biome alone, and this rejects appearing submerged there.
+            if (get_block(x, y + 1, z) == BlockType::Air && get_block(x, y + 2, z) == BlockType::Air) {
+                return Vector3{x + 0.5f, static_cast<float>(y + 1), z + 0.5f};
+            }
+            return std::nullopt;
+        }
+        return std::nullopt; // no solid ground found in this column at all
+    };
+
+    constexpr int SEARCH_STEP = 8;
+    constexpr int MAX_SEARCH_RADIUS = 512;
+    if (is_land(0, 0)) {
+        if (auto spawn = try_candidate(0, 0)) return *spawn;
+    }
+    for (int radius = SEARCH_STEP; radius <= MAX_SEARCH_RADIUS; radius += SEARCH_STEP) {
+        for (int x = -radius; x <= radius; x += SEARCH_STEP) {
+            for (int z = -radius; z <= radius; z += SEARCH_STEP) {
+                if (std::max(std::abs(x), std::abs(z)) != radius) continue; // this ring's perimeter only
+                if (!is_land(x, z)) continue;
+                if (auto spawn = try_candidate(x, z)) return *spawn;
+            }
+        }
+    }
+
+    // Astronomically unlikely (would need no dry, clear land anywhere
+    // within 512 blocks of the origin) but still a definite Vector3
+    // rather than leaving the caller with nothing.
+    return {0.5f, 100.0f, 0.5f};
 }
 
 ChunkState World::desired_state_for(int chunk_x, int chunk_z, ChunkCoordinates observer_chunk) const

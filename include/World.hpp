@@ -4,6 +4,7 @@
 #include "Chunk.hpp"
 #include "core/Block.hpp"
 
+#include <array>
 #include <cstdint>
 #include <deque>
 #include <memory>
@@ -98,16 +99,23 @@ public:
     // chunk's lighting, then that chunk's mesh plus its up to 8 border
     // neighbors' meshes (their AO/smooth-lighting samples can reach one
     // cell into the chunk that just changed). No-op if there's no solid,
-    // in-range block there. Also queues this cell for water flow
-    // (queue_fluid_neighbors) if a neighboring block is Water — see
-    // update_fluids().
+    // in-range block there. Also schedules this cell and its neighbors for
+    // a fluid re-check (see update_fluids()) — removing a block can open a
+    // path for nearby water to flow into, or remove what was holding a
+    // flow up — and schedules the cell directly above for a falling-block
+    // check (see update_falling_blocks()), in case it was Sand or Gravel
+    // resting on what's now gone.
     void break_block(int x, int y, int z);
 
     // Places a block of the given type at the given world-space
     // coordinates, then relights/remeshes exactly like break_block() does.
     // No-op if that cell is out of range or already occupied by something
     // solid — placement only ever fills empty space, it doesn't replace an
-    // existing block.
+    // existing block. Also schedules a fluid re-check of the placed cell's
+    // neighbors — see break_block()/update_fluids() — and, if the placed
+    // block is itself Sand or Gravel, a falling-block check of its own
+    // cell (see update_falling_blocks()), in case it was placed over open
+    // space.
     void place_block(int x, int y, int z, BlockType type);
 
     // Brings every chunk within LOADED_RADIUS/ACTIVE_RADIUS chunks of
@@ -130,18 +138,46 @@ public:
     // needs to change to grow this into "one call per connected player".
     void update_chunk_states(Vector3 observer_position);
 
-    // Advances water flow: drains up to a bounded number of entries from
-    // the fluid-update queue break_block() seeds (see queue_fluid_
-    // neighbors()), each either falling a Water block into an empty cell
-    // below it or, once it can't fall any further, spreading it sideways
-    // up to MAX_FLUID_SPREAD blocks from whatever it's resting against —
-    // the same shape Minecraft's own water uses (fall first, spread only
-    // once blocked), just without persisting a per-block falloff level the
-    // way vanilla's block state does, since nothing here ever needs to ask
-    // "how far is this specific water block from its source" after the
-    // fact. Call once per tick (GameEngine::tick() does this, alongside
-    // update_chunk_states()); a no-op on a tick where nothing is queued.
+    // Finds a spawn point on dry land (never Sea or Ocean) with clear air
+    // above the ground for the player to actually appear in, instead of a
+    // fixed position that could just as easily land in open water or
+    // (now that the world has no fixed size or starting layout) even
+    // underground. Searches outward from world origin in expanding rings,
+    // generating whatever chunk a promising candidate needs (via
+    // update_chunk_states) to confirm it before accepting it. Practically
+    // always returns on the very first candidate or two — land covers
+    // roughly half the world — so this isn't the expensive search its
+    // worst case suggests.
+    Vector3 find_spawn_position();
+
+    // Advances water flow by one game tick, the same way real Minecraft
+    // paces it: a change (break_block/place_block, or a fluid cell that
+    // just changed) schedules its neighbors for re-evaluation a few ticks
+    // later (FLUID_TICK_DELAY, World.cpp) rather than resolving instantly,
+    // so a flood visibly advances outward over time instead of completing
+    // within one frame. Each due cell is recomputed from its current
+    // neighbors (compute_fluid_level) — a plain Air cell next to water
+    // becomes water at the right level, an existing FLOWING/FALLING cell
+    // whose feed disappeared dries back to Air, and a SOURCE never
+    // changes. Call once per tick (GameEngine::tick() does this, alongside
+    // update_chunk_states()); a no-op on a tick where nothing is due.
     void update_fluids();
+
+    // Advances Sand/Gravel gravity by one game tick, the same "schedule,
+    // don't resolve instantly" shape as update_fluids(): a change
+    // (break_block/place_block, or a block that just fell) schedules the
+    // relevant cell(s) for re-evaluation, and each due cell falls exactly
+    // one block (into whatever's below, water included — the same way
+    // real Minecraft's sand/gravel isn't stopped by water, it falls
+    // through and replaces it) if what's below still isn't solid, then
+    // re-schedules itself for the very next tick to keep falling, or does
+    // nothing once it lands. A steady one-block-per-tick fall instead of
+    // Minecraft's own accelerating one, since nothing here renders a
+    // falling block as its own mid-air entity the way vanilla does — it's
+    // just the static block moving one cell at a time. Call once per tick
+    // (GameEngine::tick() does this, alongside update_chunk_states()/
+    // update_fluids()); a no-op on a tick where nothing is due.
+    void update_falling_blocks();
 
 private:
     using ChunkMap = std::unordered_map<int64_t, std::unique_ptr<Chunk>>;
@@ -168,22 +204,54 @@ private:
     // No-op if there's no chunk at these coordinates.
     void set_block_and_rebuild(int x, int y, int z, BlockType type);
 
-    // One pending fluid_updates entry: a specific empty cell that a Water
-    // neighbor might flow into. `level` counts blocks of *sideways* spread
-    // from whatever this water is resting against (0 for a still-falling
-    // update, since falling never uses up spread distance) — see
-    // update_fluids().
-    struct FluidUpdate { int x, y, z, level; };
+    // What a fluid cell's level *should* be right now, purely as a function
+    // of its current neighbors — std::nullopt if nothing feeds it (it
+    // should be Air). Water directly above always wins (FLUID_LEVEL_
+    // FALLING); otherwise it's one more than the lowest effective level
+    // among the 4 horizontal neighbors that are Water (a SOURCE or FALLING
+    // neighbor counts as level 0 for this), capped at FLUID_LEVEL_MAX_FLOW.
+    // Never called for a cell that's itself a SOURCE — update_fluids()
+    // checks that first, since a source's level never changes.
+    std::optional<uint8_t> compute_fluid_level(int x, int y, int z) const;
 
-    // Seeded by break_block(): after removing a block, if any of its
-    // up-to-5 relevant neighbors (above, or one of the 4 sides — never
-    // below, water doesn't flow upward) is Water, queues the newly-emptied
-    // cell so update_fluids() picks it up on a later tick. No-op if no
-    // neighbor is Water — the overwhelmingly common case (breaking a block
-    // nowhere near water), so this stays cheap.
-    void queue_fluid_neighbors(int x, int y, int z);
+    // A pending re-evaluation of one cell, due once World's own fluid_tick
+    // (incremented once per update_fluids() call) reaches due_tick — see
+    // FLUID_TICK_DELAY.
+    struct PendingFluidUpdate { int x, y, z; uint64_t due_tick; };
 
-    std::deque<FluidUpdate> pending_fluid_updates;
+    // Schedules one cell for re-evaluation FLUID_TICK_DELAY ticks from now,
+    // unless it's already scheduled (scheduled_fluid_cells dedupes —
+    // update_fluids() itself re-schedules a change's neighbors every time
+    // it runs, so without this the queue would grow without bound for any
+    // long-lived flow).
+    void schedule_fluid_update(int x, int y, int z);
+
+    // schedule_fluid_update() on this cell and its 6 face neighbors —
+    // called on any block change that could affect nearby fluid state
+    // (break_block, place_block, or update_fluids() itself after a cell it
+    // resolved actually changed).
+    void schedule_fluid_neighbors(int x, int y, int z);
+
+    std::deque<PendingFluidUpdate> pending_fluid_updates;
+    std::unordered_set<int64_t> scheduled_fluid_cells; // packed (x,y,z) currently somewhere in pending_fluid_updates
+
+    // Ticks since this World was created, incremented once per
+    // update_fluids() call — its own clock rather than reusing GameEngine's
+    // game_tick, so break_block()/place_block() (called from per-frame
+    // input handling, not from a tick) can still schedule relative to
+    // "now" without World needing the exact tick count threaded in from
+    // outside.
+    uint64_t fluid_tick = 0;
+
+    // Schedules one cell for a falling-block check next tick, unless
+    // already scheduled — same dedup role as scheduled_fluid_cells. A
+    // no-op if this cell isn't currently Sand or Gravel, so callers
+    // (break_block, update_falling_blocks() itself) can call it on any
+    // cell without checking the block type first.
+    void schedule_falling_check(int x, int y, int z);
+
+    std::deque<std::array<int, 3>> pending_falling_blocks;
+    std::unordered_set<int64_t> scheduled_falling_cells; // packed (x,y,z) currently somewhere in pending_falling_blocks
 
     // --- Chunk state transitions (see update_chunk_states) ---
     //

@@ -18,6 +18,11 @@ namespace {
     constexpr float BREAK_REACH = 10.0f; // max block-breaking distance, in blocks
     constexpr float PLACE_REACH = 15.0f; // max block-placing distance, in blocks
 
+    // World::find_spawn_position() returns ground level (a standing
+    // player's feet) — this is how far above that the free-look camera's
+    // own position (its "eyes") sits, Minecraft's own player eye height.
+    constexpr float CAMERA_EYE_HEIGHT = 1.62f;
+
     // Minecraft's tick rate: game logic (once there is any beyond the
     // counter itself) runs at a fixed 20 steps per second, independent of
     // however fast frames are actually rendering.
@@ -101,20 +106,11 @@ GameEngine::GameEngine(int screen_width, int screen_height, const char* title)
     FontManager::get(); // load the game's text font up front, same reason
     load_chunk_shader(); // same reason
 
-    // World Generation has no fixed size any more (chunks stream in around
-    // wherever the camera is, out to World's WORLD_BORDER_BLOCKS) — start
-    // near world origin (0, 0), same as Minecraft's own spawn convention,
-    // above and back from it, looking down. The downward angle (~20 degrees
-    // below horizontal, from the position/target offsets below) is
-    // deliberately kept under half of fovy (30 degrees): if it weren't,
-    // every ray in the frustum would point below the horizon and the view
-    // would be 100% nearby ground with no sky at all — a mistake made and
-    // caught while tuning this for the game's much taller hills (see
-    // BASE_HEIGHT/HEIGHT_VARIATION in Chunk.cpp, world Y ~50..90; water at
-    // 64) — regardless of how far terrain is actually loaded/rendered out
-    // to.
-    camera.position = {0.0f, 110.0f, 110.0f};
-    camera.target = {0.0f, 70.0f, 0.0f};
+    // position/target are placeholders until set_world() actually has a
+    // World to find real ground in — everything else here doesn't depend
+    // on one.
+    camera.position = {0.0f, 100.0f, 0.0f};
+    camera.target = {0.0f, 100.0f, -1.0f};
     camera.up = {0.0f, 1.0f, 0.0f};
     camera.fovy = 60.0f;
     camera.projection = CAMERA_PERSPECTIVE;
@@ -139,10 +135,19 @@ void GameEngine::set_world(std::unique_ptr<World> new_world)
 {
     world = std::move(new_world);
     if (world) {
-        // Populate around the starting position immediately, rather than
-        // leaving the world empty for the handful of frames before
-        // tick_accumulator first reaches a full tick.
-        world->update_chunk_states(camera.position);
+        // On dry land, never Sea/Ocean, with clear air to actually appear
+        // in (find_spawn_position() itself generates whatever chunk it
+        // needs to confirm this, so the world's already populated around
+        // the result — no separate update_chunk_states() call needed here
+        // the way there used to be for the old fixed starting position).
+        camera.position = world->find_spawn_position();
+        camera.position.y += CAMERA_EYE_HEIGHT;
+        // North: -Z in this engine's convention (see Chunk.cpp's
+        // CUBE_FACES comment). Level, not angled down — the old downward
+        // tilt was there to see a bird's-eye view from high above the
+        // world; standing on real ground, a level look is the natural one.
+        camera.target = {camera.position.x, camera.position.y, camera.position.z - 10.0f};
+        spawn_settle_frames = 3; // see its own comment — 2 measured, +1 margin
     }
 }
 
@@ -156,6 +161,7 @@ void GameEngine::tick()
     if (world) {
         world->update_chunk_states(camera.position);
         world->update_fluids();
+        world->update_falling_blocks();
     }
 }
 
@@ -182,6 +188,12 @@ void GameEngine::update(float delta_time)
 
     Vector2 mouse_delta = GetMouseDelta();
     Vector3 rotation = {mouse_delta.x * CAMERA_MOUSE_SENSITIVITY, mouse_delta.y * CAMERA_MOUSE_SENSITIVITY, 0.0f};
+    if (spawn_settle_frames > 0) {
+        // See spawn_settle_frames's own comment: this delta might still be
+        // a spurious startup jump, not real player input.
+        rotation = {0.0f, 0.0f, 0.0f};
+        --spawn_settle_frames;
+    }
 
     UpdateCameraPro(&camera, movement, rotation, 0.0f);
 
