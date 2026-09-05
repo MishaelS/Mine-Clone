@@ -155,6 +155,7 @@ void GameEngine::tick()
     // here.
     if (world) {
         world->update_chunk_states(camera.position);
+        world->update_fluids();
     }
 }
 
@@ -216,10 +217,16 @@ void GameEngine::update(float delta_time)
     if (IsKeyPressed(KEY_F3)) {
         show_debug_overlay = !show_debug_overlay;
     }
+    if (IsKeyPressed(KEY_F4)) {
+        show_chunk_borders = !show_chunk_borders;
+    }
+    if (IsKeyPressed(KEY_F5)) {
+        show_wireframe = !show_wireframe;
+    }
 
     for (auto& object : objects) {
         if (object->is_active()) {
-            object->update(delta_time);
+            object->update(delta_time, world.get());
         }
     }
 }
@@ -232,7 +239,18 @@ void GameEngine::draw()
     BeginMode3D(camera);
     draw_skybox(camera.position);
     if (world) {
+        // Wireframe ("skeleton") debug view: draws the exact same chunk
+        // meshes, just as GL_LINE edges instead of filled/textured
+        // triangles — every block's own face boundaries end up visible,
+        // which is what actually reveals block positions/mesh structure,
+        // rather than a separate position-label overlay.
+        if (show_wireframe) rlEnableWireMode();
         world->draw(camera);
+        if (show_wireframe) rlDisableWireMode();
+
+        if (show_chunk_borders) {
+            world->draw_chunk_borders();
+        }
     }
     for (auto& object : objects) {
         if (object->is_active()) {

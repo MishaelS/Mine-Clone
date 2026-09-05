@@ -40,6 +40,8 @@ private:
     std::vector<std::unique_ptr<GameObject>> objects;
     std::unique_ptr<World> world;
     bool show_debug_overlay = false; // toggled by F3, Minecraft-style
+    bool show_chunk_borders = false; // toggled by F4 — World::draw_chunk_borders()
+    bool show_wireframe = false;     // toggled by F5 — wireframe chunk meshes instead of textured, for inspecting mesh/culling
     float camera_move_speed;         // world units/second; mouse wheel adjusts this
 
     // Fixed-timestep accumulator (see run()): seconds of real frame time not

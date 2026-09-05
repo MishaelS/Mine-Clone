@@ -10,7 +10,7 @@ namespace {
 
 Player::Player(Vector3 position) : Entity(position) {}
 
-void Player::update(float deltaTime)
+void Player::update(float deltaTime, const World* world)
 {
     // World axes: X/Z is the ground plane, Y is up. W/S move along Z, A/D along X.
     Vector3 direction = {0.0f, 0.0f, 0.0f};
@@ -26,7 +26,7 @@ void Player::update(float deltaTime)
     }
 
     set_velocity({direction.x * PLAYER_SPEED, 0.0f, direction.z * PLAYER_SPEED});
-    Entity::update(deltaTime);
+    Entity::update(deltaTime, world);
 }
 
 void Player::draw() const

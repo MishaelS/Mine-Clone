@@ -20,33 +20,33 @@
             "name"       : "sand",
             "solid"      : true,
             "transparent": false,
-            "top"        : { "x": 3, "y": 1 },
-            "bottom"     : { "x": 3, "y": 1 },
-            "side"       : { "x": 3, "y": 1 }
+            "top"        : { "x": 2, "y": 1 },
+            "bottom"     : { "x": 2, "y": 1 },
+            "side"       : { "x": 2, "y": 1 }
         },
         {
             "name"       : "gravel",
             "solid"      : true,
             "transparent": false,
-            "top"        : { "x": 4, "y": 1 },
-            "bottom"     : { "x": 4, "y": 1 },
-            "side"       : { "x": 4, "y": 1 }
+            "top"        : { "x": 3, "y": 1 },
+            "bottom"     : { "x": 3, "y": 1 },
+            "side"       : { "x": 3, "y": 1 }
         },
         {
             "name"       : "oak_log",
             "solid"      : true,
             "transparent": false,
-            "top"        : { "x": 6, "y": 1 },
-            "bottom"     : { "x": 6, "y": 1 },
+            "top"        : { "x": 4, "y": 1 },
+            "bottom"     : { "x": 4, "y": 1 },
             "side"       : { "x": 5, "y": 1 }
         },
         {
             "name"       : "oak_planks",
             "solid"      : true,
             "transparent": false,
-            "top"        : { "x": 5, "y": 0 },
-            "bottom"     : { "x": 5, "y": 0 },
-            "side"       : { "x": 5, "y": 0 }
+            "top"        : { "x": 4, "y": 0 },
+            "bottom"     : { "x": 4, "y": 0 },
+            "side"       : { "x": 4, "y": 0 }
         },
         {
             "name"       : "stone",

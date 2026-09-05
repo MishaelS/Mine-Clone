@@ -33,6 +33,15 @@ namespace {
     // coordinate) as Minecraft's own sea level.
     constexpr int WATER_LEVEL = 64 - MIN_WORLD_Y;
 
+    // Still water's top face sits slightly below a full block's own top,
+    // same as real Minecraft (14/16 tall, i.e. 2/16 below the top) — applied
+    // in append_face() via its top_drop parameter, only to the block's
+    // upward-facing corners (see there), so this doesn't touch the actual
+    // block grid Chunk::get_block/is_opaque/collision reasoning uses: a
+    // water "block" still logically fills its full cell, only the rendered
+    // mesh is shorter.
+    constexpr float WATER_SURFACE_DROP = 2.0f / 16.0f;
+
     // Per-biome terrain shape and surface/subsurface blocks — the same
     // overall column structure (bedrock, subsurface, surface, water/air)
     // for every biome, just with each biome's own numbers and blocks
@@ -40,33 +49,119 @@ namespace {
     // look (surface blocks) and a characteristic terrain shape rather than
     // just a color. Deliberately gentler than modern Minecraft's Extreme
     // Hills (Beta 1.7.3 predates that terrain rework) — even Hills here
-    // stays well short of dramatic cliffs.
+    // stays well short of dramatic cliffs. base_height/height_variation
+    // aren't used directly any more (see generate_terrain: every biome's
+    // numbers are blended by BiomeWeights instead of picking just one) —
+    // surface_block/subsurface_block/surface_depth still are, for whichever
+    // biome ends up dominant at a given column.
     struct BiomeTerrain {
         int base_height;             // local; see the comment above on the +64 offset
         int height_variation;        // +/- around base_height (an amplitude, not itself a height — no offset needed)
+        int surface_depth;           // layers of subsurface_block just under the surface block
         BlockType surface_block;     // the single block at the very top of the column
-        BlockType subsurface_block;  // SURFACE_DEPTH layers of this just under the surface block
+        BlockType subsurface_block;
     };
 
-    constexpr int SURFACE_DEPTH = 3; // layers of subsurface_block just under the surface block
+    constexpr int DEFAULT_SURFACE_DEPTH = 3;
 
     BiomeTerrain biome_terrain(Biome biome) {
         switch (biome) {
+            case Biome::Ocean:
+                // Deep and mostly flat — world Y ~10..30, i.e. up to ~54
+                // blocks below sea level (64) at its deepest, so there's
+                // real deep water for World::draw's underwater fog override
+                // to darken toward at its own deepest (see
+                // UNDERWATER_FOG_MAX_DEPTH in World.cpp). Gravel throughout,
+                // same as Sea's own floor (see the "дно" requirement) — the
+                // difference between the two is depth and beach material,
+                // not the floor itself.
+                return {20 - MIN_WORLD_Y, 10, 4, BlockType::Gravel, BlockType::Gravel};
+            case Biome::Sea:
+                // Shallow and calm — world Y ~56..64, mostly right at sea
+                // level, so land slopes gently down into it (see the beach
+                // override in generate_terrain for the actual shoreline
+                // strip) instead of dropping to Ocean's deep floor.
+                return {60 - MIN_WORLD_Y, 4, 3, BlockType::Gravel, BlockType::Gravel};
             case Biome::Desert:
-                // Flat and dry — world Y ~56..68, mostly right around sea level.
-                return {62 - MIN_WORLD_Y, 6, BlockType::Sand, BlockType::Sand};
+                // Flat and dry, with deeper sand than other biomes' subsurface
+                // layer before hitting stone — world Y ~56..68, mostly right
+                // around sea level.
+                return {62 - MIN_WORLD_Y, 6, 6, BlockType::Sand, BlockType::Sand};
             case Biome::Forest:
                 // Noticeably hillier than Plains but not dramatic — world Y ~54..90.
-                return {72 - MIN_WORLD_Y, 18, BlockType::Grass, BlockType::Dirt};
+                return {72 - MIN_WORLD_Y, 18, DEFAULT_SURFACE_DEPTH, BlockType::Grass, BlockType::Dirt};
             case Biome::Hills:
-                // The roughest terrain this generates — world Y ~54..106 — but
-                // still gentle by modern-Minecraft standards, on purpose.
-                return {80 - MIN_WORLD_Y, 26, BlockType::Grass, BlockType::Dirt};
+                // The roughest terrain this generates — world Y ~50..114 —
+                // but still gentle by modern-Minecraft standards, on purpose.
+                // Its tallest peaks break through HILLS_STONE_LINE into bare
+                // stone (see generate_terrain), so surface_block here only
+                // actually shows up below that line.
+                return {82 - MIN_WORLD_Y, 32, DEFAULT_SURFACE_DEPTH, BlockType::Grass, BlockType::Dirt};
             case Biome::Plains:
             default:
                 // The gentlest biome — world Y ~58..78.
-                return {68 - MIN_WORLD_Y, 10, BlockType::Grass, BlockType::Dirt};
+                return {68 - MIN_WORLD_Y, 10, DEFAULT_SURFACE_DEPTH, BlockType::Grass, BlockType::Dirt};
         }
+    }
+
+    // Above this world height, Hills' surface turns to bare stone instead
+    // of grass/dirt — a simple tree-line/rocky-peak effect for its tallest
+    // terrain, the one place this generator lets a biome's own surface
+    // block depend on height rather than purely on position.
+    constexpr int HILLS_STONE_LINE = 95 - MIN_WORLD_Y;
+
+    // Rivers: TerrainNoise::river() is an ordinary noise field (roughly
+    // [-1, 1]) — wherever its *absolute value* drops under RIVER_WIDTH, the
+    // blended height above is pulled down toward RIVER_BED, tracing that
+    // field's zero-contour the way a real river winds rather than running
+    // straight. RIVER_WIDTH is in noise units, not blocks — TerrainNoise's
+    // own RIVER_FREQUENCY is what actually sets the width in blocks.
+    constexpr float RIVER_WIDTH = 0.04f;
+    constexpr int RIVER_BED = WATER_LEVEL - 3; // a few blocks under sea level, so a river reliably fills with water
+
+    // Beach: land within a few blocks of sea level, close enough to Sea or
+    // Ocean to notice, gets a shoreline material instead of its own
+    // biome's usual surface block — sand for a calm Sea coastline, gravel
+    // for a "wild" Ocean one with no Sea buffer, matching how the two
+    // differ everywhere else (Sea = calm/sandy, Ocean = deep/rocky).
+    constexpr int BEACH_HEIGHT_ABOVE_WATER = 3;
+    constexpr float BEACH_COAST_WEIGHT = 0.05f; // how much Sea+Ocean weight counts as "close enough" to be a coast
+
+    // Grass top tint per biome — same idea as Minecraft's own per-biome
+    // grass color, applied here since the block's own texture tile is a
+    // deliberately colorless overlay (see blocks.json's grass "color").
+    // Forest and Hills deliberately share the same, slightly darker green;
+    // Plains reads noticeably lighter. Desert/Ocean/Sea never generate a
+    // Grass block at all, so they don't need their own tint.
+    constexpr Color PLAINS_GRASS_TINT = {180, 220, 130, 255};
+    constexpr Color FOREST_GRASS_TINT = {124, 189, 107, 255}; // also Hills
+
+    // Blends the two grass tints above by how much Plains vs. Forest/Hills
+    // influence this column, so a border between them fades the color
+    // gradually instead of switching at whichever point dominant_biome()
+    // happens to flip — the same idea as blending terrain height itself.
+    // Desert/Ocean/Sea weight is deliberately excluded from the average
+    // (rather than fading grass toward some meaningless "tint" for sand or
+    // water): those biomes just don't produce a Grass block, so whatever
+    // this returns for a fully-desert/ocean/sea column is never actually
+    // used.
+    Color grass_tint_for_weights(const BiomeWeights& weights) {
+        float grass_total = weights.plains + weights.forest + weights.hills;
+        if (grass_total < 0.0001f) {
+            return FOREST_GRASS_TINT;
+        }
+        float plains_share = weights.plains / grass_total;
+        float forest_share = 1.0f - plains_share; // forest + hills, same tint
+        auto blend = [&](unsigned char plains_channel, unsigned char forest_channel) {
+            return static_cast<unsigned char>(std::lround(
+                plains_share * plains_channel + forest_share * forest_channel));
+        };
+        return {
+            blend(PLAINS_GRASS_TINT.r, FOREST_GRASS_TINT.r),
+            blend(PLAINS_GRASS_TINT.g, FOREST_GRASS_TINT.g),
+            blend(PLAINS_GRASS_TINT.b, FOREST_GRASS_TINT.b),
+            255,
+        };
     }
 
     // AO level (0..3, from vertex_ao) -> brightness multiplier.
@@ -224,9 +319,18 @@ namespace {
     // split for a Mesh's plain (non-quad) triangle list. `tint` (typically
     // WHITE) is multiplied into each vertex color alongside AO/light
     // brightness — see BlockProperties::texture_tints for why a face would
-    // ever need anything other than white.
-    void append_face(MeshData& mesh_data, const Face& face, Vector3 center, Rectangle uv, const float brightness[4], Color tint) {
+    // ever need anything other than white. `top_drop` lowers this face's own
+    // upward-facing corners (any corner at local y > 0, i.e. Top's own 4
+    // corners, or a side face's top edge — never Bottom's, which are all at
+    // y < 0) by that many world units — see WATER_SURFACE_DROP, the only
+    // current caller that passes anything other than the default 0.
+    void append_face(MeshData& mesh_data, const Face& face, Vector3 center, Rectangle uv, const float brightness[4], Color tint, float top_drop = 0.0f) {
         Vector3 corners[4] = {face.v1, face.v2, face.v3, face.v4};
+        if (top_drop != 0.0f) {
+            for (Vector3& corner : corners) {
+                if (corner.y > 0.0f) corner.y -= top_drop;
+            }
+        }
         // V=0 is the image's top row (raylib doesn't flip on load), so the
         // top edge of the face (corners 0, 1) must sample V=0, not V=1.
         float u[4] = {uv.x,              uv.x + uv.width, uv.x + uv.width, uv.x};
@@ -311,6 +415,19 @@ void set_chunk_fog(Vector3 camera_position, Color fog_color, float fog_start, fl
     SetShaderValue(chunk_shader, end_loc, &fog_end, SHADER_UNIFORM_FLOAT);
 }
 
+void set_chunk_water_time(float time)
+{
+    static int time_loc = GetShaderLocation(chunk_shader, "waterTime");
+    SetShaderValue(chunk_shader, time_loc, &time, SHADER_UNIFORM_FLOAT);
+}
+
+void set_chunk_water_pass(bool active)
+{
+    static int water_pass_loc = GetShaderLocation(chunk_shader, "isWaterPass");
+    int value = active ? 1 : 0; // GLSL bool uniforms are set as int from the C++ side
+    SetShaderValue(chunk_shader, water_pass_loc, &value, SHADER_UNIFORM_INT);
+}
+
 void unload_chunk_fog_shader()
 {
     UnloadShader(chunk_shader);
@@ -345,14 +462,81 @@ void Chunk::generate_terrain(const TerrainNoise& noise)
             float world_x = origin.x + x;
             float world_z = origin.z + z;
 
-            // Biome first (Beta 1.7.3-style: a function of position alone,
-            // not of the terrain height about to be generated), then that
-            // biome's own height range shapes this column.
-            BiomeTerrain terrain = biome_terrain(noise.biome(world_x, world_z));
+            // Biome weights first (Beta 1.7.3-style: a function of position
+            // alone, not of the terrain height about to be generated) —
+            // every biome's own height range/amplitude is blended by these
+            // instead of picking just one, so crossing a border changes
+            // terrain gradually instead of at a seam.
+            BiomeWeights weights = noise.biome_weights(world_x, world_z);
+            Biome dominant = dominant_biome(weights);
+            column_grass_tint[z * CHUNK_SIZE + x] = grass_tint_for_weights(weights);
+
+            BiomeTerrain plains = biome_terrain(Biome::Plains);
+            BiomeTerrain forest = biome_terrain(Biome::Forest);
+            BiomeTerrain desert = biome_terrain(Biome::Desert);
+            BiomeTerrain hills  = biome_terrain(Biome::Hills);
+            BiomeTerrain ocean  = biome_terrain(Biome::Ocean);
+            BiomeTerrain sea    = biome_terrain(Biome::Sea);
+
+            float base_height = weights.plains * plains.base_height
+                               + weights.forest * forest.base_height
+                               + weights.desert * desert.base_height
+                               + weights.hills  * hills.base_height
+                               + weights.ocean  * ocean.base_height
+                               + weights.sea    * sea.base_height;
+            float height_variation = weights.plains * plains.height_variation
+                                    + weights.forest * forest.height_variation
+                                    + weights.desert * desert.height_variation
+                                    + weights.hills  * hills.height_variation
+                                    + weights.ocean  * ocean.height_variation
+                                    + weights.sea    * sea.height_variation;
 
             float sample = noise.height(world_x * NOISE_FREQUENCY, world_z * NOISE_FREQUENCY, NOISE_OCTAVES);
-            int height = terrain.base_height + static_cast<int>(std::lround(sample * terrain.height_variation));
-            height = std::clamp(height, 1, CHUNK_HEIGHT - 1);
+            float height_f = base_height + sample * height_variation;
+
+            // Rivers: pull the blended height above down toward RIVER_BED
+            // wherever the river noise is close to 0, smoothly (so its
+            // banks slope into it instead of a sudden drop) — near a Desert
+            // border (weights.desert neither ~0 nor ~1), so rivers
+            // specifically cut through arid land rather than appearing
+            // between every pair of biomes, and also near any Sea/Ocean
+            // coastline, so a river that reaches the coast keeps carving
+            // smoothly into it instead of stopping dead right at the
+            // shoreline — the same noise field's course now visibly empties
+            // into the sea instead of vanishing at the biome border.
+            bool near_desert_border = weights.desert > 0.1f && weights.desert < 0.9f;
+            bool near_coast = (weights.sea + weights.ocean) > BEACH_COAST_WEIGHT;
+            if (near_desert_border || near_coast) {
+                float river_distance = std::fabs(noise.river(world_x, world_z));
+                float carve = std::clamp(1.0f - river_distance / RIVER_WIDTH, 0.0f, 1.0f);
+                height_f = height_f * (1.0f - carve) + RIVER_BED * carve;
+            }
+
+            int height = std::clamp(static_cast<int>(std::lround(height_f)), 1, CHUNK_HEIGHT - 1);
+
+            // The dominant biome's own surface blocks — except Hills, whose
+            // tallest peaks break through the tree line into bare stone
+            // regardless of what biome_terrain() would otherwise say.
+            BiomeTerrain terrain = biome_terrain(dominant);
+            BlockType surface_block = terrain.surface_block;
+            BlockType subsurface_block = terrain.subsurface_block;
+            if (dominant == Biome::Hills && height > HILLS_STONE_LINE) {
+                surface_block = BlockType::Stone;
+                subsurface_block = BlockType::Stone;
+            }
+
+            // Beach: a shallow shelf of land right at a Sea/Ocean coastline
+            // gets a shoreline material instead of whatever its own land
+            // biome would otherwise put there (grass, etc.) — sand for a
+            // calm Sea coastline, gravel for a "wild" Ocean one. Only
+            // applies on the land side (Sea/Ocean columns already get
+            // their own gravel floor from biome_terrain() above).
+            bool is_land = dominant != Biome::Sea && dominant != Biome::Ocean;
+            if (is_land && near_coast && height <= WATER_LEVEL + BEACH_HEIGHT_ABOVE_WATER) {
+                bool wild_coast = weights.ocean > weights.sea;
+                surface_block = wild_coast ? BlockType::Gravel : BlockType::Sand;
+                subsurface_block = surface_block;
+            }
 
             // Everything past this column's own content is already Air
             // (blocks.fill(BlockType::Air) in the constructor), so the loop
@@ -369,9 +553,9 @@ void Chunk::generate_terrain(const TerrainNoise& noise)
                 } else if (y > height) {
                     type = BlockType::Water; // the underwater gap up to sea level
                 } else if (y == height) {
-                    type = terrain.surface_block;
-                } else if (y > height - SURFACE_DEPTH) {
-                    type = terrain.subsurface_block;
+                    type = surface_block;
+                } else if (y > height - terrain.surface_depth) {
+                    type = subsurface_block;
                 } else {
                     type = BlockType::Stone;
                 }
@@ -594,6 +778,17 @@ void Chunk::build_mesh(const Chunk* west, const Chunk* east, const Chunk* north,
                 const BlockProperties& properties = get_block_properties(type);
                 MeshData& mesh_data = properties.translucent ? water_data : opaque_data;
 
+                // Water-only: a block with Water directly above it is
+                // interior to a body of water, not its surface (and its Top
+                // face is never actually meshed anyway — same-translucent-
+                // type culling below skips it) — only a true surface block
+                // gets the lowered top geometry (top_drop, WATER_SURFACE_
+                // DROP) real still water has in Minecraft.
+                float top_drop = 0.0f;
+                if (type == BlockType::Water && neighbor_block(x, y + 1, z) != BlockType::Water) {
+                    top_drop = WATER_SURFACE_DROP;
+                }
+
                 for (int face = 0; face < 6; ++face) {
                     const Face& f = CUBE_FACES[face];
 
@@ -621,7 +816,22 @@ void Chunk::build_mesh(const Chunk* west, const Chunk* east, const Chunk* north,
                         float light_fraction = vertex_light(nb, x, y, z, f.normal, corners[i]);
                         brightness[i] = AO_BRIGHTNESS[ao] * light_fraction;
                     }
-                    append_face(mesh_data, f, center, properties.texture_uvs[face], brightness, properties.texture_tints[face]);
+
+                    // A grass top's tint depends on this column's own blend
+                    // of biomes (column_grass_tint, precomputed in
+                    // generate_terrain) instead of the one fixed color
+                    // blocks.json's texture_tints would give every Grass
+                    // block regardless of where it is. Water's own tint
+                    // deliberately does *not* vary with depth the same way
+                    // — it stays blocks.json's one plain color everywhere,
+                    // same as real Minecraft's water surface; depth instead
+                    // darkens *visibility* (World::draw's underwater fog
+                    // override, set_chunk_fog), not the water block itself.
+                    Color tint = properties.texture_tints[face];
+                    if (type == BlockType::Grass && face == static_cast<int>(BlockFace::Top)) {
+                        tint = column_grass_tint[z * CHUNK_SIZE + x];
+                    }
+                    append_face(mesh_data, f, center, properties.texture_uvs[face], brightness, tint, top_drop);
                 }
             }
         }

@@ -5,6 +5,7 @@
 #include "core/Block.hpp"
 
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -44,6 +45,15 @@ public:
     // cutoff where they'd just pop out of existence.
     void draw(const Camera3D& camera) const;
 
+    // Debug aid: a wireframe box around every currently-loaded chunk's full
+    // column (CHUNK_SIZE x CHUNK_HEIGHT x CHUNK_SIZE), so the chunk grid
+    // itself is visible regardless of terrain — toggled by GameEngine's F4.
+    // Draws every loaded chunk, not just draw()'s own visible/culled set:
+    // there are few enough of them (bounded by LOADED_RADIUS) that skipping
+    // the cull is simpler and the cost difference isn't worth the extra
+    // bookkeeping for a debug-only feature.
+    void draw_chunk_borders() const;
+
     // World-space (not chunk-local) block coordinates. Out-of-range (either
     // past the edge of the generated world, or above/below a chunk's own
     // height — there's no vertical chunk stacking yet) reads as Air.
@@ -65,6 +75,14 @@ public:
     // there to be loaded at all.
     Biome get_biome(int x, int z) const;
 
+    // std::nullopt if `position` isn't inside a Water block; otherwise how
+    // many more Water blocks sit directly above it before the water body
+    // ends (0 = already the topmost, i.e. right under the surface) — for
+    // effects that scale with submersion depth rather than treating
+    // "underwater" as all-or-nothing: the camera's own underwater screen
+    // tint (GameEngine) and Entity's water-drag movement slowdown.
+    std::optional<int> water_depth_at(Vector3 position) const;
+
     // A solid block hit by a ray, found by stepping through the voxel grid
     // one cell at a time (Amanatides & Woo traversal) rather than sampling
     // at fixed intervals, so a fast-moving thin ray can't tunnel through a
@@ -80,7 +98,9 @@ public:
     // chunk's lighting, then that chunk's mesh plus its up to 8 border
     // neighbors' meshes (their AO/smooth-lighting samples can reach one
     // cell into the chunk that just changed). No-op if there's no solid,
-    // in-range block there.
+    // in-range block there. Also queues this cell for water flow
+    // (queue_fluid_neighbors) if a neighboring block is Water — see
+    // update_fluids().
     void break_block(int x, int y, int z);
 
     // Places a block of the given type at the given world-space
@@ -110,6 +130,19 @@ public:
     // needs to change to grow this into "one call per connected player".
     void update_chunk_states(Vector3 observer_position);
 
+    // Advances water flow: drains up to a bounded number of entries from
+    // the fluid-update queue break_block() seeds (see queue_fluid_
+    // neighbors()), each either falling a Water block into an empty cell
+    // below it or, once it can't fall any further, spreading it sideways
+    // up to MAX_FLUID_SPREAD blocks from whatever it's resting against —
+    // the same shape Minecraft's own water uses (fall first, spread only
+    // once blocked), just without persisting a per-block falloff level the
+    // way vanilla's block state does, since nothing here ever needs to ask
+    // "how far is this specific water block from its source" after the
+    // fact. Call once per tick (GameEngine::tick() does this, alongside
+    // update_chunk_states()); a no-op on a tick where nothing is queued.
+    void update_fluids();
+
 private:
     using ChunkMap = std::unordered_map<int64_t, std::unique_ptr<Chunk>>;
 
@@ -134,6 +167,23 @@ private:
     // its chunk modified, and relights/remeshes that chunk's neighborhood.
     // No-op if there's no chunk at these coordinates.
     void set_block_and_rebuild(int x, int y, int z, BlockType type);
+
+    // One pending fluid_updates entry: a specific empty cell that a Water
+    // neighbor might flow into. `level` counts blocks of *sideways* spread
+    // from whatever this water is resting against (0 for a still-falling
+    // update, since falling never uses up spread distance) — see
+    // update_fluids().
+    struct FluidUpdate { int x, y, z, level; };
+
+    // Seeded by break_block(): after removing a block, if any of its
+    // up-to-5 relevant neighbors (above, or one of the 4 sides — never
+    // below, water doesn't flow upward) is Water, queues the newly-emptied
+    // cell so update_fluids() picks it up on a later tick. No-op if no
+    // neighbor is Water — the overwhelmingly common case (breaking a block
+    // nowhere near water), so this stays cheap.
+    void queue_fluid_neighbors(int x, int y, int z);
+
+    std::deque<FluidUpdate> pending_fluid_updates;
 
     // --- Chunk state transitions (see update_chunk_states) ---
     //

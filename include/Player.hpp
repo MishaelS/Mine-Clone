@@ -7,6 +7,6 @@ class Player : public Entity {
 public:
     explicit Player(Vector3 position);
 
-    void update(float delta_time) override;
+    void update(float delta_time, const World* world) override;
     void draw() const override;
 };

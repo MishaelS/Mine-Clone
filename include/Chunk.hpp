@@ -61,6 +61,21 @@ void load_chunk_shader();
 // instead of a hard cutoff where chunks just stop being drawn.
 void set_chunk_fog(Vector3 camera_position, Color fog_color, float fog_start, float fog_end);
 
+// Feeds the water shader's own animation its clock — call once per frame
+// (World::draw() does this, same as set_chunk_fog()) with seconds since
+// startup (or any other steadily-increasing time source); drives the
+// scrolling-texel flow effect in assets/shaders/chunk.fs, active only
+// while isWaterPass is true (see set_chunk_water_pass()).
+void set_chunk_water_time(float time);
+
+// Toggles the water shader's animation on/off — true right before
+// Chunk::draw_water() draws anything, false again right after, since
+// every chunk's opaque and water mesh share this one Material/shader (see
+// get_chunk_material() in Chunk.cpp) and the animation must only affect
+// the water pass, not every other block's texture too. World::draw() is
+// the only caller.
+void set_chunk_water_pass(bool active);
+
 // Frees the shader set_chunk_fog()/every Chunk's mesh material shares.
 // Call once before CloseWindow() — unlike the plain-texture default
 // material this replaced, it isn't a raylib-internal resource freed
@@ -163,6 +178,17 @@ private:
     // Packed per-cell light: upper nibble = sky light, lower nibble = block
     // light, each 0-15.
     std::array<uint8_t, CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE> light{};
+
+    // Grass top tint for each (x, z) column, blended across every grass-
+    // bearing biome's own tint by that column's BiomeWeights when
+    // generate_terrain() ran — a smooth gradient instead of a hard color
+    // switch at a biome border, the same way terrain height itself blends.
+    // Recomputing this from noise again at mesh-build time would work just
+    // as well, but this is a 256-entry lookup instead of another noise
+    // sample per grass-top face. build_mesh() uses it in place of the one
+    // fixed color a normal block's texture_tints would give every instance
+    // of Grass.
+    std::array<Color, CHUNK_SIZE * CHUNK_SIZE> column_grass_tint{};
 
     // Highest Y with a non-Air block anywhere in this chunk (generation
     // tracks it; set_block() only ever raises it, never lowers it — cheap

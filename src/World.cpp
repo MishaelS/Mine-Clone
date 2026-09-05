@@ -38,6 +38,23 @@ namespace {
     constexpr int LOADED_RADIUS = 8;
     constexpr int ACTIVE_RADIUS = 4;
 
+    // Water flow (World::update_fluids/queue_fluid_neighbors): how far
+    // (in blocks) flowing water spreads sideways from whatever it's
+    // resting against before stopping, matching classic Minecraft's own
+    // water spread distance. Falling water (straight down into an empty
+    // cell) isn't limited by this at all — only sideways spread is.
+    constexpr int MAX_FLUID_SPREAD = 7;
+
+    // Caps how many queued fluid cells update_fluids() resolves in a
+    // single tick — the same "spiral of death" caution MAX_TICKS_PER_FRAME
+    // uses elsewhere (GameEngine.cpp), here against a large flood (e.g.
+    // breaking a wall that was holding back an entire lake) turning one
+    // tick into a multi-chunk remesh storm. The rest of the queue simply
+    // waits for later ticks instead — a big flood visibly spreads over a
+    // couple of seconds rather than all at once, which reads as more
+    // water-like anyway.
+    constexpr int MAX_FLUID_UPDATES_PER_TICK = 64;
+
     // Fog (see World::draw/set_chunk_fog) fully hides everything by
     // FOG_END_FRACTION of LOADED_RADIUS's own distance, not right at it —
     // so a chunk unloading at the render-distance edge does so already
@@ -46,6 +63,26 @@ namespace {
     // ramping in at FOG_END_FRACTION*FOG_START_FRACTION of LOADED_RADIUS.
     constexpr float FOG_END_FRACTION = 0.8f;
     constexpr float FOG_START_FRACTION = 0.5f;
+
+    // Underwater fog: real Minecraft doesn't darken the water block's own
+    // surface color by depth (it stays one plain color everywhere) —
+    // instead, whenever the *camera's* eye is inside a fluid, it swaps in a
+    // much shorter, fluid-colored fog in place of the normal render-
+    // distance one, so visibility itself is what gets worse, not the
+    // water's own paint job. World::draw does the same swap here whenever
+    // water_depth_at(camera.position) says the camera is submerged, using
+    // that same depth to pick how short/dark the fog gets: barely
+    // submerged is still fairly clear (UNDERWATER_FOG_END_SHALLOW),
+    // deepening toward UNDERWATER_FOG_END_DEEP/UNDERWATER_FOG_COLOR_DEEP by
+    // UNDERWATER_FOG_MAX_DEPTH blocks down. fogStart is a small fraction of
+    // fogEnd rather than 0 outright, so the blend into fog isn't a visible
+    // hard edge right at the near plane.
+    constexpr float UNDERWATER_FOG_START_FRACTION = 0.1f;
+    constexpr float UNDERWATER_FOG_END_SHALLOW = 20.0f;
+    constexpr float UNDERWATER_FOG_END_DEEP = 6.0f;
+    constexpr Color UNDERWATER_FOG_COLOR_SHALLOW = {40, 90, 160, 255};
+    constexpr Color UNDERWATER_FOG_COLOR_DEEP = {5, 15, 35, 255};
+    constexpr int UNDERWATER_FOG_MAX_DEPTH = 24; // matches Ocean's own depth range, see Chunk.cpp's biome_terrain
 
     // Chunks within this many blocks of the camera are always drawn — the
     // view-cone test below approximates visibility by angle alone, which
@@ -106,6 +143,10 @@ namespace {
     int chebyshev_distance(int ax, int az, int bx, int bz) {
         return std::max(std::abs(ax - bx), std::abs(az - bz));
     }
+
+    // draw_chunk_borders(): magenta doesn't occur naturally in terrain, so
+    // it reads clearly as a debug overlay against any biome.
+    constexpr Color CHUNK_BORDER_COLOR = {255, 0, 255, 255};
 }
 
 World::World(uint32_t seed)
@@ -159,9 +200,23 @@ void World::rebuild_mesh_neighborhood(int chunk_x, int chunk_z)
 
 void World::draw(const Camera3D& camera) const
 {
-    float fog_end = LOADED_RADIUS * CHUNK_SIZE * FOG_END_FRACTION;
-    float fog_start = fog_end * FOG_START_FRACTION;
-    set_chunk_fog(camera.position, skybox_horizon_color(), fog_start, fog_end);
+    float fog_end, fog_start;
+    Color fog_color;
+    if (auto depth = water_depth_at(camera.position)) {
+        // Submerged: swap in underwater fog (see UNDERWATER_FOG_* above)
+        // instead of the normal render-distance one — real Minecraft's own
+        // approach, rather than darkening the water block's own color.
+        float t = std::clamp(static_cast<float>(*depth) / UNDERWATER_FOG_MAX_DEPTH, 0.0f, 1.0f);
+        fog_end = UNDERWATER_FOG_END_SHALLOW + (UNDERWATER_FOG_END_DEEP - UNDERWATER_FOG_END_SHALLOW) * t;
+        fog_start = fog_end * UNDERWATER_FOG_START_FRACTION;
+        fog_color = ColorLerp(UNDERWATER_FOG_COLOR_SHALLOW, UNDERWATER_FOG_COLOR_DEEP, t);
+    } else {
+        fog_end = LOADED_RADIUS * CHUNK_SIZE * FOG_END_FRACTION;
+        fog_start = fog_end * FOG_START_FRACTION;
+        fog_color = skybox_horizon_color();
+    }
+    set_chunk_fog(camera.position, fog_color, fog_start, fog_end);
+    set_chunk_water_time(static_cast<float>(GetTime()));
 
     Vector3 forward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
 
@@ -176,6 +231,7 @@ void World::draw(const Camera3D& camera) const
     // geometry anywhere — alpha blending needs to composite over the
     // finished opaque picture, not however opaque and translucent chunks
     // would otherwise interleave by draw order alone.
+    set_chunk_water_pass(false);
     for (const Chunk* chunk : visible) {
         chunk->draw();
     }
@@ -185,14 +241,36 @@ void World::draw(const Camera3D& camera) const
     // overlapping translucent surfaces aren't sorted against each other
     // this way, which can look slightly off at some angles, but that's the
     // same trade-off most simple voxel renderers make instead of full
-    // per-triangle transparency sorting.
+    // per-triangle transparency sorting. Backface culling is off for this
+    // pass specifically: a water top face's winding only faces up, so
+    // without this, looking at it from *underneath* (submerged, looking up
+    // toward the surface) would cull it away entirely and let the raw sky
+    // show through unobstructed and unfogged — breaking the enclosed,
+    // foggy underwater look this is all for in the first place.
     BeginBlendMode(BLEND_ALPHA);
     rlDisableDepthMask();
+    rlDisableBackfaceCulling();
+    set_chunk_water_pass(true);
     for (const Chunk* chunk : visible) {
         chunk->draw_water();
     }
+    set_chunk_water_pass(false);
+    rlEnableBackfaceCulling();
     rlEnableDepthMask();
     EndBlendMode();
+}
+
+void World::draw_chunk_borders() const
+{
+    for (const auto& [key, chunk] : chunks) {
+        Vector3 min_corner = chunk->get_position();
+        Vector3 center = {
+            min_corner.x + CHUNK_SIZE / 2.0f,
+            min_corner.y + CHUNK_HEIGHT / 2.0f,
+            min_corner.z + CHUNK_SIZE / 2.0f,
+        };
+        DrawCubeWires(center, static_cast<float>(CHUNK_SIZE), static_cast<float>(CHUNK_HEIGHT), static_cast<float>(CHUNK_SIZE), CHUNK_BORDER_COLOR);
+    }
 }
 
 BlockType World::get_block(int x, int y, int z) const
@@ -300,6 +378,7 @@ void World::break_block(int x, int y, int z)
 {
     if (!get_block_properties(get_block(x, y, z)).solid) return; // nothing there to break
     set_block_and_rebuild(x, y, z, BlockType::Air);
+    queue_fluid_neighbors(x, y, z);
 }
 
 void World::place_block(int x, int y, int z, BlockType type)
@@ -324,6 +403,107 @@ void World::set_block_and_rebuild(int x, int y, int z, BlockType type)
     chunk->compute_lighting();
 
     rebuild_mesh_neighborhood(chunk_x, chunk_z);
+}
+
+void World::queue_fluid_neighbors(int x, int y, int z)
+{
+    // Water directly above falls into the new gap — takes priority over
+    // (and, since it'll re-check its own neighbors once it lands, makes
+    // redundant) spreading sideways from any water beside this cell too.
+    if (get_block(x, y + 1, z) == BlockType::Water) {
+        pending_fluid_updates.push_back({x, y, z, 0});
+        return;
+    }
+
+    static constexpr int OFFSETS[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+    for (const auto& offset : OFFSETS) {
+        if (get_block(x + offset[0], y, z + offset[1]) == BlockType::Water) {
+            // One queued entry is enough regardless of how many of the 4
+            // sides actually have water — update_fluids() re-derives the
+            // full spread from this cell once it's filled.
+            pending_fluid_updates.push_back({x, y, z, 1});
+            return;
+        }
+    }
+}
+
+void World::update_fluids()
+{
+    if (pending_fluid_updates.empty()) return;
+
+    // Same batching idea as update_chunk_states(): a chunk relit/remeshed
+    // once per unique chunk this tick's updates actually touched, not once
+    // per individual block change — a flood filling a dozen cells in the
+    // same chunk shouldn't relight or remesh it a dozen times over.
+    std::unordered_set<int64_t> relit_chunks;
+    std::unordered_set<int64_t> needs_mesh;
+    auto mark_dirty = [&needs_mesh](int chunk_x, int chunk_z) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            for (int dz = -1; dz <= 1; ++dz) {
+                needs_mesh.insert(chunk_key(chunk_x + dx, chunk_z + dz));
+            }
+        }
+    };
+
+    int processed = 0;
+    while (processed < MAX_FLUID_UPDATES_PER_TICK && !pending_fluid_updates.empty()) {
+        FluidUpdate update = pending_fluid_updates.front();
+        pending_fluid_updates.pop_front();
+        ++processed;
+
+        // Already filled (by an earlier update this same batch) or built
+        // over since this was queued — either way, nothing to do here.
+        if (get_block(update.x, update.y, update.z) != BlockType::Air) continue;
+
+        int chunk_x = floor_div(update.x, CHUNK_SIZE);
+        int chunk_z = floor_div(update.z, CHUNK_SIZE);
+        Chunk* chunk = chunk_at(chunk_x, chunk_z);
+        if (chunk == nullptr) continue; // unloaded since this was queued
+
+        chunk->set_block(update.x - chunk_x * CHUNK_SIZE, update.y - MIN_WORLD_Y, update.z - chunk_z * CHUNK_SIZE, BlockType::Water);
+        chunk->mark_modified();
+        relit_chunks.insert(chunk_key(chunk_x, chunk_z));
+        mark_dirty(chunk_x, chunk_z);
+
+        if (get_block(update.x, update.y - 1, update.z) == BlockType::Air) {
+            // Keep falling — waterfalls have no spread-distance limit.
+            pending_fluid_updates.push_back({update.x, update.y - 1, update.z, 0});
+        } else if (update.level < MAX_FLUID_SPREAD) {
+            // Can't fall any further here (solid ground, or already
+            // water) — spread sideways instead, one level further from
+            // whatever this water is resting against.
+            static constexpr int OFFSETS[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+            for (const auto& offset : OFFSETS) {
+                int nx = update.x + offset[0];
+                int nz = update.z + offset[1];
+                if (get_block(nx, update.y, nz) == BlockType::Air) {
+                    pending_fluid_updates.push_back({nx, update.y, nz, update.level + 1});
+                }
+            }
+        }
+    }
+
+    for (int64_t key : relit_chunks) {
+        auto [cx, cz] = unpack_chunk_key(key);
+        Chunk* chunk = chunk_at(cx, cz);
+        if (chunk != nullptr) chunk->compute_lighting();
+    }
+    for (int64_t key : needs_mesh) {
+        auto [cx, cz] = unpack_chunk_key(key);
+        rebuild_mesh(cx, cz);
+    }
+}
+
+std::optional<int> World::water_depth_at(Vector3 position) const
+{
+    int x = static_cast<int>(std::floor(position.x));
+    int y = static_cast<int>(std::floor(position.y));
+    int z = static_cast<int>(std::floor(position.z));
+    if (get_block(x, y, z) != BlockType::Water) return std::nullopt;
+
+    int depth = 0;
+    while (get_block(x, y + depth + 1, z) == BlockType::Water) ++depth;
+    return depth;
 }
 
 void World::update_chunk_states(Vector3 observer_position)
