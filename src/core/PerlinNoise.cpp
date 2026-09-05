@@ -13,6 +13,22 @@ PerlinNoise::PerlinNoise(uint32_t seed)
 {
     perlin = FastNoise::New<FastNoise::Perlin>();
 
+    // FastNoise2's Perlin is a ScalableGenerator: it silently divides every
+    // input coordinate by its own "feature scale" (default 100, i.e. an
+    // extra hidden x0.01 on frequency) before sampling — on top of whatever
+    // frequency noise()/fractal()'s own caller already multiplied in.
+    // Locking scale to 1 here makes this node do no scaling of its own, so
+    // noise()/fractal()'s `x`/`y` are the only place frequency is
+    // controlled, matching what every caller in this project already
+    // assumes. Found by chasing a real bug: World Generation's biome
+    // temperature/humidity noise (sampled with noise(), not fractal())
+    // came back nearly constant (+/-0.007 instead of the expected +/-1)
+    // because of this — terrain height (sampled with fractal(), whose
+    // source is this same node) was silently affected the exact same way,
+    // just harder to notice since a ~100x-too-large wavelength still looks
+    // like a plausible, if very gentle, slope within one loaded area.
+    perlin->SetScale(1.0f);
+
     fractal_node = FastNoise::New<FastNoise::FractalFBm>();
     fractal_node->SetSource(perlin);
     fractal_node->SetLacunarity(LACUNARITY);

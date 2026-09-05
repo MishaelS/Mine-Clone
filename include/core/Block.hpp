@@ -47,6 +47,16 @@ struct BlockProperties {
     bool transparent;  // doesn't block light or occlude neighbors (air, later: glass/water)
     int  luminance;    // 0-15, block light emitted by this block (0 = none)
 
+    // Drawn in its own pass, after every opaque block in the whole world,
+    // with alpha blending on and depth *write* off (still depth *tested*,
+    // so solid terrain in front of it still correctly hides it) — see
+    // Chunk::build_mesh/draw_water() and World::draw(). Also changes face
+    // culling: two adjacent blocks of the same translucent type (e.g. two
+    // water blocks) don't draw the face between them, same as Minecraft
+    // doesn't render the water-water (or glass-glass) boundary inside a
+    // solid body of it — only transparent-to-different-block boundaries do.
+    bool translucent;
+
     // UV rectangle (0..1) within get_block_atlas_texture(), indexed by
     // BlockFace — every block's faces share one atlas texture, so a whole
     // chunk mesh draws with a single bound texture.

@@ -36,6 +36,8 @@ add_executable(${PROJECT_NAME}
     src/core/TextureManager.cpp
     src/core/FontManager.cpp
     src/core/PerlinNoise.cpp
+    src/core/TerrainNoise.cpp
+    src/core/Biome.cpp
 )
 target_include_directories(${PROJECT_NAME} PRIVATE include)
 target_link_libraries(${PROJECT_NAME} PRIVATE raylib FastNoise)

@@ -71,3 +71,8 @@ void draw_skybox(Vector3 camera_position)
     rlEnableDepthTest();
     rlEnableBackfaceCulling();
 }
+
+Color skybox_horizon_color()
+{
+    return HORIZON_COLOR;
+}

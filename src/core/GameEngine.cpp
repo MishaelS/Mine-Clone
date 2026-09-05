@@ -99,6 +99,7 @@ GameEngine::GameEngine(int screen_width, int screen_height, const char* title)
     SetTargetFPS(60);
     Load_block_definitions(); // needs a GL context, so only after InitWindow
     FontManager::get(); // load the game's text font up front, same reason
+    load_chunk_shader(); // same reason
 
     // World Generation has no fixed size any more (chunks stream in around
     // wherever the camera is, out to World's WORLD_BORDER_BLOCKS) — start
@@ -125,6 +126,7 @@ GameEngine::~GameEngine()
     EnableCursor();
     TextureManager::unload_all();
     FontManager::unload();
+    unload_chunk_fog_shader();
     CloseWindow();
 }
 
@@ -230,7 +232,7 @@ void GameEngine::draw()
     BeginMode3D(camera);
     draw_skybox(camera.position);
     if (world) {
-        world->draw();
+        world->draw(camera);
     }
     for (auto& object : objects) {
         if (object->is_active()) {

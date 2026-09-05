@@ -7,7 +7,7 @@
 #include <array>
 #include <cstdint>
 
-class PerlinNoise;
+class TerrainNoise;
 
 constexpr int CHUNK_SIZE = 16;    // width/depth (X/Z) — chunks are still only streamed in the X/Z grid (World::update_chunk_states), no vertical stacking
 constexpr int CHUNK_HEIGHT = 384; // Y — a single chunk spans the whole world height, Minecraft 1.18+'s build limit (-64..319)
@@ -42,6 +42,31 @@ enum class ChunkState : uint8_t {
     Active,
 };
 
+// Compiles assets/shaders/chunk.{vs,fs} — raylib's own default mesh shader
+// (texture*vertexColor, so AO/tint already baked into vertex colors by
+// Chunk::build_mesh keeps working unchanged) plus linear distance fog.
+// Every chunk's mesh material (get_chunk_material() in Chunk.cpp) uses this
+// one shared shader. Call once, after the window exists (needs a GL
+// context) — GameEngine's constructor does this alongside
+// Load_block_definitions()/FontManager::get().
+void load_chunk_shader();
+
+// Configures every chunk's shared atlas material for distance fog — call
+// once per frame (World::draw() does this) before any Chunk::draw(), since
+// camera_position changes every frame. Fragments at or past fog_end fade
+// fully to fog_color; fragments before fog_start are unaffected; a linear
+// ramp fills the gap between them (world units from the camera). fog_color
+// should match the skybox's own horizon color (skybox_horizon_color(),
+// Skybox.hpp) so the render-distance edge reads as fading into the sky
+// instead of a hard cutoff where chunks just stop being drawn.
+void set_chunk_fog(Vector3 camera_position, Color fog_color, float fog_start, float fog_end);
+
+// Frees the shader set_chunk_fog()/every Chunk's mesh material shares.
+// Call once before CloseWindow() — unlike the plain-texture default
+// material this replaced, it isn't a raylib-internal resource freed
+// automatically by CloseWindow()'s own cleanup.
+void unload_chunk_fog_shader();
+
 // A CHUNK_SIZE x CHUNK_HEIGHT x CHUNK_SIZE grid of blocks, positioned in the
 // world by WorldObject's position (its min corner, not its center). Block
 // data builds into a single GPU mesh (build_mesh()) with hidden faces culled
@@ -56,11 +81,12 @@ public:
     Chunk(const Chunk&) = delete;
     Chunk& operator=(const Chunk&) = delete;
 
-    // Fills the chunk with terrain: a Perlin-noise height per (x, z) column,
-    // stone below it, a few layers of dirt near the surface, grass on top,
-    // and bedrock at y=0. `noise` is sampled at this chunk's world-space X/Z
-    // so terrain height is continuous across chunk borders.
-    void generate_terrain(const PerlinNoise& noise);
+    // Fills the chunk with terrain: a biome per (x, z) column (TerrainNoise's
+    // temperature/humidity layers), that biome's own height range and
+    // surface/subsurface blocks, stone below that, and bedrock at y=0.
+    // `noise` is sampled at this chunk's world-space X/Z so both terrain
+    // height and biome are continuous across chunk borders.
+    void generate_terrain(const TerrainNoise& noise);
 
     // Full sky+block light recompute via BFS flood fill. Call after the block
     // layout is set. Incremental (BFS-from-the-change-only) updates for
@@ -84,7 +110,18 @@ public:
                      const Chunk* northwest, const Chunk* northeast,
                      const Chunk* southwest, const Chunk* southeast);
 
+    // Draws this chunk's opaque geometry (everything except translucent
+    // blocks like water — see draw_water()).
     void draw() const override;
+
+    // Draws this chunk's translucent geometry (water — see
+    // BlockProperties::translucent) — a separate mesh from draw()'s, built
+    // by the same build_mesh() call. World::draw() calls this in its own
+    // pass, after every chunk's draw() (opaque geometry world-wide) and
+    // with alpha blending enabled, so translucent faces correctly blend
+    // over everything solid instead of however they'd happen to interleave
+    // with it by draw order alone.
+    void draw_water() const;
 
     BlockType get_block(int x, int y, int z) const;
     void set_block(int x, int y, int z, BlockType type);
@@ -141,6 +178,11 @@ private:
     // vertexCount == 0 (and mesh_uploaded == false) until build_mesh() runs.
     Mesh mesh{};
     bool mesh_uploaded = false;
+
+    // Translucent geometry (water), built and drawn separately from `mesh`
+    // — see draw_water().
+    Mesh water_mesh{};
+    bool water_mesh_uploaded = false;
 
     // A live Chunk is always at least Loaded (see ChunkState) — Unloaded is
     // never stored, only reported by World for a coordinate with no Chunk.

@@ -10,7 +10,8 @@
 #include <unordered_map>
 #include <unordered_set>
 
-class PerlinNoise;
+class TerrainNoise;
+enum class Biome : uint8_t;
 
 // Owns every currently-loaded chunk in the world (streamed in/out around an
 // observer position, see update_chunk_states — nothing is loaded up front,
@@ -29,13 +30,19 @@ public:
     explicit World(uint32_t seed);
 
     // Declared (and defined in World.cpp) even though it's just =default:
-    // terrain_noise is a unique_ptr<PerlinNoise> with PerlinNoise only
+    // terrain_noise is a unique_ptr<TerrainNoise> with TerrainNoise only
     // forward-declared here, and the implicit destructor the compiler would
     // otherwise generate at every World-destroying call site needs
-    // PerlinNoise's full definition to know how to delete it.
+    // TerrainNoise's full definition to know how to delete it.
     ~World();
 
-    void draw() const;
+    // Draws every loaded chunk that's actually in view: skips anything the
+    // camera clearly isn't looking toward (an approximate cone test, not
+    // exact frustum culling — see the .cpp), and fades chunks near
+    // LOADED_RADIUS's own edge into the sky (World's own distance fog, see
+    // set_chunk_fog in Chunk.hpp) instead of drawing right up to a hard
+    // cutoff where they'd just pop out of existence.
+    void draw(const Camera3D& camera) const;
 
     // World-space (not chunk-local) block coordinates. Out-of-range (either
     // past the edge of the generated world, or above/below a chunk's own
@@ -51,6 +58,12 @@ public:
     // chunk is actually loaded.
     struct ChunkCoordinates { int x, z; };
     ChunkCoordinates chunk_coordinates(int x, int z) const;
+
+    // Which biome a world-space (x, z) falls in — for the debug overlay.
+    // Pure function of position (TerrainNoise's temperature/humidity
+    // layers), so unlike get_block()/get_light() this doesn't need a chunk
+    // there to be loaded at all.
+    Biome get_biome(int x, int z) const;
 
     // A solid block hit by a ray, found by stepping through the voxel grid
     // one cell at a time (Amanatides & Woo traversal) rather than sampling
@@ -143,7 +156,7 @@ private:
     // edits are lost once it unloads.
     void unload_chunk(int chunk_x, int chunk_z);
 
-    std::unique_ptr<PerlinNoise> terrain_noise;
+    std::unique_ptr<TerrainNoise> terrain_noise;
     ChunkMap chunks;
 
     // Which chunk update_chunk_states() last computed states around, so it

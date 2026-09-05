@@ -42,6 +42,10 @@ namespace {
 
     // One face's texture: which terrain.png tile, and the tint to multiply
     // into it (WHITE — i.e. no change — unless blocks.json gives a "color").
+    // tint.a is this face's opacity for translucent blocks (see
+    // BlockProperties::translucent) — 255 (fully opaque) unless blocks.json
+    // gives a 4th "color" component; meaningless for an opaque block, which
+    // never blends.
     struct FaceTexture {
         Rectangle uv;
         Color tint;
@@ -59,6 +63,9 @@ namespace {
                 tint.r = static_cast<unsigned char>(components[0].as_number(255.0));
                 tint.g = static_cast<unsigned char>(components[1].as_number(255.0));
                 tint.b = static_cast<unsigned char>(components[2].as_number(255.0));
+            }
+            if (components.size() >= 4) {
+                tint.a = static_cast<unsigned char>(components[3].as_number(255.0));
             }
         }
 
@@ -87,7 +94,7 @@ namespace {
 void Load_block_definitions()
 {
     // Air: never drawn, so its texture slots are left unused.
-    block_table[static_cast<uint8_t>(BlockType::Air)] = {false, true, 0, {}, {}};
+    block_table[static_cast<uint8_t>(BlockType::Air)] = {false, true, 0, false, {}, {}};
     block_names[static_cast<uint8_t>(BlockType::Air)] = "air";
 
     block_atlas_texture = &TextureManager::get(TERRAIN_TEXTURE_PATH);
@@ -113,6 +120,7 @@ void Load_block_definitions()
         BlockProperties properties;
         properties.solid = entry["solid"].as_bool(true);
         properties.transparent = entry["transparent"].as_bool(false);
+        properties.translucent = entry["translucent"].as_bool(false);
         properties.luminance = static_cast<int>(entry["luminance"].as_number(0.0));
         // Order: Top, Bottom, North, South, East, West.
         properties.texture_uvs[0] = top.uv;

@@ -1,5 +1,5 @@
 #include "Chunk.hpp"
-#include "core/PerlinNoise.hpp"
+#include "core/TerrainNoise.hpp"
 
 #include "raymath.h"
 
@@ -15,22 +15,59 @@ namespace {
     constexpr float HALF = 0.5f;
 
     // Terrain shape: a wavelength-~96-block rolling hill signal, layered 4
-    // octaves deep for detail, mapped onto a height band centered on
-    // BASE_HEIGHT (comfortably inside the chunk's own local 0..CHUNK_HEIGHT-1
-    // column). Chunk stays plainly 0-based internally (see MIN_WORLD_Y in
-    // Chunk.hpp) — these are LOCAL heights, offset by -MIN_WORLD_Y (+64)
-    // from the world-space heights they're meant to represent, so e.g.
-    // BASE_HEIGHT here means world Y ~70, not local Y 70.
+    // octaves deep for detail (Beta 1.7.3-style layering: this is itself a
+    // sum of multiple noise octaves, then World Generation layers biome
+    // selection — a whole separate pair of noise maps, see TerrainNoise —
+    // on top of that). Mapped onto a height band centered on each biome's
+    // own BASE_HEIGHT (comfortably inside the chunk's own local
+    // 0..CHUNK_HEIGHT-1 column). Chunk stays plainly 0-based internally
+    // (see MIN_WORLD_Y in Chunk.hpp) — BiomeTerrain's heights below are
+    // LOCAL, offset by -MIN_WORLD_Y (+64) from the world-space heights
+    // they're meant to represent, so e.g. a base_height of 6 there means
+    // world Y ~70, not local Y 70.
     constexpr float NOISE_FREQUENCY = 1.0f / 96.0f;
     constexpr int NOISE_OCTAVES = 4;
-    constexpr int BASE_HEIGHT = 70 - MIN_WORLD_Y;       // world Y ~70, just above sea level, so most terrain is dry land
-    constexpr int HEIGHT_VARIATION = 20;                // +/- around BASE_HEIGHT -> world Y roughly 50..90 (amplitude, not itself a height, needs no offset)
-    constexpr int DIRT_DEPTH = 3;                       // layers of dirt just under the grass top
 
     // Sea level: any column whose terrain height falls below this fills the
     // gap with water up to it. World Y 64, same idea (and the same absolute
     // coordinate) as Minecraft's own sea level.
     constexpr int WATER_LEVEL = 64 - MIN_WORLD_Y;
+
+    // Per-biome terrain shape and surface/subsurface blocks — the same
+    // overall column structure (bedrock, subsurface, surface, water/air)
+    // for every biome, just with each biome's own numbers and blocks
+    // dropped in, matching Beta 1.7.3's approach of biomes carrying both a
+    // look (surface blocks) and a characteristic terrain shape rather than
+    // just a color. Deliberately gentler than modern Minecraft's Extreme
+    // Hills (Beta 1.7.3 predates that terrain rework) — even Hills here
+    // stays well short of dramatic cliffs.
+    struct BiomeTerrain {
+        int base_height;             // local; see the comment above on the +64 offset
+        int height_variation;        // +/- around base_height (an amplitude, not itself a height — no offset needed)
+        BlockType surface_block;     // the single block at the very top of the column
+        BlockType subsurface_block;  // SURFACE_DEPTH layers of this just under the surface block
+    };
+
+    constexpr int SURFACE_DEPTH = 3; // layers of subsurface_block just under the surface block
+
+    BiomeTerrain biome_terrain(Biome biome) {
+        switch (biome) {
+            case Biome::Desert:
+                // Flat and dry — world Y ~56..68, mostly right around sea level.
+                return {62 - MIN_WORLD_Y, 6, BlockType::Sand, BlockType::Sand};
+            case Biome::Forest:
+                // Noticeably hillier than Plains but not dramatic — world Y ~54..90.
+                return {72 - MIN_WORLD_Y, 18, BlockType::Grass, BlockType::Dirt};
+            case Biome::Hills:
+                // The roughest terrain this generates — world Y ~54..106 — but
+                // still gentle by modern-Minecraft standards, on purpose.
+                return {80 - MIN_WORLD_Y, 26, BlockType::Grass, BlockType::Dirt};
+            case Biome::Plains:
+            default:
+                // The gentlest biome — world Y ~58..78.
+                return {68 - MIN_WORLD_Y, 10, BlockType::Grass, BlockType::Dirt};
+        }
+    }
 
     // AO level (0..3, from vertex_ao) -> brightness multiplier.
     constexpr float AO_BRIGHTNESS[4] = {0.5f, 0.65f, 0.8f, 1.0f};
@@ -211,9 +248,21 @@ namespace {
             mesh_data.colors.push_back(static_cast<unsigned char>(brightness[corner] * tint.r));
             mesh_data.colors.push_back(static_cast<unsigned char>(brightness[corner] * tint.g));
             mesh_data.colors.push_back(static_cast<unsigned char>(brightness[corner] * tint.b));
-            mesh_data.colors.push_back(255);
+            // Not scaled by brightness, unlike the color channels — alpha is
+            // this face's opacity (see BlockProperties::translucent), not
+            // part of its shading.
+            mesh_data.colors.push_back(tint.a);
         }
     }
+
+    // Loaded once by load_chunk_shader() (called from GameEngine's
+    // constructor, alongside Load_block_definitions()/FontManager::get()) —
+    // not lazily, so it's clear from the startup sequence exactly when the
+    // GL context it needs is required to already exist, same as those.
+    // assets/shaders/chunk.{vs,fs}: raylib's own default mesh shader
+    // (texture*vertexColor, so AO/tint already baked into vertex colors by
+    // Chunk::build_mesh keeps working unchanged) plus linear distance fog.
+    Shader chunk_shader{};
 
     // Every chunk's mesh samples the same block texture atlas, so they all
     // share one Material — built lazily so it's only touched once
@@ -222,6 +271,7 @@ namespace {
         static Material material = [] {
             Material m = LoadMaterialDefault();
             SetMaterialTexture(&m, MATERIAL_MAP_DIFFUSE, get_block_atlas_texture());
+            m.shader = chunk_shader;
             return m;
         }();
         return material;
@@ -236,6 +286,34 @@ namespace {
         std::memcpy(buffer, data.data(), data.size() * sizeof(T));
         return buffer;
     }
+}
+
+void load_chunk_shader()
+{
+    chunk_shader = LoadShader(ASSETS_PATH "shaders/chunk.vs", ASSETS_PATH "shaders/chunk.fs");
+}
+
+void set_chunk_fog(Vector3 camera_position, Color fog_color, float fog_start, float fog_end)
+{
+    // Looked up by name once, not on every call — GetShaderLocation() does
+    // a string lookup each time, wasted work for a location that never
+    // moves once the shader's compiled.
+    static int camera_loc = GetShaderLocation(chunk_shader, "cameraPosition");
+    static int color_loc  = GetShaderLocation(chunk_shader, "fogColor");
+    static int start_loc  = GetShaderLocation(chunk_shader, "fogStart");
+    static int end_loc    = GetShaderLocation(chunk_shader, "fogEnd");
+
+    SetShaderValue(chunk_shader, camera_loc, &camera_position, SHADER_UNIFORM_VEC3);
+
+    float color[3] = {fog_color.r / 255.0f, fog_color.g / 255.0f, fog_color.b / 255.0f};
+    SetShaderValue(chunk_shader, color_loc, color, SHADER_UNIFORM_VEC3);
+    SetShaderValue(chunk_shader, start_loc, &fog_start, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(chunk_shader, end_loc, &fog_end, SHADER_UNIFORM_FLOAT);
+}
+
+void unload_chunk_fog_shader()
+{
+    UnloadShader(chunk_shader);
 }
 
 int Chunk::index(int x, int y, int z)
@@ -253,9 +331,12 @@ Chunk::~Chunk()
     if (mesh_uploaded) {
         UnloadMesh(mesh);
     }
+    if (water_mesh_uploaded) {
+        UnloadMesh(water_mesh);
+    }
 }
 
-void Chunk::generate_terrain(const PerlinNoise& noise)
+void Chunk::generate_terrain(const TerrainNoise& noise)
 {
     Vector3 origin = get_position();
 
@@ -263,9 +344,14 @@ void Chunk::generate_terrain(const PerlinNoise& noise)
         for (int z = 0; z < CHUNK_SIZE; ++z) {
             float world_x = origin.x + x;
             float world_z = origin.z + z;
-            float sample = noise.fractal(world_x * NOISE_FREQUENCY, world_z * NOISE_FREQUENCY, NOISE_OCTAVES);
 
-            int height = BASE_HEIGHT + static_cast<int>(std::lround(sample * HEIGHT_VARIATION));
+            // Biome first (Beta 1.7.3-style: a function of position alone,
+            // not of the terrain height about to be generated), then that
+            // biome's own height range shapes this column.
+            BiomeTerrain terrain = biome_terrain(noise.biome(world_x, world_z));
+
+            float sample = noise.height(world_x * NOISE_FREQUENCY, world_z * NOISE_FREQUENCY, NOISE_OCTAVES);
+            int height = terrain.base_height + static_cast<int>(std::lround(sample * terrain.height_variation));
             height = std::clamp(height, 1, CHUNK_HEIGHT - 1);
 
             // Everything past this column's own content is already Air
@@ -283,9 +369,9 @@ void Chunk::generate_terrain(const PerlinNoise& noise)
                 } else if (y > height) {
                     type = BlockType::Water; // the underwater gap up to sea level
                 } else if (y == height) {
-                    type = BlockType::Grass;
-                } else if (y > height - DIRT_DEPTH) {
-                    type = BlockType::Dirt;
+                    type = terrain.surface_block;
+                } else if (y > height - SURFACE_DEPTH) {
+                    type = terrain.subsurface_block;
                 } else {
                     type = BlockType::Stone;
                 }
@@ -459,30 +545,37 @@ void Chunk::build_mesh(const Chunk* west, const Chunk* east, const Chunk* north,
         mesh = Mesh{};
         mesh_uploaded = false;
     }
+    if (water_mesh_uploaded) {
+        UnloadMesh(water_mesh);
+        water_mesh = Mesh{};
+        water_mesh_uploaded = false;
+    }
 
-    MeshData mesh_data;
+    // Built up separately since they're drawn separately — see draw_water().
+    MeshData opaque_data;
+    MeshData water_data;
     Neighborhood nb{this, west, east, north, south, northwest, northeast, southwest, southeast};
 
-    // Like is_opaque(), but a coordinate that steps outside this chunk's own
-    // 0..CHUNK_SIZE-1 range is looked up in the appropriate neighbor instead
-    // of being treated as open — that neighbor's own block data has already
-    // been generated by the time build_mesh() runs. A null neighbor (the
-    // edge of the world) still counts as open, same as before. A face's own
-    // normal only ever steps one axis at a time, so the diagonal neighbors
-    // in `nb` never come into play here (they matter for vertex_ao/
-    // vertex_light below, whose corner samples can step two axes at once).
-    auto neighbor_opaque = [&](int x, int y, int z) {
-        if (y < 0 || y >= CHUNK_HEIGHT) return false; // above/below the world, not a neighbor chunk
+    // A coordinate that steps outside this chunk's own 0..CHUNK_SIZE-1 range
+    // is looked up in the appropriate neighbor instead of being treated as
+    // open — that neighbor's own block data has already been generated by
+    // the time build_mesh() runs. A null neighbor (the edge of the world),
+    // same as stepping above/below the world on Y, reads as Air. A face's
+    // own normal only ever steps one axis at a time, so the diagonal
+    // neighbors in `nb` never come into play here (they matter for
+    // vertex_ao/vertex_light below, whose corner samples can step two axes
+    // at once).
+    auto neighbor_block = [&](int x, int y, int z) {
+        if (y < 0 || y >= CHUNK_HEIGHT) return BlockType::Air; // above/below the world, not a neighbor chunk
 
         const Chunk* neighbor = nullptr;
         if (x < 0)              { neighbor = west;  x += CHUNK_SIZE; }
         else if (x >= CHUNK_SIZE) { neighbor = east;  x -= CHUNK_SIZE; }
         else if (z < 0)          { neighbor = north; z += CHUNK_SIZE; }
         else if (z >= CHUNK_SIZE) { neighbor = south; z -= CHUNK_SIZE; }
-        else return is_opaque(x, y, z); // still inside this chunk
+        else return get_block(x, y, z); // still inside this chunk
 
-        if (neighbor == nullptr) return false;
-        return !get_block_properties(neighbor->get_block(x, y, z)).transparent;
+        return neighbor == nullptr ? BlockType::Air : neighbor->get_block(x, y, z);
     };
 
     // Bounded to highest_block_y, not CHUNK_HEIGHT: everything above it is
@@ -499,16 +592,27 @@ void Chunk::build_mesh(const Chunk* west, const Chunk* east, const Chunk* north,
                 Vector3 center = {x + 0.5f, y + 0.5f, z + 0.5f};
 
                 const BlockProperties& properties = get_block_properties(type);
+                MeshData& mesh_data = properties.translucent ? water_data : opaque_data;
+
                 for (int face = 0; face < 6; ++face) {
                     const Face& f = CUBE_FACES[face];
 
-                    // Hidden-face culling: a face whose neighbor is opaque
-                    // can never be seen, so it's left out of the mesh
-                    // entirely rather than drawn and hidden behind it.
                     int nx = x + static_cast<int>(f.normal.x);
                     int ny = y + static_cast<int>(f.normal.y);
                     int nz = z + static_cast<int>(f.normal.z);
-                    if (neighbor_opaque(nx, ny, nz)) continue;
+                    BlockType neighbor_type = neighbor_block(nx, ny, nz);
+
+                    // Hidden-face culling: a face whose neighbor is opaque
+                    // can never be seen, so it's left out of the mesh
+                    // entirely rather than drawn and hidden behind it. A
+                    // face between two blocks of the same translucent type
+                    // (e.g. two water blocks) is skipped the same way —
+                    // Minecraft doesn't draw the water-water (or
+                    // glass-glass) boundary inside a solid body of it
+                    // either, only where it meets something actually
+                    // different.
+                    if (!get_block_properties(neighbor_type).transparent) continue;
+                    if (properties.translucent && neighbor_type == type) continue;
 
                     Vector3 corners[4] = {f.v1, f.v2, f.v3, f.v4};
                     float brightness[4];
@@ -523,19 +627,27 @@ void Chunk::build_mesh(const Chunk* west, const Chunk* east, const Chunk* north,
         }
     }
 
-    mesh.vertexCount = static_cast<int>(mesh_data.positions.size() / 3);
+    mesh.vertexCount = static_cast<int>(opaque_data.positions.size() / 3);
     mesh.triangleCount = mesh.vertexCount / 3;
-    if (mesh.vertexCount == 0) {
-        return; // an all-air chunk (e.g. above the terrain height): nothing to draw
+    if (mesh.vertexCount > 0) {
+        mesh.vertices = to_mesh_buffer(opaque_data.positions);
+        mesh.normals = to_mesh_buffer(opaque_data.normals);
+        mesh.texcoords = to_mesh_buffer(opaque_data.texcoords);
+        mesh.colors = to_mesh_buffer(opaque_data.colors);
+        UploadMesh(&mesh, false);
+        mesh_uploaded = true;
     }
 
-    mesh.vertices = to_mesh_buffer(mesh_data.positions);
-    mesh.normals = to_mesh_buffer(mesh_data.normals);
-    mesh.texcoords = to_mesh_buffer(mesh_data.texcoords);
-    mesh.colors = to_mesh_buffer(mesh_data.colors);
-
-    UploadMesh(&mesh, false);
-    mesh_uploaded = true;
+    water_mesh.vertexCount = static_cast<int>(water_data.positions.size() / 3);
+    water_mesh.triangleCount = water_mesh.vertexCount / 3;
+    if (water_mesh.vertexCount > 0) {
+        water_mesh.vertices = to_mesh_buffer(water_data.positions);
+        water_mesh.normals = to_mesh_buffer(water_data.normals);
+        water_mesh.texcoords = to_mesh_buffer(water_data.texcoords);
+        water_mesh.colors = to_mesh_buffer(water_data.colors);
+        UploadMesh(&water_mesh, false);
+        water_mesh_uploaded = true;
+    }
 }
 
 void Chunk::draw() const
@@ -544,4 +656,17 @@ void Chunk::draw() const
 
     Vector3 origin = get_position();
     DrawMesh(mesh, get_chunk_material(), MatrixTranslate(origin.x, origin.y, origin.z));
+}
+
+void Chunk::draw_water() const
+{
+    if (!water_mesh_uploaded) return;
+
+    // Same material (texture, shader, fog) as draw()'s opaque mesh — only
+    // the GL blend/depth state around this call differs, and that's
+    // World::draw()'s job, not this one's: every chunk's draw() needs to
+    // happen before every chunk's draw_water() (see World::draw()'s own
+    // comment), so batching that decision per-chunk here wouldn't work.
+    Vector3 origin = get_position();
+    DrawMesh(water_mesh, get_chunk_material(), MatrixTranslate(origin.x, origin.y, origin.z));
 }

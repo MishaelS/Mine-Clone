@@ -1,7 +1,9 @@
 #include "World.hpp"
-#include "core/PerlinNoise.hpp"
+#include "core/TerrainNoise.hpp"
+#include "Skybox.hpp"
 
 #include "raymath.h"
+#include "rlgl.h"
 
 #include <algorithm>
 #include <cmath>
@@ -36,6 +38,53 @@ namespace {
     constexpr int LOADED_RADIUS = 8;
     constexpr int ACTIVE_RADIUS = 4;
 
+    // Fog (see World::draw/set_chunk_fog) fully hides everything by
+    // FOG_END_FRACTION of LOADED_RADIUS's own distance, not right at it —
+    // so a chunk unloading at the render-distance edge does so already
+    // inside the fog, never visibly. FOG_START_FRACTION is relative to that
+    // (reduced) end distance, not to LOADED_RADIUS directly: fog starts
+    // ramping in at FOG_END_FRACTION*FOG_START_FRACTION of LOADED_RADIUS.
+    constexpr float FOG_END_FRACTION = 0.8f;
+    constexpr float FOG_START_FRACTION = 0.5f;
+
+    // Chunks within this many blocks of the camera are always drawn — the
+    // view-cone test below approximates visibility by angle alone, which
+    // breaks down at very close range (a chunk right next to the camera can
+    // legitimately be visible well outside a "reasonable" cone), so it
+    // doesn't get applied there at all.
+    constexpr float ALWAYS_VISIBLE_BLOCKS = 3.0f * CHUNK_SIZE;
+
+    // cos(70 degrees). An approximate view-cone test, not exact frustum
+    // culling: exact culling needs frustum planes extracted from the
+    // camera's view-projection matrix, which depends on getting raylib's
+    // exact matrix convention (row- vs column-vector) right — a mismatch
+    // there fails silently as chunks incorrectly popping out of view, which
+    // is a much worse bug than under-culling. 70 degrees is a deliberately
+    // generous margin over the actual worst case at the default 1280x720
+    // window (fovy 60 => ~46 degree half-FOV horizontally, ~50 degrees to
+    // the frustum's own corner) — it still culls whatever's clearly behind
+    // or well to the side of the camera, just not as tightly as the exact
+    // frustum would.
+    constexpr float VIEW_CONE_COS = 0.342f;
+
+    // Approximates whether a chunk (by its column footprint in the X/Z
+    // plane — chunks span the whole world height, so Y never narrows this)
+    // is worth drawing from the camera's position/facing. Never a false
+    // negative by a wide margin (see VIEW_CONE_COS) — the goal is skipping
+    // what's clearly not on screen, not a tight match to it.
+    bool chunk_in_view(Vector3 chunk_min_corner, Vector3 camera_position, Vector3 camera_forward) {
+        float to_chunk_x = (chunk_min_corner.x + CHUNK_SIZE / 2.0f) - camera_position.x;
+        float to_chunk_z = (chunk_min_corner.z + CHUNK_SIZE / 2.0f) - camera_position.z;
+        float distance = std::sqrt(to_chunk_x * to_chunk_x + to_chunk_z * to_chunk_z);
+        if (distance <= ALWAYS_VISIBLE_BLOCKS) return true;
+
+        float forward_length = std::sqrt(camera_forward.x * camera_forward.x + camera_forward.z * camera_forward.z);
+        if (forward_length < 1e-4f) return true; // looking straight up/down: no horizontal facing to cull against
+
+        float cos_angle = (to_chunk_x * camera_forward.x + to_chunk_z * camera_forward.z) / (distance * forward_length);
+        return cos_angle >= VIEW_CONE_COS;
+    }
+
     // The world has no fixed size — any chunk within this many blocks of
     // the origin can be generated on demand (World::chunk_at), same idea as
     // Minecraft's own world border: technically a limit, practically never
@@ -60,7 +109,7 @@ namespace {
 }
 
 World::World(uint32_t seed)
-    : terrain_noise(std::make_unique<PerlinNoise>(seed))
+    : terrain_noise(std::make_unique<TerrainNoise>(seed))
 {
     // Nothing is loaded yet — the first update_chunk_states() call (see
     // GameEngine::set_world()/tick()) populates the world around wherever
@@ -108,11 +157,42 @@ void World::rebuild_mesh_neighborhood(int chunk_x, int chunk_z)
     }
 }
 
-void World::draw() const
+void World::draw(const Camera3D& camera) const
 {
+    float fog_end = LOADED_RADIUS * CHUNK_SIZE * FOG_END_FRACTION;
+    float fog_start = fog_end * FOG_START_FRACTION;
+    set_chunk_fog(camera.position, skybox_horizon_color(), fog_start, fog_end);
+
+    Vector3 forward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
+
+    std::vector<const Chunk*> visible;
     for (const auto& [key, chunk] : chunks) {
+        if (chunk_in_view(chunk->get_position(), camera.position, forward)) {
+            visible.push_back(chunk.get());
+        }
+    }
+
+    // Opaque geometry first, world-wide, before any translucent (water)
+    // geometry anywhere — alpha blending needs to composite over the
+    // finished opaque picture, not however opaque and translucent chunks
+    // would otherwise interleave by draw order alone.
+    for (const Chunk* chunk : visible) {
         chunk->draw();
     }
+
+    // Water: alpha blended, and not depth-*written* (only depth-*tested*,
+    // so solid terrain in front of it still correctly hides it). Two
+    // overlapping translucent surfaces aren't sorted against each other
+    // this way, which can look slightly off at some angles, but that's the
+    // same trade-off most simple voxel renderers make instead of full
+    // per-triangle transparency sorting.
+    BeginBlendMode(BLEND_ALPHA);
+    rlDisableDepthMask();
+    for (const Chunk* chunk : visible) {
+        chunk->draw_water();
+    }
+    rlEnableDepthMask();
+    EndBlendMode();
 }
 
 BlockType World::get_block(int x, int y, int z) const
@@ -142,6 +222,11 @@ int World::get_light(int x, int y, int z) const
 World::ChunkCoordinates World::chunk_coordinates(int x, int z) const
 {
     return {floor_div(x, CHUNK_SIZE), floor_div(z, CHUNK_SIZE)};
+}
+
+Biome World::get_biome(int x, int z) const
+{
+    return terrain_noise->biome(static_cast<float>(x), static_cast<float>(z));
 }
 
 std::optional<World::RaycastHit> World::raycast(Vector3 origin, Vector3 direction, float max_distance) const
