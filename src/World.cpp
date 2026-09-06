@@ -271,35 +271,85 @@ void World::draw(const Camera3D& camera) const
         }
     }
 
-    // Opaque geometry first, world-wide, before any translucent (water)
-    // geometry anywhere - alpha blending needs to composite over the
-    // finished opaque picture, not however opaque and translucent chunks
-    // would otherwise interleave by draw order alone.
+    // Opaque geometry first, world-wide, before any transparent (glass,
+    // foliage, ...) or translucent (water) geometry anywhere - alpha
+    // blending needs to composite over the finished opaque picture, not
+    // however opaque and see-through chunks would otherwise interleave by
+    // draw order alone.
     set_chunk_water_pass(false);
     for (const Chunk* chunk : visible) {
         chunk->draw();
     }
 
-    // Water: alpha blended, and not depth-*written* (only depth-*tested*,
-    // so solid terrain in front of it still correctly hides it). Two
-    // overlapping translucent surfaces aren't sorted against each other
-    // this way, which can look slightly off at some angles, but that's the
-    // same trade-off most simple voxel renderers make instead of full
-    // per-triangle transparency sorting. Backface culling is off for this
-    // pass specifically: a water top face's winding only faces up, so
-    // without this, looking at it from *underneath* (submerged, looking up
-    // toward the surface) would cull it away entirely and let the raw sky
-    // show through unobstructed and unfogged - breaking the enclosed,
-    // foggy underwater look this is all for in the first place.
+    // Transparent/translucent geometry: alpha blended, and not depth-
+    // *written* (only depth-*tested*, so solid terrain in front still
+    // correctly hides it) - a transparent block's face writing to the
+    // depth buffer as if it were solid would incorrectly occlude whatever
+    // real geometry sits behind it, up to and including entire chunks
+    // visible through a large window. With depth writes off, nothing here
+    // is sorted against anything else by actual depth any more - it all
+    // just composites in whatever order it's drawn in - so every
+    // transparent layer from every visible chunk (see below) is instead
+    // explicitly sorted by its own true 3D distance from the camera and
+    // drawn farthest first, the same trade-off most simple voxel renderers
+    // make instead of full per-triangle transparency sorting. Backface
+    // culling stays *on* here (unlike depth writes) for every transparent
+    // layer - an isolated glass block's far face (facing away from the
+    // camera) would otherwise also render, right behind its near face,
+    // showing the same glass texture twice in a row before whatever's
+    // actually beyond it. Water is the one exception (see draw_water()
+    // below): its own top face winding only faces up, so backface culling
+    // would hide it entirely when viewed from *underneath* (submerged,
+    // looking up toward the surface) - it's disabled just for that one
+    // call instead.
     BeginBlendMode(BLEND_ALPHA);
     rlDisableDepthMask();
-    rlDisableBackfaceCulling();
-    set_chunk_water_pass(true);
+
+    // Every see-through layer, from every visible chunk, in one single
+    // flat list - every distinct transparent BlockType a chunk has
+    // (Chunk::get_transparent_layer_avg_y()) plus its water
+    // (get_water_avg_y()) - each with its own true 3D distance from the
+    // camera. This has to be flat and sorted *once*, globally, rather
+    // than sorting chunks by (horizontal-only) distance first and only
+    // then sorting each chunk's own layers: two chunks close in the X/Z
+    // plane can still hold layers at very different Y (glass in one
+    // chunk, foliage in the chunk right next to it, say), and a per-chunk
+    // sort nested inside a coarser cross-chunk sort would never actually
+    // compare those two layers' real distances against each other -
+    // only within-chunk ties would come out right, cross-chunk ones
+    // wouldn't.
+    struct Layer { float distance_sq; const Chunk* chunk; bool is_water; size_t index; };
+    std::vector<Layer> layers;
     for (const Chunk* chunk : visible) {
-        chunk->draw_water();
+        Vector3 pos = chunk->get_position();
+        float dx = (pos.x + CHUNK_SIZE / 2.0f) - camera.position.x;
+        float dz = (pos.z + CHUNK_SIZE / 2.0f) - camera.position.z;
+        float horizontal_dist_sq = dx * dx + dz * dz;
+
+        for (size_t i = 0; i < chunk->transparent_layer_count(); ++i) {
+            float dy = (pos.y + chunk->get_transparent_layer_avg_y(i)) - camera.position.y;
+            layers.push_back({horizontal_dist_sq + dy * dy, chunk, false, i});
+        }
+        float water_dy = (pos.y + chunk->get_water_avg_y()) - camera.position.y;
+        layers.push_back({horizontal_dist_sq + water_dy * water_dy, chunk, true, 0});
     }
-    set_chunk_water_pass(false);
-    rlEnableBackfaceCulling();
+
+    std::sort(layers.begin(), layers.end(), [](const Layer& a, const Layer& b) {
+        return a.distance_sq > b.distance_sq; // farthest first
+    });
+
+    for (const Layer& layer : layers) {
+        if (layer.is_water) {
+            set_chunk_water_pass(true);
+            rlDisableBackfaceCulling(); // see this block's own comment above - water-only
+            layer.chunk->draw_water();
+            rlEnableBackfaceCulling();
+            set_chunk_water_pass(false);
+        } else {
+            layer.chunk->draw_transparent_layer(layer.index);
+        }
+    }
+
     rlEnableDepthMask();
     EndBlendMode();
 }

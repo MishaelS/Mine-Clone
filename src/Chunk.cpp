@@ -338,6 +338,29 @@ namespace {
         std::vector<unsigned char> colors;
     };
 
+    // One of these per distinct transparent-but-not-translucent BlockType
+    // encountered while building a chunk's mesh (see
+    // Chunk::transparent_layer_count()'s own comment for why they can't
+    // share one mesh) - `y_sum`/`y_count` become that layer's own avg_y
+    // once the block scan finishes, same idea as water's.
+    struct TransparentBuildBucket {
+        BlockType type;
+        MeshData data;
+        double y_sum = 0.0;
+        int y_count = 0;
+    };
+
+    // Linear search rather than a hash map: a chunk realistically has a
+    // handful of distinct transparent types at most, so this is cheaper
+    // (and simpler) than hashing BlockType for every transparent block.
+    TransparentBuildBucket& bucket_for(std::vector<TransparentBuildBucket>& buckets, BlockType type) {
+        for (TransparentBuildBucket& bucket : buckets) {
+            if (bucket.type == type) return bucket;
+        }
+        buckets.push_back(TransparentBuildBucket{type});
+        return buckets.back();
+    }
+
     // Appends one face as two triangles (0,1,2) and (0,2,3) - the same quad,
     // split for a Mesh's plain (non-quad) triangle list. `tint` (typically
     // WHITE) is multiplied into each vertex color alongside AO/light
@@ -470,6 +493,9 @@ Chunk::~Chunk()
 {
     if (mesh_uploaded) {
         UnloadMesh(mesh);
+    }
+    for (TransparentLayer& layer : transparent_layers) {
+        if (layer.uploaded) UnloadMesh(layer.mesh);
     }
     if (water_mesh_uploaded) {
         UnloadMesh(water_mesh);
@@ -1139,16 +1165,30 @@ void Chunk::build_mesh(const Chunk* west, const Chunk* east, const Chunk* north,
         mesh = Mesh{};
         mesh_uploaded = false;
     }
+    for (TransparentLayer& layer : transparent_layers) {
+        if (layer.uploaded) UnloadMesh(layer.mesh);
+    }
+    transparent_layers.clear();
     if (water_mesh_uploaded) {
         UnloadMesh(water_mesh);
         water_mesh = Mesh{};
         water_mesh_uploaded = false;
     }
 
-    // Built up separately since they're drawn separately - see draw_water().
+    // Built up separately since they're drawn separately - see
+    // transparent_layer_count()/draw_water(). One bucket per distinct
+    // transparent BlockType, created on first use (bucket_for()).
     MeshData opaque_data;
+    std::vector<TransparentBuildBucket> transparent_buckets;
     MeshData water_data;
     Neighborhood nb{this, west, east, north, south, northwest, northeast, southwest, southeast};
+
+    // Accumulated per block (not per face - a block with more visible
+    // faces shouldn't weigh more) into water_avg_y once the loop below
+    // finishes - see its own comment in Chunk.hpp. Each transparent
+    // bucket accumulates the same way into its own y_sum/y_count instead.
+    double water_y_sum = 0.0;
+    int water_y_count = 0;
 
     // A coordinate that steps outside this chunk's own 0..CHUNK_SIZE-1 range
     // is looked up in the appropriate neighbor instead of being treated as
@@ -1186,7 +1226,29 @@ void Chunk::build_mesh(const Chunk* west, const Chunk* east, const Chunk* north,
                 Vector3 center = {x + 0.5f, y + 0.5f, z + 0.5f};
 
                 const BlockProperties& properties = get_block_properties(type);
-                MeshData& mesh_data = properties.translucent ? water_data : opaque_data;
+                // translucent (water) and plain transparent (glass,
+                // foliage, ...) both need depth writes off - see draw()'s
+                // own comment - so neither can share opaque_data; each
+                // distinct transparent BlockType also gets its own bucket
+                // rather than sharing one, so two different transparent
+                // types can be depth-sorted against each other too (see
+                // transparent_layer_count()'s own comment) - only water
+                // needs its own separate mesh beyond that, for the
+                // flowing-texture shader pass (set_chunk_water_pass).
+                MeshData* mesh_data_ptr;
+                if (properties.translucent) {
+                    mesh_data_ptr = &water_data;
+                    water_y_sum += y;
+                    ++water_y_count;
+                } else if (properties.transparent) {
+                    TransparentBuildBucket& bucket = bucket_for(transparent_buckets, type);
+                    bucket.y_sum += y;
+                    ++bucket.y_count;
+                    mesh_data_ptr = &bucket.data;
+                } else {
+                    mesh_data_ptr = &opaque_data;
+                }
+                MeshData& mesh_data = *mesh_data_ptr;
 
                 // Water-only: a block with Water directly above it is
                 // interior to a body of water, not its surface (and its Top
@@ -1249,6 +1311,8 @@ void Chunk::build_mesh(const Chunk* west, const Chunk* east, const Chunk* north,
         }
     }
 
+    water_avg_y = water_y_count > 0 ? static_cast<float>(water_y_sum / water_y_count) : 0.0f;
+
     mesh.vertexCount = static_cast<int>(opaque_data.positions.size() / 3);
     mesh.triangleCount = mesh.vertexCount / 3;
     if (mesh.vertexCount > 0) {
@@ -1258,6 +1322,22 @@ void Chunk::build_mesh(const Chunk* west, const Chunk* east, const Chunk* north,
         mesh.colors = to_mesh_buffer(opaque_data.colors);
         UploadMesh(&mesh, false);
         mesh_uploaded = true;
+    }
+
+    for (TransparentBuildBucket& bucket : transparent_buckets) {
+        if (bucket.data.positions.empty()) continue;
+
+        TransparentLayer layer;
+        layer.avg_y = bucket.y_count > 0 ? static_cast<float>(bucket.y_sum / bucket.y_count) : 0.0f;
+        layer.mesh.vertexCount = static_cast<int>(bucket.data.positions.size() / 3);
+        layer.mesh.triangleCount = layer.mesh.vertexCount / 3;
+        layer.mesh.vertices = to_mesh_buffer(bucket.data.positions);
+        layer.mesh.normals = to_mesh_buffer(bucket.data.normals);
+        layer.mesh.texcoords = to_mesh_buffer(bucket.data.texcoords);
+        layer.mesh.colors = to_mesh_buffer(bucket.data.colors);
+        UploadMesh(&layer.mesh, false);
+        layer.uploaded = true;
+        transparent_layers.push_back(layer);
     }
 
     water_mesh.vertexCount = static_cast<int>(water_data.positions.size() / 3);
@@ -1278,6 +1358,19 @@ void Chunk::draw() const
 
     Vector3 origin = get_position();
     DrawMesh(mesh, get_chunk_material(), MatrixTranslate(origin.x, origin.y, origin.z));
+}
+
+void Chunk::draw_transparent_layer(size_t index) const
+{
+    const TransparentLayer& layer = transparent_layers[index];
+    if (!layer.uploaded) return;
+
+    // Same material as draw()'s opaque mesh and draw_water() - only the GL
+    // blend/depth state around this call differs, and that's World::draw()'s
+    // job (see its own comment): every chunk's draw() needs to happen
+    // before every chunk's draw_transparent_layer()/draw_water().
+    Vector3 origin = get_position();
+    DrawMesh(layer.mesh, get_chunk_material(), MatrixTranslate(origin.x, origin.y, origin.z));
 }
 
 void Chunk::draw_water() const

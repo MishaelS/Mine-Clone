@@ -479,16 +479,28 @@ void GameEngine::start_singleplayer_world(const std::string& folder_name)
     // distance and fog distance are user-configurable.
 
     current_world_folder = folder_name;
-    set_world(std::make_unique<World>(config));
+    auto new_world = std::make_unique<World>(config);
 
     // Resume exactly where the player left off last time, if they ever
-    // have before (see save_player_state()) - overrides set_world()'s own
-    // default spawn-search placement and default_inventory(), otherwise
-    // left untouched (a brand new world has no player.json yet).
+    // have before (see save_player_state()) - bypasses set_world()'s own
+    // find_spawn_position() call entirely rather than overriding its
+    // result afterward: find_spawn_position() itself calls
+    // update_chunk_states() to populate the area it searches, so calling
+    // it and then immediately jumping somewhere else meant generating two
+    // full batches of chunks (once around a throwaway point near world
+    // origin, once around the real position) every time a previously-
+    // played world was reopened - measured as roughly doubling load time.
+    // A brand new world has no player.json yet, so falls through to
+    // set_world()'s normal spawn search unchanged.
     if (std::optional<PlayerSaveState> saved = WorldSave::load_player_state(folder_name)) {
+        world = std::move(new_world);
         camera.position = saved->position;
         camera.target = Vector3Add(camera.position, Vector3Scale(saved->forward, 10.0f));
         inventory = saved->inventory;
+        spawn_settle_frames = 3; // see its own comment on set_world()
+        world->update_chunk_states(camera.position);
+    } else {
+        set_world(std::move(new_world));
     }
 
     enter_state(GameState::Playing);

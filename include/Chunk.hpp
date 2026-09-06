@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 class TerrainNoise;
 
@@ -160,18 +161,58 @@ public:
                      const Chunk* northwest, const Chunk* northeast,
                      const Chunk* southwest, const Chunk* southeast);
 
-    // Draws this chunk's opaque geometry (everything except translucent
-    // blocks like water - see draw_water()).
+    // Draws this chunk's fully-opaque geometry only - anything
+    // BlockProperties::transparent (glass, foliage, water, ...) is never in
+    // this mesh, see draw_transparent()/draw_water(). Kept strictly opaque
+    // deliberately: this is the only one of the three meshes drawn with
+    // normal depth *writes* on, and a transparent block's face writing to
+    // the depth buffer as if it were solid would incorrectly hide whatever
+    // real geometry sits behind it - visible as terrain (or whole chunks,
+    // if the transparent surface is large) vanishing when looked at
+    // through a window or similar.
     void draw() const override;
 
+    // Every transparent-but-not-translucent block TYPE present in this
+    // chunk (glass, foliage, ...) gets its OWN separate mesh/"layer" -
+    // never merged into one, even though they're drawn with the same GL
+    // state - because two different transparent types can both be visible
+    // through each other (e.g. a glass pane in front of a foliage block),
+    // and with neither writing to the depth buffer (see draw()'s own
+    // comment on why not), there's no way to sort them against each other
+    // *within* one merged mesh: draw order there is whatever order
+    // build_mesh()'s block scan happened to add them in, fixed at mesh-
+    // build time and unrelated to the camera's actual, ever-changing
+    // position. World::draw() sorts these layers itself instead (using
+    // get_transparent_layer_avg_y()) - drawn in its own pass, after every
+    // chunk's draw() (opaque geometry world-wide), with alpha blending on
+    // and depth *writes* off (still depth *tested*, so solid terrain in
+    // front still correctly hides it) - same GL state as draw_water(),
+    // just without its flowing-texture shader animation
+    // (BlockProperties::translucent is specifically water's own thing).
+    size_t transparent_layer_count() const { return transparent_layers.size(); }
+    void draw_transparent_layer(size_t index) const;
+
     // Draws this chunk's translucent geometry (water - see
-    // BlockProperties::translucent) - a separate mesh from draw()'s, built
-    // by the same build_mesh() call. World::draw() calls this in its own
-    // pass, after every chunk's draw() (opaque geometry world-wide) and
-    // with alpha blending enabled, so translucent faces correctly blend
-    // over everything solid instead of however they'd happen to interleave
-    // with it by draw order alone.
+    // BlockProperties::translucent) - a separate mesh from draw()'s/
+    // draw_transparent()'s, built by the same build_mesh() call.
+    // World::draw() calls this in its own pass, after every chunk's draw()
+    // (opaque geometry world-wide) and with alpha blending enabled, so
+    // translucent faces correctly blend over everything solid instead of
+    // however they'd happen to interleave with it by draw order alone.
     void draw_water() const;
+
+    // Local-space (0..CHUNK_HEIGHT) average Y of transparent layer `index`
+    // (or of draw_water()'s own mesh), computed once by build_mesh() - a
+    // cheap per-layer stand-in for "where this content actually sits
+    // vertically" so World::draw() can decide, every frame, which of a
+    // chunk's several see-through layers (each transparent type present,
+    // plus water) is closest to the camera *right now* and draw
+    // farthest-first. Chunks span the whole world height, so two chunks
+    // being different distances apart in the X/Z plane says nothing about
+    // which of *this one chunk's own* layers, at very different Y, is
+    // nearer - e.g. a glass roof directly over a pond in the same chunk.
+    float get_transparent_layer_avg_y(size_t index) const { return transparent_layers[index].avg_y; }
+    float get_water_avg_y() const { return water_avg_y; }
 
     BlockType get_block(int x, int y, int z) const;
     void set_block(int x, int y, int z, BlockType type);
@@ -275,10 +316,22 @@ private:
     Mesh mesh{};
     bool mesh_uploaded = false;
 
+    // One entry per distinct transparent-but-not-translucent BlockType
+    // present in this chunk (glass, foliage, ...) - see
+    // transparent_layer_count()'s own comment for why these can't just be
+    // merged into one mesh the way opaque blocks are.
+    struct TransparentLayer {
+        Mesh mesh{};
+        bool uploaded = false;
+        float avg_y = 0.0f;
+    };
+    std::vector<TransparentLayer> transparent_layers;
+
     // Translucent geometry (water), built and drawn separately from `mesh`
     // - see draw_water().
     Mesh water_mesh{};
     bool water_mesh_uploaded = false;
+    float water_avg_y = 0.0f;
 
     // A live Chunk is always at least Loaded (see ChunkState) - Unloaded is
     // never stored, only reported by World for a coordinate with no Chunk.

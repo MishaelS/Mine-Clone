@@ -41,14 +41,6 @@
             "side"       : { "x": 8, "y": 4 }
         },
         {
-            "name"       : "foliage",
-            "solid"      : true,
-            "transparent": true,
-            "top"        : { "x": 4, "y": 3 },
-            "bottom"     : { "x": 4, "y": 3 },
-            "side"       : { "x": 4, "y": 3 }
-        },
-        {
             "name"       : "oak_log",
             "solid"      : true,
             "transparent": false,
@@ -129,6 +121,14 @@
             "side"       : { "x": 1, "y": 1 }
         },
         {
+            "name"       : "workbench",
+            "solid"      : true,
+            "transparent": false,
+            "top"        : { "x": 11, "y": 2 },
+            "bottom"     : { "x":  4, "y": 0 },
+            "side"       : { "x": 11, "y": 3 }
+        },
+        {
             "name"       : "water",
             "solid"      : false,
             "transparent": true,
@@ -138,12 +138,12 @@
             "side"       : { "x": 13, "y": 12, "color": [255, 255, 255, 200] }
         },
         {
-            "name"       : "workbench",
+            "name"       : "foliage",
             "solid"      : true,
-            "transparent": false,
-            "top"        : { "x": 11, "y": 2 },
-            "bottom"     : { "x":  4, "y": 0 },
-            "side"       : { "x": 11, "y": 3 }
+            "transparent": true,
+            "top"        : { "x": 4, "y": 3 },
+            "bottom"     : { "x": 4, "y": 3 },
+            "side"       : { "x": 4, "y": 3 }
         },
         {
             "name"       : "glass",
