@@ -12,7 +12,7 @@ public:
     virtual ~GameObject() = default;
 
     // `world` is whatever GameEngine currently holds (see its own update()),
-    // nullable since nothing guarantees one exists at every call site — a
+    // nullable since nothing guarantees one exists at every call site - a
     // subclass caring about world state (Entity's water drag) checks it
     // itself rather than every caller having to know that's needed.
     virtual void update(float delta_time, const World* world);

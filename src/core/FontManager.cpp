@@ -6,7 +6,7 @@ namespace FontManager {
     namespace {
         constexpr const char* FONT_PATH = ASSETS_PATH "fonts/Minecraft Rus/minecraft.ttf";
 
-        // Baked at this pixel size — larger than any current on-screen text
+        // Baked at this pixel size - larger than any current on-screen text
         // (the debug overlay draws at 18px) so scaling down still looks
         // crisp; raylib upsamples a smaller baked size instead of re-baking
         // when text is drawn larger.
@@ -16,7 +16,7 @@ namespace FontManager {
         bool loaded = false;
 
         // Basic Latin + Cyrillic, since this is a Latin+Cyrillic font meant
-        // for Russian text — raylib's default codepoint set (0-255) would
+        // for Russian text - raylib's default codepoint set (0-255) would
         // leave every Cyrillic glyph missing.
         std::vector<int> build_codepoints() {
             std::vector<int> codepoints;

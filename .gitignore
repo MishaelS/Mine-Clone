@@ -4,3 +4,7 @@ build/
 *.o
 
 .DS_Store
+
+# Player-generated runtime data, not source - see core/WorldSave, core/Settings
+saves/
+settings.json

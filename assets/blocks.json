@@ -43,7 +43,7 @@
         {
             "name"       : "foliage",
             "solid"      : true,
-            "transparent": false,
+            "transparent": true,
             "top"        : { "x": 4, "y": 3 },
             "bottom"     : { "x": 4, "y": 3 },
             "side"       : { "x": 4, "y": 3 }
@@ -52,9 +52,9 @@
             "name"       : "oak_log",
             "solid"      : true,
             "transparent": false,
-            "top"        : { "x": 4, "y": 1 },
-            "bottom"     : { "x": 4, "y": 1 },
-            "side"       : { "x": 5, "y": 1 }
+            "top"        : { "x": 5, "y": 1 },
+            "bottom"     : { "x": 5, "y": 1 },
+            "side"       : { "x": 4, "y": 1 }
         },
         {
             "name"       : "oak_planks",
@@ -144,6 +144,14 @@
             "top"        : { "x": 11, "y": 2 },
             "bottom"     : { "x":  4, "y": 0 },
             "side"       : { "x": 11, "y": 3 }
+        },
+        {
+            "name"       : "glass",
+            "solid"      : true,
+            "transparent": true,
+            "top"        : { "x": 1, "y": 3 },
+            "bottom"     : { "x": 1, "y": 3 },
+            "side"       : { "x": 1, "y": 3 }
         }
     ]
 }

@@ -15,7 +15,7 @@ namespace TextureManager {
     const Texture2D& get(const std::string& path);
 
     // Same as get(), but on a cache miss the image is downscaled to
-    // target_size x target_size before it's uploaded — for callers that need
+    // target_size x target_size before it's uploaded - for callers that need
     // a specific resolution regardless of the source image's size (e.g. block
     // textures). Ignored on a cache hit, since the cached texture keeps
     // whatever size it was first loaded at.

@@ -12,7 +12,7 @@ namespace {
 
     constexpr const char* TERRAIN_TEXTURE_PATH = "sprites/terrain.png";
 
-    // terrain.png is a 16x16 grid of 16px tiles (256x256 pixels total) —
+    // terrain.png is a 16x16 grid of 16px tiles (256x256 pixels total) -
     // every block face's "x"/"y" in blocks.json is a tile's column/row in
     // that grid.
     constexpr int TILE_PIXELS = 16;   // one tile's width/height, in pixels
@@ -20,13 +20,13 @@ namespace {
     constexpr float ATLAS_PIXELS = static_cast<float>(TILE_PIXELS * GRID_TILES); // 256
 
     // Set once Load_block_definitions() has loaded terrain.png (needs a GL
-    // context, so this can't happen at static-init time) — kept alive
+    // context, so this can't happen at static-init time) - kept alive
     // afterward so chunks can read get_block_atlas_texture() at any point.
     const Texture2D* block_atlas_texture = nullptr;
 
     // Turns a tile's (column, row) into the UV rectangle (0..1) raylib/OpenGL
     // expects. The tile's position and size stay whole pixels right up to
-    // the last step — the division by ATLAS_PIXELS — which is unavoidable:
+    // the last step - the division by ATLAS_PIXELS - which is unavoidable:
     // the GPU only understands texture coordinates normalized to 0..1,
     // whatever the texture's actual pixel size.
     Rectangle tile_uv(int col, int row) {
@@ -41,9 +41,9 @@ namespace {
     }
 
     // One face's texture: which terrain.png tile, and the tint to multiply
-    // into it (WHITE — i.e. no change — unless blocks.json gives a "color").
+    // into it (WHITE - i.e. no change - unless blocks.json gives a "color").
     // tint.a is this face's opacity for translucent blocks (see
-    // BlockProperties::translucent) — 255 (fully opaque) unless blocks.json
+    // BlockProperties::translucent) - 255 (fully opaque) unless blocks.json
     // gives a 4th "color" component; meaningless for an opaque block, which
     // never blends.
     struct FaceTexture {
@@ -91,6 +91,7 @@ namespace {
         {"bedrock"     , BlockType::Bedrock    },
         {"water"       , BlockType::Water      },
         {"workbench"   , BlockType::Workbench  },
+        {"glass"       , BlockType::Glass      },
     };
 }
 
@@ -152,6 +153,13 @@ const BlockProperties& get_block_properties(BlockType type)
 const std::string& get_block_name(BlockType type)
 {
     return block_names[static_cast<uint8_t>(type)];
+}
+
+std::optional<BlockType> block_type_from_name(const std::string& name)
+{
+    auto it = NAME_TO_TYPE.find(name);
+    if (it == NAME_TO_TYPE.end()) return std::nullopt;
+    return it->second;
 }
 
 const Texture2D& get_block_atlas_texture()

@@ -1,7 +1,7 @@
 #include "core/TerrainNoise.hpp"
 
 TerrainNoise::TerrainNoise(uint32_t seed)
-    // Distinct seeds so the layers don't sample identical patterns — small,
+    // Distinct seeds so the layers don't sample identical patterns - small,
     // deterministic offsets are enough: FastNoise2's permutation table
     // already looks completely different for any two distinct seeds,
     // however close together.

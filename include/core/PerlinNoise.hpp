@@ -25,7 +25,7 @@ public:
 private:
     int seed;
     // mutable: fractal() reconfigures fractal_node's octave/gain before each
-    // query (see the .cpp), which needs a non-const node — an implementation
+    // query (see the .cpp), which needs a non-const node - an implementation
     // detail that doesn't change PerlinNoise's own externally observable
     // behavior (same inputs still always give the same output), so the
     // public methods stay const same as the old hand-rolled version.

@@ -3,6 +3,7 @@
 #include "raylib.h"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 // The id a Chunk stores per voxel cell. Kept tiny (1 byte) since a single
@@ -29,6 +30,7 @@ enum class BlockType : uint8_t {
     Bedrock,
     Water,
     Workbench,
+    Glass,
     Count, // not a real block; sentinel for table/array sizing
 };
 
@@ -52,16 +54,16 @@ struct BlockProperties {
 
     // Drawn in its own pass, after every opaque block in the whole world,
     // with alpha blending on and depth *write* off (still depth *tested*,
-    // so solid terrain in front of it still correctly hides it) — see
+    // so solid terrain in front of it still correctly hides it) - see
     // Chunk::build_mesh/draw_water() and World::draw(). Also changes face
     // culling: two adjacent blocks of the same translucent type (e.g. two
     // water blocks) don't draw the face between them, same as Minecraft
     // doesn't render the water-water (or glass-glass) boundary inside a
-    // solid body of it — only transparent-to-different-block boundaries do.
+    // solid body of it - only transparent-to-different-block boundaries do.
     bool translucent;
 
     // UV rectangle (0..1) within get_block_atlas_texture(), indexed by
-    // BlockFace — every block's faces share one atlas texture, so a whole
+    // BlockFace - every block's faces share one atlas texture, so a whole
     // chunk mesh draws with a single bound texture.
     Rectangle texture_uvs[6];
 
@@ -75,8 +77,8 @@ struct BlockProperties {
 
 // Parses assets/blocks.json and fills the BlockType -> BlockProperties table.
 // Each face entry ("top"/"bottom"/"side") gives the (x, y) grid position of
-// its tile within assets/sprites/terrain.png — a fixed 16x16 grid of 16px
-// tiles, shared by every block, no per-sprite packing needed — plus an
+// its tile within assets/sprites/terrain.png - a fixed 16x16 grid of 16px
+// tiles, shared by every block, no per-sprite packing needed - plus an
 // optional "color" tint (see BlockProperties::texture_tints).
 // Call once after the window exists (texture loads need a GL context).
 void Load_block_definitions();
@@ -88,6 +90,13 @@ const BlockProperties& get_block_properties(BlockType type);
 // BlockType::Air, which has no blocks.json entry of its own.
 const std::string& get_block_name(BlockType type);
 
-// assets/sprites/terrain.png — the single texture every BlockProperties::
+// Reverse of get_block_name() - std::nullopt if `name` doesn't match any
+// blocks.json entry. Used to deserialize a block by its stable, human-
+// readable name (e.g. a saved player's hotbar) instead of its raw
+// BlockType enum value, which isn't safe to persist across builds if the
+// enum's own order ever changes.
+std::optional<BlockType> block_type_from_name(const std::string& name);
+
+// assets/sprites/terrain.png - the single texture every BlockProperties::
 // texture_uvs rectangle indexes into. Valid only after Load_block_definitions().
 const Texture2D& get_block_atlas_texture();

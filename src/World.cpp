@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -32,7 +33,7 @@ namespace {
     }
 
     // Packs one block's world-space (x, y, z) into a single key for
-    // World::scheduled_fluid_cells — biased to non-negative first since a
+    // World::scheduled_fluid_cells - biased to non-negative first since a
     // bitwise packing needs every field's range to start at 0. x/z fit in
     // 25 bits (comfortably covering WORLD_BORDER_BLOCKS, defined further
     // down); y in 11 (the world is nowhere near 2000 blocks tall).
@@ -45,22 +46,15 @@ namespace {
         return (bx << 36) | (by << 25) | bz;
     }
 
-    // How far, in chunks, a chunk is drawn (LOADED_RADIUS) vs. drawn *and*
-    // ticking (ACTIVE_RADIUS) around an observer — Minecraft's own render
-    // vs. simulation distance split. Square (Chebyshev) radius, same shape
-    // Minecraft loads in, not a circle.
-    constexpr int LOADED_RADIUS = 8;
-    constexpr int ACTIVE_RADIUS = 4;
-
     // Water flow (World::update_fluids): how many ticks after a cell is
-    // scheduled before it's actually re-evaluated — the same idea as real
+    // scheduled before it's actually re-evaluated - the same idea as real
     // Minecraft's own liquid tick rate (5 game ticks in Java Edition), so
     // a flow visibly advances outward one step at a time instead of
     // instantly resolving the moment something changes.
     constexpr int FLUID_TICK_DELAY = 5;
 
     // Caps how many due fluid cells update_fluids() resolves in a single
-    // tick — the same "spiral of death" caution MAX_TICKS_PER_FRAME uses
+    // tick - the same "spiral of death" caution MAX_TICKS_PER_FRAME uses
     // elsewhere (GameEngine.cpp), here against an enormous number of cells
     // all coming due on the same tick (e.g. draining a whole lake) turning
     // one tick into a multi-chunk remesh storm. Anything past this limit
@@ -70,21 +64,23 @@ namespace {
     constexpr int MAX_FLUID_UPDATES_PER_TICK = 64;
 
     // Same "spiral of death" caution as MAX_FLUID_UPDATES_PER_TICK, for
-    // Sand/Gravel gravity (World::update_falling_blocks) — against, say, a
+    // Sand/Gravel gravity (World::update_falling_blocks) - against, say, a
     // huge floating platform losing its support all at once.
     constexpr int MAX_FALLING_UPDATES_PER_TICK = 128;
 
-    // Fog (see World::draw/set_chunk_fog) fully hides everything by
-    // FOG_END_FRACTION of LOADED_RADIUS's own distance, not right at it —
-    // so a chunk unloading at the render-distance edge does so already
-    // inside the fog, never visibly. FOG_START_FRACTION is relative to that
-    // (reduced) end distance, not to LOADED_RADIUS directly: fog starts
-    // ramping in at FOG_END_FRACTION*FOG_START_FRACTION of LOADED_RADIUS.
+    // Safety ceiling on the user-configured fog distance (Settings), not
+    // its primary source (see World::draw): fog fully hides everything by
+    // FOG_END_FRACTION of config.loaded_radius_chunks's own distance at
+    // the very latest, so a chunk unloading at the render-distance edge
+    // does so already inside the fog, never visibly, no matter how far the
+    // player pushed the fog slider. FOG_START_FRACTION is relative to
+    // whichever end distance actually applies (the configured one, or this
+    // ceiling if that's nearer).
     constexpr float FOG_END_FRACTION = 0.8f;
     constexpr float FOG_START_FRACTION = 0.5f;
 
     // Underwater fog: real Minecraft doesn't darken the water block's own
-    // surface color by depth (it stays one plain color everywhere) —
+    // surface color by depth (it stays one plain color everywhere) -
     // instead, whenever the *camera's* eye is inside a fluid, it swaps in a
     // much shorter, fluid-colored fog in place of the normal render-
     // distance one, so visibility itself is what gets worse, not the
@@ -103,7 +99,7 @@ namespace {
     constexpr Color UNDERWATER_FOG_COLOR_DEEP = {5, 15, 35, 255};
     constexpr int UNDERWATER_FOG_MAX_DEPTH = 24; // matches Ocean's own depth range, see Chunk.cpp's biome_terrain
 
-    // Chunks within this many blocks of the camera are always drawn — the
+    // Chunks within this many blocks of the camera are always drawn - the
     // view-cone test below approximates visibility by angle alone, which
     // breaks down at very close range (a chunk right next to the camera can
     // legitimately be visible well outside a "reasonable" cone), so it
@@ -113,20 +109,20 @@ namespace {
     // cos(70 degrees). An approximate view-cone test, not exact frustum
     // culling: exact culling needs frustum planes extracted from the
     // camera's view-projection matrix, which depends on getting raylib's
-    // exact matrix convention (row- vs column-vector) right — a mismatch
+    // exact matrix convention (row- vs column-vector) right - a mismatch
     // there fails silently as chunks incorrectly popping out of view, which
     // is a much worse bug than under-culling. 70 degrees is a deliberately
     // generous margin over the actual worst case at the default 1280x720
     // window (fovy 60 => ~46 degree half-FOV horizontally, ~50 degrees to
-    // the frustum's own corner) — it still culls whatever's clearly behind
+    // the frustum's own corner) - it still culls whatever's clearly behind
     // or well to the side of the camera, just not as tightly as the exact
     // frustum would.
     constexpr float VIEW_CONE_COS = 0.342f;
 
     // Approximates whether a chunk (by its column footprint in the X/Z
-    // plane — chunks span the whole world height, so Y never narrows this)
+    // plane - chunks span the whole world height, so Y never narrows this)
     // is worth drawing from the camera's position/facing. Never a false
-    // negative by a wide margin (see VIEW_CONE_COS) — the goal is skipping
+    // negative by a wide margin (see VIEW_CONE_COS) - the goal is skipping
     // what's clearly not on screen, not a tight match to it.
     bool chunk_in_view(Vector3 chunk_min_corner, Vector3 camera_position, Vector3 camera_forward) {
         float to_chunk_x = (chunk_min_corner.x + CHUNK_SIZE / 2.0f) - camera_position.x;
@@ -141,13 +137,13 @@ namespace {
         return cos_angle >= VIEW_CONE_COS;
     }
 
-    // The world has no fixed size — any chunk within this many blocks of
+    // The world has no fixed size - any chunk within this many blocks of
     // the origin can be generated on demand (World::chunk_at), same idea as
     // Minecraft's own world border: technically a limit, practically never
     // reached by walking. It's nowhere near Minecraft's actual 29,999,984,
     // deliberately: this project stores every position in a 32-bit float
     // (raylib's Vector3), and float can only represent every integer
-    // exactly up to 2^24 (16,777,216) — past that, block positions start
+    // exactly up to 2^24 (16,777,216) - past that, block positions start
     // rounding to the nearest representable value, which looks like blocks
     // jittering off-grid. Minecraft avoids this because it stores position
     // in a 64-bit double internally; matching its exact border number here
@@ -168,16 +164,43 @@ namespace {
     constexpr Color CHUNK_BORDER_COLOR = {255, 0, 255, 255};
 }
 
-World::World(uint32_t seed)
-    : seed(seed)
-    , terrain_noise(std::make_unique<TerrainNoise>(seed))
+World::World(WorldConfig config)
+    : config(std::move(config))
+    , terrain_noise(std::make_unique<TerrainNoise>(this->config.seed))
 {
-    // Nothing is loaded yet — the first update_chunk_states() call (see
+    // Active must never exceed Loaded - desired_state_for() assumes this
+    // ordering, and Settings only actually exposes render distance to the
+    // player (active/simulation distance stays fixed - see WorldConfig).
+    this->config.active_radius_chunks = std::min(this->config.active_radius_chunks, this->config.loaded_radius_chunks);
+
+    if (this->config.save_directory) {
+        std::error_code ec;
+        std::filesystem::create_directories(*this->config.save_directory + "/chunks", ec);
+    }
+
+    // Nothing is loaded yet - the first update_chunk_states() call (see
     // GameEngine::set_world()/tick()) populates the world around wherever
     // the observer actually starts.
 }
 
-World::~World() = default;
+World::~World()
+{
+    // The only place a still-resident chunk's edits reach disk on the
+    // "just quit the game" path - unload_chunk() covers a chunk that
+    // streamed out while still playing, this covers whatever's left
+    // loaded when the World itself goes away.
+    if (!config.save_directory) return;
+    for (const auto& [key, chunk] : chunks) {
+        if (!chunk->is_modified()) continue;
+        auto [cx, cz] = unpack_chunk_key(key);
+        chunk->save_to_file(chunk_file_path(cx, cz));
+    }
+}
+
+std::string World::chunk_file_path(int chunk_x, int chunk_z) const
+{
+    return *config.save_directory + "/chunks/" + std::to_string(chunk_x) + "_" + std::to_string(chunk_z) + ".chunk";
+}
 
 const Chunk* World::chunk_at(int chunk_x, int chunk_z) const
 {
@@ -189,7 +212,7 @@ const Chunk* World::chunk_at(int chunk_x, int chunk_z) const
     return it != chunks.end() ? it->second.get() : nullptr;
 }
 
-// One real implementation (above) instead of two identical bodies — the
+// One real implementation (above) instead of two identical bodies - the
 // standard way to share a const/non-const accessor pair (Meyers, Effective
 // C++ Item 3).
 Chunk* World::chunk_at(int chunk_x, int chunk_z)
@@ -224,14 +247,15 @@ void World::draw(const Camera3D& camera) const
     Color fog_color;
     if (auto depth = water_depth_at(camera.position)) {
         // Submerged: swap in underwater fog (see UNDERWATER_FOG_* above)
-        // instead of the normal render-distance one — real Minecraft's own
+        // instead of the normal render-distance one - real Minecraft's own
         // approach, rather than darkening the water block's own color.
         float t = std::clamp(static_cast<float>(*depth) / UNDERWATER_FOG_MAX_DEPTH, 0.0f, 1.0f);
         fog_end = UNDERWATER_FOG_END_SHALLOW + (UNDERWATER_FOG_END_DEEP - UNDERWATER_FOG_END_SHALLOW) * t;
         fog_start = fog_end * UNDERWATER_FOG_START_FRACTION;
         fog_color = ColorLerp(UNDERWATER_FOG_COLOR_SHALLOW, UNDERWATER_FOG_COLOR_DEEP, t);
     } else {
-        fog_end = LOADED_RADIUS * CHUNK_SIZE * FOG_END_FRACTION;
+        float max_fog_end = config.loaded_radius_chunks * CHUNK_SIZE * FOG_END_FRACTION;
+        fog_end = std::min(static_cast<float>(config.fog_distance_blocks), max_fog_end);
         fog_start = fog_end * FOG_START_FRACTION;
         fog_color = skybox_horizon_color();
     }
@@ -248,7 +272,7 @@ void World::draw(const Camera3D& camera) const
     }
 
     // Opaque geometry first, world-wide, before any translucent (water)
-    // geometry anywhere — alpha blending needs to composite over the
+    // geometry anywhere - alpha blending needs to composite over the
     // finished opaque picture, not however opaque and translucent chunks
     // would otherwise interleave by draw order alone.
     set_chunk_water_pass(false);
@@ -265,7 +289,7 @@ void World::draw(const Camera3D& camera) const
     // pass specifically: a water top face's winding only faces up, so
     // without this, looking at it from *underneath* (submerged, looking up
     // toward the surface) would cull it away entirely and let the raw sky
-    // show through unobstructed and unfogged — breaking the enclosed,
+    // show through unobstructed and unfogged - breaking the enclosed,
     // foggy underwater look this is all for in the first place.
     BeginBlendMode(BLEND_ALPHA);
     rlDisableDepthMask();
@@ -435,7 +459,7 @@ namespace {
 std::optional<uint8_t> World::compute_fluid_level(int x, int y, int z) const
 {
     // Water directly above always feeds this cell, regardless of its own
-    // level — a falling column doesn't care how far *that* water is from
+    // level - a falling column doesn't care how far *that* water is from
     // its own source, only that it's there.
     if (get_block(x, y + 1, z) == BlockType::Water) {
         return FLUID_LEVEL_FALLING;
@@ -452,7 +476,7 @@ std::optional<uint8_t> World::compute_fluid_level(int x, int y, int z) const
         const Chunk* chunk = chunk_at(chunk_x, chunk_z);
         uint8_t neighbor_level = chunk->get_fluid_level(nx - chunk_x * CHUNK_SIZE, y - MIN_WORLD_Y, nz - chunk_z * CHUNK_SIZE);
         // A SOURCE or FALLING neighbor is as good as being right next to
-        // the source itself for spread-distance purposes — only a
+        // the source itself for spread-distance purposes - only a
         // FLOWING neighbor's own distance actually costs anything extra.
         int effective = (neighbor_level == FLUID_LEVEL_SOURCE || neighbor_level == FLUID_LEVEL_FALLING) ? 0 : neighbor_level;
         best = std::min(best, effective + 1);
@@ -486,7 +510,7 @@ void World::update_fluids()
 
     // Same batching idea as update_chunk_states(): a chunk relit/remeshed
     // once per unique chunk this tick's updates actually touched, not once
-    // per individual block change — a flood filling a dozen cells in the
+    // per individual block change - a flood filling a dozen cells in the
     // same chunk shouldn't relight or remesh it a dozen times over.
     std::unordered_set<int64_t> relit_chunks;
     std::unordered_set<int64_t> needs_mesh;
@@ -594,7 +618,7 @@ void World::update_falling_blocks()
 
     // Only entries already queued *before* this call started get resolved
     // this tick (hence a fixed iteration count taken up front, not a
-    // while-loop draining the deque) — schedule_falling_check() below,
+    // while-loop draining the deque) - schedule_falling_check() below,
     // called on a block right after it falls, queues its new position for
     // the *next* update_falling_blocks() call, not this one. Without that
     // distinction, a block would keep re-entering this same pass and fall
@@ -619,7 +643,7 @@ void World::update_falling_blocks()
 
         int local_x = x - chunk_x * CHUNK_SIZE;
         int local_z = z - chunk_z * CHUNK_SIZE;
-        // Falls straight down within the same chunk column — no vertical
+        // Falls straight down within the same chunk column - no vertical
         // chunk stacking, so both cells always share one chunk.
         chunk->set_block(local_x, y - MIN_WORLD_Y, local_z, BlockType::Air);
         chunk->set_block(local_x, (y - 1) - MIN_WORLD_Y, local_z, type);
@@ -628,13 +652,13 @@ void World::update_falling_blocks()
         mark_dirty(chunk_x, chunk_z);
 
         // Whatever water this displaced (or is now newly adjacent to the
-        // cell it vacated) should react — same as real Minecraft, sand/
+        // cell it vacated) should react - same as real Minecraft, sand/
         // gravel isn't stopped by water, it falls through and replaces it.
         schedule_fluid_neighbors(x, y, z);
         schedule_fluid_neighbors(x, y - 1, z);
 
         // Keep falling next tick if still unsupported, and let whatever
-        // was resting on top of this block — if it's also Sand or Gravel —
+        // was resting on top of this block - if it's also Sand or Gravel -
         // know it may have just lost its own support in turn.
         schedule_falling_check(x, y - 1, z);
         schedule_falling_check(x, y + 1, z);
@@ -677,12 +701,12 @@ void World::update_chunk_states(Vector3 observer_position)
     last_observer_chunk = observer_chunk;
 
     // Every chunk a generate/unload this call touches needs its mesh (and
-    // its neighbors', per rebuild_mesh_neighborhood's reasoning) rebuilt —
+    // its neighbors', per rebuild_mesh_neighborhood's reasoning) rebuilt -
     // collected here instead of meshing immediately inside generate_chunk/
     // unload_chunk, and only actually rebuilt once each in a final pass
     // below. The set dedups: a border chunk shared by several newly-loaded
     // (or unloaded) neighbors would otherwise get remeshed once per
-    // neighbor instead of once, total — measured at 1345 rebuilds for 289
+    // neighbor instead of once, total - measured at 1345 rebuilds for 289
     // chunks' worth of initial world generation before this batching, ~4.6x
     // more than the 289 actually needed.
     std::unordered_set<int64_t> needs_mesh;
@@ -696,12 +720,12 @@ void World::update_chunk_states(Vector3 observer_position)
 
     // Bring every chunk within LOADED_RADIUS up to its correct state:
     // generate whatever isn't loaded yet, then set the state that was
-    // actually asked for either way — for an already-loaded chunk that's
+    // actually asked for either way - for an already-loaded chunk that's
     // just the Active/Loaded tick flag, no generation involved.
-    int min_x = std::max(-WORLD_BORDER_CHUNKS, observer_chunk.x - LOADED_RADIUS);
-    int max_x = std::min(WORLD_BORDER_CHUNKS - 1, observer_chunk.x + LOADED_RADIUS);
-    int min_z = std::max(-WORLD_BORDER_CHUNKS, observer_chunk.z - LOADED_RADIUS);
-    int max_z = std::min(WORLD_BORDER_CHUNKS - 1, observer_chunk.z + LOADED_RADIUS);
+    int min_x = std::max(-WORLD_BORDER_CHUNKS, observer_chunk.x - config.loaded_radius_chunks);
+    int max_x = std::min(WORLD_BORDER_CHUNKS - 1, observer_chunk.x + config.loaded_radius_chunks);
+    int min_z = std::max(-WORLD_BORDER_CHUNKS, observer_chunk.z - config.loaded_radius_chunks);
+    int max_z = std::min(WORLD_BORDER_CHUNKS - 1, observer_chunk.z + config.loaded_radius_chunks);
 
     for (int cx = min_x; cx <= max_x; ++cx) {
         for (int cz = min_z; cz <= max_z; ++cz) {
@@ -716,13 +740,13 @@ void World::update_chunk_states(Vector3 observer_position)
     }
 
     // Unload anything still resident that fell outside LOADED_RADIUS.
-    // Collected first since unload_chunk() erases from `chunks` — iterating
+    // Collected first since unload_chunk() erases from `chunks` - iterating
     // and erasing from the same map at once needs more care than this is
     // worth for a scan that only runs when the observer changes chunks.
     std::vector<std::pair<int, int>> out_of_range;
     for (const auto& [key, chunk] : chunks) {
         auto [cx, cz] = unpack_chunk_key(key);
-        if (chebyshev_distance(cx, cz, observer_chunk.x, observer_chunk.z) > LOADED_RADIUS) {
+        if (chebyshev_distance(cx, cz, observer_chunk.x, observer_chunk.z) > config.loaded_radius_chunks) {
             out_of_range.emplace_back(cx, cz);
         }
     }
@@ -749,15 +773,15 @@ Vector3 World::find_spawn_position()
     };
 
     // Only once a candidate passes that check do we pay for generating its
-    // area, so this can actually confirm real, clear ground to stand on —
-    // not just "probably land" — before accepting it.
+    // area, so this can actually confirm real, clear ground to stand on -
+    // not just "probably land" - before accepting it.
     auto try_candidate = [this](int x, int z) -> std::optional<Vector3> {
         update_chunk_states({static_cast<float>(x), 0.0f, static_cast<float>(z)});
 
         for (int y = MIN_WORLD_Y + CHUNK_HEIGHT - 2; y >= MIN_WORLD_Y; --y) {
             if (!get_block_properties(get_block(x, y, z)).solid) continue;
             // Found the ground. Only actually a valid spawn if there's
-            // room to stand in above it — a beach column can dip just
+            // room to stand in above it - a beach column can dip just
             // under a nearby Sea's water level despite reading as "land"
             // by biome alone, and this rejects appearing submerged there.
             if (get_block(x, y + 1, z) == BlockType::Air && get_block(x, y + 2, z) == BlockType::Air) {
@@ -792,9 +816,9 @@ Vector3 World::find_spawn_position()
 ChunkState World::desired_state_for(int chunk_x, int chunk_z, ChunkCoordinates observer_chunk) const
 {
     int distance = chebyshev_distance(chunk_x, chunk_z, observer_chunk.x, observer_chunk.z);
-    if (distance <= ACTIVE_RADIUS) return ChunkState::Active;
-    if (distance <= LOADED_RADIUS) return ChunkState::Loaded;
-    return ChunkState::Unloaded; // never actually assigned to a Chunk — see update_chunk_states
+    if (distance <= config.active_radius_chunks) return ChunkState::Active;
+    if (distance <= config.loaded_radius_chunks) return ChunkState::Loaded;
+    return ChunkState::Unloaded; // never actually assigned to a Chunk - see update_chunk_states
 }
 
 void World::generate_chunk(int chunk_x, int chunk_z)
@@ -806,13 +830,19 @@ void World::generate_chunk(int chunk_x, int chunk_z)
     };
     auto chunk = std::make_unique<Chunk>(position);
 
-    // World data only — what a future server would own. No mesh built here:
-    // update_chunk_states() batches meshing (this chunk's and any affected
-    // neighbors') into one pass after every generate/unload this call needs
-    // is done, instead of doing it immediately per chunk.
-    chunk->generate_terrain(*terrain_noise);
-    chunk->carve_caves(seed, chunk_x, chunk_z);
-    chunk->compute_lighting();
+    // A previously-modified chunk gets its exact saved state back instead
+    // of being regenerated - an untouched chunk never has a save file at
+    // all (see unload_chunk()/~World()), so this only ever loads something
+    // a player actually changed. World data only either way - no mesh
+    // built here: update_chunk_states() batches meshing (this chunk's and
+    // any affected neighbors') into one pass after every generate/unload
+    // this call needs is done, instead of doing it immediately per chunk.
+    bool loaded_from_disk = config.save_directory && chunk->load_from_file(chunk_file_path(chunk_x, chunk_z));
+    if (!loaded_from_disk) {
+        chunk->generate_terrain(*terrain_noise);
+        chunk->carve_caves(config.seed, chunk_x, chunk_z);
+    }
+    chunk->compute_lighting(); // never persisted - cheap to rebuild either way
     chunks.emplace(chunk_key(chunk_x, chunk_z), std::move(chunk));
 }
 
@@ -821,12 +851,12 @@ void World::unload_chunk(int chunk_x, int chunk_z)
     Chunk* chunk = chunk_at(chunk_x, chunk_z);
     if (chunk == nullptr) return;
 
-    // TODO: if chunk->is_modified(), persist its block/light data to disk
-    // here before freeing it. Not implemented yet — a modified chunk's
-    // edits are lost on unload, same as if they'd never happened.
+    if (config.save_directory && chunk->is_modified()) {
+        chunk->save_to_file(chunk_file_path(chunk_x, chunk_z));
+    }
 
     chunks.erase(chunk_key(chunk_x, chunk_z)); // ~Chunk() frees the GPU mesh too
 
-    // No neighborhood remesh here — same batching reasoning as
+    // No neighborhood remesh here - same batching reasoning as
     // generate_chunk(), handled by update_chunk_states().
 }

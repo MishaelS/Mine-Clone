@@ -17,7 +17,7 @@ namespace {
     constexpr int MARGIN       = 8;
     constexpr Color BACKGROUND = {0, 0, 0, 140};
 
-    // Compass name for a (normalized) look direction, clockwise from North —
+    // Compass name for a (normalized) look direction, clockwise from North -
     // matches the world's own North = -Z / East = +X convention (see
     // Chunk.cpp's CUBE_FACES comment).
     const char* cardinal_direction(Vector3 forward)
@@ -47,7 +47,7 @@ void draw_debug_overlay(const Camera3D& camera, const World& world, float aim_re
     Biome biome = world.get_biome(block_x, block_z);
 
     // Position within the chunk itself, not just which chunk (world-space
-    // Block: line above) or which chunk grid cell (chunk.x/z) — same three-
+    // Block: line above) or which chunk grid cell (chunk.x/z) - same three-
     // tier breakdown Minecraft's own F3 "Chunk:" line shows (local x/y/z
     // "in" chunk x/z). Y doesn't wrap per chunk here (a chunk spans the
     // whole world height, no vertical stacking), so local_y == block_y.

@@ -62,7 +62,7 @@ void draw_skybox(Vector3 camera_position)
 
     // rlEnableDepthTest/rlEnableBackfaceCulling below flip GL state
     // immediately, but rlEnd() doesn't flush these quads to the GPU by
-    // itself — without this, they'd get rasterized later (whenever the
+    // itself - without this, they'd get rasterized later (whenever the
     // batch actually flushes) with depth test and culling back on, and
     // vanish: back-face culling would discard them since the camera sits
     // inside the cube, facing their back side.

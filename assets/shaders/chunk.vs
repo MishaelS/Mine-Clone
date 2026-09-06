@@ -16,13 +16,13 @@ out vec3 fragWorldPosition;
 
 uniform mat4 mvp;
 
-// Set automatically by raylib's DrawMesh() every draw call — matModel is
+// Set automatically by raylib's DrawMesh() every draw call - matModel is
 // one of its recognized-by-name uniforms, same as mvp, no extra C++ code
 // needed to feed it.
 uniform mat4 matModel;
 
 // Set once per frame from World::draw() (see Chunk.hpp's set_chunk_water_
-// time/set_chunk_water_pass) — same uniforms chunk.fs's texel scroll uses,
+// time/set_chunk_water_pass) - same uniforms chunk.fs's texel scroll uses,
 // shared here since a linked GLSL program's uniforms are one shared set
 // regardless of which stage(s) declare them.
 uniform float waterTime;
@@ -33,7 +33,7 @@ void main()
     vec3 localPosition = vertexPosition;
 
     if (isWaterPass) {
-        // Only a water surface's own already-lowered top corners ripple —
+        // Only a water surface's own already-lowered top corners ripple -
         // Chunk::append_face's top_drop (WATER_SURFACE_DROP = 2/16) leaves
         // them at a local Y whose fractional part is 0.875, distinguishing
         // them from a full-height bottom corner (fractional part 0.0).

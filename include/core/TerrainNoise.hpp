@@ -25,28 +25,28 @@ class TerrainNoise {
 public:
     explicit TerrainNoise(uint32_t seed);
 
-    // Multi-octave (fractal) height noise, roughly in [-1, 1] — the same
+    // Multi-octave (fractal) height noise, roughly in [-1, 1] - the same
     // shape as before, just factored out so it can be scaled/offset
     // differently per biome instead of by one fixed amplitude everywhere.
     float height(float world_x, float world_z, int octaves, float persistence = 0.5f) const;
 
-    // How much each biome (including Sea and Ocean) influences a world column —
+    // How much each biome (including Sea and Ocean) influences a world column -
     // Chunk::generate_terrain blends every biome's own height range/
     // surface blocks by these instead of picking just one, so a border
     // changes gradually rather than at a cliff.
     BiomeWeights biome_weights(float world_x, float world_z) const;
 
-    // dominant_biome(biome_weights(...)) — for the debug overlay, which
+    // dominant_biome(biome_weights(...)) - for the debug overlay, which
     // just wants one name, not a blend.
     Biome biome(float world_x, float world_z) const;
 
-    // Raw river noise, roughly in [-1, 1] — Chunk::generate_terrain carves
+    // Raw river noise, roughly in [-1, 1] - Chunk::generate_terrain carves
     // a channel wherever this is close to 0 (see RIVER_WIDTH there),
     // tracing this noise's zero-contour the way a real river's course
     // winds rather than following a straight or grid-aligned line.
     float river(float world_x, float world_z) const;
 
-    // Small-scale noise, roughly in [-1, 1] — Chunk::generate_terrain turns
+    // Small-scale noise, roughly in [-1, 1] - Chunk::generate_terrain turns
     // a patch of underwater sand into clay wherever this crosses above a
     // threshold, the high frequency keeping each patch small ("small
     // chunks of clay"), same idea as real Minecraft's shallow-water clay
@@ -59,7 +59,7 @@ private:
     // height()'s own detail octaves do.
     static constexpr float BIOME_FREQUENCY = 1.0f / 900.0f;
 
-    // Even lower frequency than biomes — sea/ocean/continents are the
+    // Even lower frequency than biomes - sea/ocean/continents are the
     // largest-scale feature this generates.
     static constexpr float CONTINENT_FREQUENCY = 1.0f / 1800.0f;
 
@@ -73,7 +73,7 @@ private:
     // coastline instead of the entire coastline sharing one character.
     static constexpr float COAST_FREQUENCY = 1.0f / 250.0f;
 
-    // Wavelength ~12 blocks — small enough that a patch crossing the clay
+    // Wavelength ~12 blocks - small enough that a patch crossing the clay
     // threshold only spans a handful of blocks, not a whole beach.
     static constexpr float CLAY_FREQUENCY = 1.0f / 12.0f;
 

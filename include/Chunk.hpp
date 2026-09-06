@@ -6,17 +6,18 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 
 class TerrainNoise;
 
-constexpr int CHUNK_SIZE = 16;    // width/depth (X/Z) — chunks are still only streamed in the X/Z grid (World::update_chunk_states), no vertical stacking
-constexpr int CHUNK_HEIGHT = 384; // Y — a single chunk spans the whole world height, Minecraft 1.18+'s build limit (-64..319)
+constexpr int CHUNK_SIZE = 16;    // width/depth (X/Z) - chunks are still only streamed in the X/Z grid (World::update_chunk_states), no vertical stacking
+constexpr int CHUNK_HEIGHT = 384; // Y - a single chunk spans the whole world height, Minecraft 1.18+'s build limit (-64..319)
 
-// World-space Y of a chunk's own local index 0 — Minecraft's own world
+// World-space Y of a chunk's own local index 0 - Minecraft's own world
 // floor (bedrock generates here). A Chunk's internal block/light arrays and
 // loops stay plainly 0-based (0..CHUNK_HEIGHT-1), same as X/Z; World is the
 // only place that translates a world-space Y to/from that local index, by
-// subtracting/adding this — see World::get_block()/get_light()/
+// subtracting/adding this - see World::get_block()/get_light()/
 // set_block_and_rebuild() and World::generate_chunk()'s own Y position.
 constexpr int MIN_WORLD_Y = -64;
 
@@ -28,12 +29,12 @@ constexpr int MAX_LIGHT = 15;
 
 // A chunk's simulation/render tier, based on distance from an observer (see
 // World::update_chunk_states). There's no Chunk object for an Unloaded
-// coordinate at all — World reports that state itself for any (x, z) it
+// coordinate at all - World reports that state itself for any (x, z) it
 // has no Chunk for; a live Chunk is always at least Loaded.
 //
 // This is also the seam a future client/server split grows from: Loaded
 // vs. Active already means exactly "the client should draw this, but not
-// simulate it" vs. "draw and simulate" — a server deciding that instead of
+// simulate it" vs. "draw and simulate" - a server deciding that instead of
 // each client's own distance check, and sending the result over the
 // network, wouldn't need this enum or anything that reads it to change.
 enum class ChunkState : uint8_t {
@@ -47,23 +48,23 @@ enum class ChunkState : uint8_t {
 // at full strength; FLOWING water is 1-7 blocks of horizontal distance
 // from the nearest effective source and dries up (World::update_fluids)
 // the moment nothing feeds it any more; FALLING is water with more water
-// directly above it — acts like a fresh source for spreading sideways
+// directly above it - acts like a fresh source for spreading sideways
 // *from this layer*, but unlike a real source it dries up if that feed
 // from above stops. Meaningless wherever the block itself isn't Water.
 constexpr uint8_t FLUID_LEVEL_SOURCE = 0;
 constexpr uint8_t FLUID_LEVEL_MAX_FLOW = 7;  // farthest a FLOWING level can reach; one more step than this can't flow at all
 constexpr uint8_t FLUID_LEVEL_FALLING = 8;
 
-// Compiles assets/shaders/chunk.{vs,fs} — raylib's own default mesh shader
+// Compiles assets/shaders/chunk.{vs,fs} - raylib's own default mesh shader
 // (texture*vertexColor, so AO/tint already baked into vertex colors by
 // Chunk::build_mesh keeps working unchanged) plus linear distance fog.
 // Every chunk's mesh material (get_chunk_material() in Chunk.cpp) uses this
 // one shared shader. Call once, after the window exists (needs a GL
-// context) — GameEngine's constructor does this alongside
+// context) - GameEngine's constructor does this alongside
 // Load_block_definitions()/FontManager::get().
 void load_chunk_shader();
 
-// Configures every chunk's shared atlas material for distance fog — call
+// Configures every chunk's shared atlas material for distance fog - call
 // once per frame (World::draw() does this) before any Chunk::draw(), since
 // camera_position changes every frame. Fragments at or past fog_end fade
 // fully to fog_color; fragments before fog_start are unaffected; a linear
@@ -73,14 +74,14 @@ void load_chunk_shader();
 // instead of a hard cutoff where chunks just stop being drawn.
 void set_chunk_fog(Vector3 camera_position, Color fog_color, float fog_start, float fog_end);
 
-// Feeds the water shader's own animation its clock — call once per frame
+// Feeds the water shader's own animation its clock - call once per frame
 // (World::draw() does this, same as set_chunk_fog()) with seconds since
 // startup (or any other steadily-increasing time source); drives the
 // scrolling-texel flow effect in assets/shaders/chunk.fs, active only
 // while isWaterPass is true (see set_chunk_water_pass()).
 void set_chunk_water_time(float time);
 
-// Toggles the water shader's animation on/off — true right before
+// Toggles the water shader's animation on/off - true right before
 // Chunk::draw_water() draws anything, false again right after, since
 // every chunk's opaque and water mesh share this one Material/shader (see
 // get_chunk_material() in Chunk.cpp) and the animation must only affect
@@ -89,7 +90,7 @@ void set_chunk_water_time(float time);
 void set_chunk_water_pass(bool active);
 
 // Frees the shader set_chunk_fog()/every Chunk's mesh material shares.
-// Call once before CloseWindow() — unlike the plain-texture default
+// Call once before CloseWindow() - unlike the plain-texture default
 // material this replaced, it isn't a raylib-internal resource freed
 // automatically by CloseWindow()'s own cleanup.
 void unload_chunk_fog_shader();
@@ -125,7 +126,7 @@ public:
     // ravine) can start in a neighboring chunk and wind its way into this
     // one, so `world_seed` and every chunk coordinate within
     // CAVE_CHUNK_RADIUS (Chunk.cpp) of (chunk_x, chunk_z) are re-walked
-    // here too, purely as geometry — only the parts of each path landing
+    // here too, purely as geometry - only the parts of each path landing
     // inside *this* chunk are actually carved. Because each path's shape
     // is a deterministic function of (world_seed, its own origin chunk),
     // not of generation order, a chunk generated later still carves the
@@ -133,7 +134,7 @@ public:
     // half of, so the two halves always line up into one continuous
     // tunnel/ravine. Call after generate_terrain() and before
     // compute_lighting() (so sky/block light correctly floods into the
-    // new voids) — never carves Water, Air, or Bedrock, so it can't drain
+    // new voids) - never carves Water, Air, or Bedrock, so it can't drain
     // a lake or breach the world floor.
     void carve_caves(uint32_t world_seed, int chunk_x, int chunk_z);
 
@@ -143,14 +144,14 @@ public:
     void compute_lighting();
 
     // Rebuilds the GPU mesh from the current block/light data, skipping any
-    // face whose neighbor is opaque — hidden faces never make it into the
+    // face whose neighbor is opaque - hidden faces never make it into the
     // mesh at all. At the chunk's own edges, that neighbor lives in an
-    // adjacent chunk, so the 4 side neighbors are consulted too — without
+    // adjacent chunk, so the 4 side neighbors are consulted too - without
     // them, every boundary face would be drawn as an (unnecessary, and
     // visibly wrong from inside solid ground) wall. Vertex AO and smooth
     // lighting sample one cell past a face too, which for a corner vertex
     // can land in a diagonal neighbor instead of a side one, so all 8
-    // border chunks are taken — any may be null, at the edge of the world,
+    // border chunks are taken - any may be null, at the edge of the world,
     // in which case that side reads as open/fully sunlit as before. Call
     // once after generate_terrain()/compute_lighting(), once every
     // neighbor's block data is also ready; call again after any future
@@ -160,11 +161,11 @@ public:
                      const Chunk* southwest, const Chunk* southeast);
 
     // Draws this chunk's opaque geometry (everything except translucent
-    // blocks like water — see draw_water()).
+    // blocks like water - see draw_water()).
     void draw() const override;
 
-    // Draws this chunk's translucent geometry (water — see
-    // BlockProperties::translucent) — a separate mesh from draw()'s, built
+    // Draws this chunk's translucent geometry (water - see
+    // BlockProperties::translucent) - a separate mesh from draw()'s, built
     // by the same build_mesh() call. World::draw() calls this in its own
     // pass, after every chunk's draw() (opaque geometry world-wide) and
     // with alpha blending enabled, so translucent faces correctly blend
@@ -175,14 +176,14 @@ public:
     BlockType get_block(int x, int y, int z) const;
     void set_block(int x, int y, int z, BlockType type);
 
-    // FLUID_LEVEL_SOURCE/FLOWING(1-7)/FALLING — see the constants' own
+    // FLUID_LEVEL_SOURCE/FLOWING(1-7)/FALLING - see the constants' own
     // comments. Only meaningful where get_block() is Water; garbage
     // (whatever this cell's array slot happens to hold) otherwise, since
     // nothing reads it except code that already checked the block type
     // first (World::compute_fluid_level, Chunk::build_mesh's neighbor
     // checks don't need it at all). Defaults to FLUID_LEVEL_SOURCE (0) for
-    // every cell, so terrain-generated water — never explicitly written
-    // here — reads as a source without generate_terrain needing to set it
+    // every cell, so terrain-generated water - never explicitly written
+    // here - reads as a source without generate_terrain needing to set it
     // itself, matching how a generated body of water in Minecraft is all
     // source blocks.
     uint8_t get_fluid_level(int x, int y, int z) const;
@@ -190,13 +191,13 @@ public:
 
     // max(sky, block) light, 0..15. Public so a neighboring chunk's
     // build_mesh() can sample real light data across a chunk border instead
-    // of guessing — bounds-checked to MAX_LIGHT (open, sunlit space)
+    // of guessing - bounds-checked to MAX_LIGHT (open, sunlit space)
     // outside this chunk, since there's no neighbor-chunk data to fall back
     // on here; the caller is expected to resolve cross-chunk coordinates
     // itself and call this only with this chunk's own local coordinates.
     int get_light(int x, int y, int z) const;
 
-    // Always Loaded or Active for a live Chunk (see ChunkState) — World is
+    // Always Loaded or Active for a live Chunk (see ChunkState) - World is
     // the only writer, via update_chunk_states()'s transition handling.
     ChunkState get_state() const { return state; }
     void set_state(ChunkState new_state) { state = new_state; }
@@ -204,9 +205,27 @@ public:
     // Set by World whenever a block here changes after generation
     // (break_block/place_block), so a future unload can tell a chunk that
     // needs its edits saved apart from one that can just be regenerated.
-    // Not acted on yet — see World::unload_chunk's TODO.
+    // Not acted on yet - see World::unload_chunk's TODO.
     bool is_modified() const { return modified; }
     void mark_modified() { modified = true; }
+
+    // Raw binary dump of everything a reload needs to reconstruct this
+    // chunk exactly (blocks, fluid_level, column_grass_tint,
+    // highest_block_y) behind a small magic+version header - not JSON
+    // (Json.hpp has no writer, and ~98KB of block IDs has no business
+    // being text). Light isn't included - compute_lighting() cheaply
+    // rebuilds it after either generation or load, same as it always has.
+    // Written to a ".tmp" sibling then renamed into place, so a crash
+    // mid-write can't leave a later load reading back a half-written file.
+    // Returns false (nothing written) if the file couldn't be opened.
+    bool save_to_file(const std::string& path) const;
+
+    // Inverse of save_to_file(): true and every array above overwritten
+    // from `path`; false (this Chunk's data is left untouched - the caller
+    // discards it and falls back to procedural generation, see
+    // World::generate_chunk) if the file is missing, truncated, or its
+    // header doesn't match.
+    bool load_from_file(const std::string& path);
 
 private:
     static int index(int x, int y, int z);
@@ -232,7 +251,7 @@ private:
 
     // Grass top tint for each (x, z) column, blended across every grass-
     // bearing biome's own tint by that column's BiomeWeights when
-    // generate_terrain() ran — a smooth gradient instead of a hard color
+    // generate_terrain() ran - a smooth gradient instead of a hard color
     // switch at a biome border, the same way terrain height itself blends.
     // Recomputing this from noise again at mesh-build time would work just
     // as well, but this is a 256-entry lookup instead of another noise
@@ -242,13 +261,13 @@ private:
     std::array<Color, CHUNK_SIZE * CHUNK_SIZE> column_grass_tint{};
 
     // Highest Y with a non-Air block anywhere in this chunk (generation
-    // tracks it; set_block() only ever raises it, never lowers it — cheap
+    // tracks it; set_block() only ever raises it, never lowers it - cheap
     // and safe, since overestimating just means scanning a few extra
     // guaranteed-air rows, while underestimating would hide real blocks).
     // With CHUNK_HEIGHT now 256 but actual terrain rarely reaching much
     // above 90, build_mesh() and compute_lighting() use this to skip the
     // rest of the column instead of always walking the full 256, since it's
-    // guaranteed air up there — see get_sky_light() for the one place that
+    // guaranteed air up there - see get_sky_light() for the one place that
     // needs to know the difference between "above this" and "out of chunk".
     int highest_block_y = 0;
 
@@ -257,11 +276,11 @@ private:
     bool mesh_uploaded = false;
 
     // Translucent geometry (water), built and drawn separately from `mesh`
-    // — see draw_water().
+    // - see draw_water().
     Mesh water_mesh{};
     bool water_mesh_uploaded = false;
 
-    // A live Chunk is always at least Loaded (see ChunkState) — Unloaded is
+    // A live Chunk is always at least Loaded (see ChunkState) - Unloaded is
     // never stored, only reported by World for a coordinate with no Chunk.
     ChunkState state = ChunkState::Loaded;
     bool modified = false;

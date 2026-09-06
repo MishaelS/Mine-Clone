@@ -8,6 +8,8 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <queue>
 #include <random>
 #include <vector>
@@ -18,11 +20,11 @@ namespace {
     // Terrain shape: a wavelength-~96-block rolling hill signal, layered 4
     // octaves deep for detail (Beta 1.7.3-style layering: this is itself a
     // sum of multiple noise octaves, then World Generation layers biome
-    // selection — a whole separate pair of noise maps, see TerrainNoise —
+    // selection - a whole separate pair of noise maps, see TerrainNoise -
     // on top of that). Mapped onto a height band centered on each biome's
     // own BASE_HEIGHT (comfortably inside the chunk's own local
     // 0..CHUNK_HEIGHT-1 column). Chunk stays plainly 0-based internally
-    // (see MIN_WORLD_Y in Chunk.hpp) — BiomeTerrain's heights below are
+    // (see MIN_WORLD_Y in Chunk.hpp) - BiomeTerrain's heights below are
     // LOCAL, offset by -MIN_WORLD_Y (+64) from the world-space heights
     // they're meant to represent, so e.g. a base_height of 6 there means
     // world Y ~70, not local Y 70.
@@ -35,7 +37,7 @@ namespace {
     constexpr int WATER_LEVEL = 64 - MIN_WORLD_Y;
 
     // Still water's top face sits slightly below a full block's own top,
-    // same as real Minecraft (14/16 tall, i.e. 2/16 below the top) — applied
+    // same as real Minecraft (14/16 tall, i.e. 2/16 below the top) - applied
     // in append_face() via its top_drop parameter, only to the block's
     // upward-facing corners (see there), so this doesn't touch the actual
     // block grid Chunk::get_block/is_opaque/collision reasoning uses: a
@@ -43,21 +45,21 @@ namespace {
     // mesh is shorter.
     constexpr float WATER_SURFACE_DROP = 2.0f / 16.0f;
 
-    // Per-biome terrain shape and surface/subsurface blocks — the same
+    // Per-biome terrain shape and surface/subsurface blocks - the same
     // overall column structure (bedrock, subsurface, surface, water/air)
     // for every biome, just with each biome's own numbers and blocks
     // dropped in, matching Beta 1.7.3's approach of biomes carrying both a
     // look (surface blocks) and a characteristic terrain shape rather than
     // just a color. Deliberately gentler than modern Minecraft's Extreme
-    // Hills (Beta 1.7.3 predates that terrain rework) — even Hills here
+    // Hills (Beta 1.7.3 predates that terrain rework) - even Hills here
     // stays well short of dramatic cliffs. base_height/height_variation
     // aren't used directly any more (see generate_terrain: every biome's
-    // numbers are blended by BiomeWeights instead of picking just one) —
+    // numbers are blended by BiomeWeights instead of picking just one) -
     // surface_block/subsurface_block/surface_depth still are, for whichever
     // biome ends up dominant at a given column.
     struct BiomeTerrain {
         int base_height;             // local; see the comment above on the +64 offset
-        int height_variation;        // +/- around base_height (an amplitude, not itself a height — no offset needed)
+        int height_variation;        // +/- around base_height (an amplitude, not itself a height - no offset needed)
         int surface_depth;           // layers of subsurface_block just under the surface block
         BlockType surface_block;     // the single block at the very top of the column
         BlockType subsurface_block;
@@ -68,32 +70,32 @@ namespace {
     BiomeTerrain biome_terrain(Biome biome) {
         switch (biome) {
             case Biome::Ocean:
-                // Deep and mostly flat — world Y ~10..30, i.e. up to ~54
+                // Deep and mostly flat - world Y ~10..30, i.e. up to ~54
                 // blocks below sea level (64) at its deepest, so there's
                 // real deep water for World::draw's underwater fog override
                 // to darken toward at its own deepest (see
                 // UNDERWATER_FOG_MAX_DEPTH in World.cpp). Gravel throughout,
-                // same as Sea's own floor (see the "дно" requirement) — the
+                // same as Sea's own floor (see the "дно" requirement) - the
                 // difference between the two is depth and beach material,
                 // not the floor itself.
                 return {20 - MIN_WORLD_Y, 10, 4, BlockType::Gravel, BlockType::Gravel};
             case Biome::Sea:
-                // Shallow and calm — world Y ~56..64, mostly right at sea
+                // Shallow and calm - world Y ~56..64, mostly right at sea
                 // level, so land slopes gently down into it (see the beach
                 // override in generate_terrain for the actual shoreline
                 // strip) instead of dropping to Ocean's deep floor.
                 return {60 - MIN_WORLD_Y, 4, 3, BlockType::Gravel, BlockType::Gravel};
             case Biome::Desert:
                 // Flat and dry, with deeper sand than other biomes' subsurface
-                // layer before hitting stone — world Y ~56..68, mostly right
+                // layer before hitting stone - world Y ~56..68, mostly right
                 // around sea level.
                 return {62 - MIN_WORLD_Y, 6, 6, BlockType::Sand, BlockType::Sand};
             case Biome::Forest:
                 // Mostly a smooth, gentle roll (closer to Plains than to
-                // Hills) — world Y ~62..82.
+                // Hills) - world Y ~62..82.
                 return {72 - MIN_WORLD_Y, 10, DEFAULT_SURFACE_DEPTH, BlockType::Grass, BlockType::Dirt};
             case Biome::Hills:
-                // The roughest terrain this generates — world Y ~50..114 —
+                // The roughest terrain this generates - world Y ~50..114 -
                 // but still gentle by modern-Minecraft standards, on purpose.
                 // Its tallest peaks break through HILLS_STONE_LINE into bare
                 // stone (see generate_terrain), so surface_block here only
@@ -101,30 +103,30 @@ namespace {
                 return {82 - MIN_WORLD_Y, 32, DEFAULT_SURFACE_DEPTH, BlockType::Grass, BlockType::Dirt};
             case Biome::Plains:
             default:
-                // The gentlest biome — world Y ~58..78.
+                // The gentlest biome - world Y ~58..78.
                 return {68 - MIN_WORLD_Y, 10, DEFAULT_SURFACE_DEPTH, BlockType::Grass, BlockType::Dirt};
         }
     }
 
     // Above this world height, Hills' surface turns to bare stone instead
-    // of grass/dirt — a simple tree-line/rocky-peak effect for its tallest
+    // of grass/dirt - a simple tree-line/rocky-peak effect for its tallest
     // terrain, the one place this generator lets a biome's own surface
     // block depend on height rather than purely on position.
     constexpr int HILLS_STONE_LINE = 95 - MIN_WORLD_Y;
 
     // Rivers: TerrainNoise::river() is an ordinary noise field (roughly
-    // [-1, 1]) — wherever its *absolute value* drops under RIVER_WIDTH, the
+    // [-1, 1]) - wherever its *absolute value* drops under RIVER_WIDTH, the
     // blended height above is pulled down toward RIVER_BED, tracing that
     // field's zero-contour the way a real river winds rather than running
-    // straight. RIVER_WIDTH is in noise units, not blocks — TerrainNoise's
+    // straight. RIVER_WIDTH is in noise units, not blocks - TerrainNoise's
     // own RIVER_FREQUENCY is what actually sets the width in blocks.
     constexpr float RIVER_WIDTH = 0.04f;
     constexpr int RIVER_BED = WATER_LEVEL - 3; // a few blocks under sea level, so a river reliably fills with water
 
     // A river only carves the *surface* down into a valley when its bed is
     // within this many blocks of the natural (pre-river) terrain height.
-    // Where the land is already taller than that above RIVER_BED — a ridge
-    // the river's course happens to cross — generate_terrain leaves the
+    // Where the land is already taller than that above RIVER_BED - a ridge
+    // the river's course happens to cross - generate_terrain leaves the
     // surface alone and instead tunnels a flooded channel through the rock
     // at RIVER_BED's own elevation, the same river continuing underground
     // rather than cutting an ever-deeper canyon to stay at the surface.
@@ -133,7 +135,7 @@ namespace {
 
     // Clay: TerrainNoise::clay() is a small-scale noise field: wherever it
     // crosses above CLAY_THRESHOLD, a patch of otherwise-Sand surface
-    // (always underwater — see generate_terrain) becomes Clay instead,
+    // (always underwater - see generate_terrain) becomes Clay instead,
     // matching real Minecraft's small shallow-water clay deposits. Only
     // ever replaces the surface block itself, not whatever's under it, so
     // a patch reads as a thin clay deposit sitting in the sand rather than
@@ -142,13 +144,13 @@ namespace {
 
     // Beach: land within a few blocks of sea level, close enough to Sea or
     // Ocean to notice, gets a shoreline material instead of its own
-    // biome's usual surface block — sand for a calm Sea coastline, gravel
+    // biome's usual surface block - sand for a calm Sea coastline, gravel
     // for a "wild" Ocean one with no Sea buffer, matching how the two
     // differ everywhere else (Sea = calm/sandy, Ocean = deep/rocky).
     constexpr int BEACH_HEIGHT_ABOVE_WATER = 3;
     constexpr float BEACH_COAST_WEIGHT = 0.05f; // how much Sea+Ocean weight counts as "close enough" to be a coast
 
-    // Grass top tint per biome — same idea as Minecraft's own per-biome
+    // Grass top tint per biome - same idea as Minecraft's own per-biome
     // grass color, applied here since the block's own texture tile is a
     // deliberately colorless overlay (see blocks.json's grass "color").
     // Forest and Hills deliberately share the same, slightly darker green;
@@ -160,7 +162,7 @@ namespace {
     // Blends the two grass tints above by how much Plains vs. Forest/Hills
     // influence this column, so a border between them fades the color
     // gradually instead of switching at whichever point dominant_biome()
-    // happens to flip — the same idea as blending terrain height itself.
+    // happens to flip - the same idea as blending terrain height itself.
     // Desert/Ocean/Sea weight is deliberately excluded from the average
     // (rather than fading grass toward some meaningless "tint" for sand or
     // water): those biomes just don't produce a Grass block, so whatever
@@ -209,8 +211,8 @@ namespace {
     // past one edge; a diagonal corner-of-corner sample (used for AO/light
     // at a convex vertex) steps past two edges at once when the block is
     // also at the chunk's edge on that other axis, landing in a diagonal
-    // neighbor rather than a side one. Any entry may be null — the edge of
-    // the loaded world — same as a missing side neighbor.
+    // neighbor rather than a side one. Any entry may be null - the edge of
+    // the loaded world - same as a missing side neighbor.
     struct Neighborhood {
         const Chunk* self;
         const Chunk* west, *east, *north, *south;
@@ -247,7 +249,7 @@ namespace {
         return get_block_properties(chunk->get_block(x, y, z)).solid;
     }
 
-    // Light lookup, resolved the same way — a sample that steps outside the
+    // Light lookup, resolved the same way - a sample that steps outside the
     // chunk being meshed reads the neighbor's real computed light instead
     // of assuming full sky light. Out-of-range on y or a missing neighbor
     // still reads as open, sunlit space, same as before.
@@ -308,13 +310,13 @@ namespace {
         bool cc = solid_at(nb, cells.corner[0], cells.corner[1], cells.corner[2]);
 
         // Two occupied edge-neighbors darken a vertex fully, even if the corner
-        // is empty — otherwise convex corners get a visible bright seam.
+        // is empty - otherwise convex corners get a visible bright seam.
         if (s1 && s2) return 0;
         return 3 - (static_cast<int>(s1) + static_cast<int>(s2) + static_cast<int>(cc));
     }
 
     // Average light (0..1) of the same three neighbor cells used for AO, plus
-    // the cell right outside the face — the same per-vertex sampling
+    // the cell right outside the face - the same per-vertex sampling
     // Minecraft calls "smooth lighting".
     float vertex_light(const Neighborhood& nb, int x, int y, int z, Vector3 normal, Vector3 corner) {
         NeighborCells cells = compute_neighbor_cells(x, y, z, normal, corner);
@@ -336,14 +338,14 @@ namespace {
         std::vector<unsigned char> colors;
     };
 
-    // Appends one face as two triangles (0,1,2) and (0,2,3) — the same quad,
+    // Appends one face as two triangles (0,1,2) and (0,2,3) - the same quad,
     // split for a Mesh's plain (non-quad) triangle list. `tint` (typically
     // WHITE) is multiplied into each vertex color alongside AO/light
-    // brightness — see BlockProperties::texture_tints for why a face would
+    // brightness - see BlockProperties::texture_tints for why a face would
     // ever need anything other than white. `top_drop` lowers this face's own
     // upward-facing corners (any corner at local y > 0, i.e. Top's own 4
-    // corners, or a side face's top edge — never Bottom's, which are all at
-    // y < 0) by that many world units — see WATER_SURFACE_DROP, the only
+    // corners, or a side face's top edge - never Bottom's, which are all at
+    // y < 0) by that many world units - see WATER_SURFACE_DROP, the only
     // current caller that passes anything other than the default 0.
     void append_face(MeshData& mesh_data, const Face& face, Vector3 center, Rectangle uv, const float brightness[4], Color tint, float top_drop = 0.0f) {
         Vector3 corners[4] = {face.v1, face.v2, face.v3, face.v4};
@@ -373,7 +375,7 @@ namespace {
             mesh_data.colors.push_back(static_cast<unsigned char>(brightness[corner] * tint.r));
             mesh_data.colors.push_back(static_cast<unsigned char>(brightness[corner] * tint.g));
             mesh_data.colors.push_back(static_cast<unsigned char>(brightness[corner] * tint.b));
-            // Not scaled by brightness, unlike the color channels — alpha is
+            // Not scaled by brightness, unlike the color channels - alpha is
             // this face's opacity (see BlockProperties::translucent), not
             // part of its shading.
             mesh_data.colors.push_back(tint.a);
@@ -381,7 +383,7 @@ namespace {
     }
 
     // Loaded once by load_chunk_shader() (called from GameEngine's
-    // constructor, alongside Load_block_definitions()/FontManager::get()) —
+    // constructor, alongside Load_block_definitions()/FontManager::get()) -
     // not lazily, so it's clear from the startup sequence exactly when the
     // GL context it needs is required to already exist, same as those.
     // assets/shaders/chunk.{vs,fs}: raylib's own default mesh shader
@@ -390,7 +392,7 @@ namespace {
     Shader chunk_shader{};
 
     // Every chunk's mesh samples the same block texture atlas, so they all
-    // share one Material — built lazily so it's only touched once
+    // share one Material - built lazily so it's only touched once
     // Load_block_definitions() (and so the atlas texture) has already run.
     Material& get_chunk_material() {
         static Material material = [] {
@@ -402,7 +404,7 @@ namespace {
         return material;
     }
 
-    // Copies a std::vector into a malloc'd buffer sized to match — Mesh
+    // Copies a std::vector into a malloc'd buffer sized to match - Mesh
     // fields must be malloc-compatible since UnloadMesh() frees them with
     // RL_FREE (== free() with raylib's default allocator).
     template <typename T>
@@ -420,7 +422,7 @@ void load_chunk_shader()
 
 void set_chunk_fog(Vector3 camera_position, Color fog_color, float fog_start, float fog_end)
 {
-    // Looked up by name once, not on every call — GetShaderLocation() does
+    // Looked up by name once, not on every call - GetShaderLocation() does
     // a string lookup each time, wasted work for a location that never
     // moves once the shader's compiled.
     static int camera_loc = GetShaderLocation(chunk_shader, "cameraPosition");
@@ -484,7 +486,7 @@ void Chunk::generate_terrain(const TerrainNoise& noise)
             float world_z = origin.z + z;
 
             // Biome weights first (Beta 1.7.3-style: a function of position
-            // alone, not of the terrain height about to be generated) —
+            // alone, not of the terrain height about to be generated) -
             // every biome's own height range/amplitude is blended by these
             // instead of picking just one, so crossing a border changes
             // terrain gradually instead of at a seam.
@@ -517,13 +519,13 @@ void Chunk::generate_terrain(const TerrainNoise& noise)
 
             // Rivers: pull the blended height above down toward RIVER_BED
             // wherever the river noise is close to 0, smoothly (so its
-            // banks slope into it instead of a sudden drop) — near a Desert
+            // banks slope into it instead of a sudden drop) - near a Desert
             // border (weights.desert neither ~0 nor ~1), so rivers
             // specifically cut through arid land rather than appearing
             // between every pair of biomes, and also near any Sea/Ocean
             // coastline, so a river that reaches the coast keeps carving
             // smoothly into it instead of stopping dead right at the
-            // shoreline — the same noise field's course now visibly empties
+            // shoreline - the same noise field's course now visibly empties
             // into the sea instead of vanishing at the biome border.
             bool near_desert_border = weights.desert > 0.1f && weights.desert < 0.9f;
             bool near_coast = (weights.sea + weights.ocean) > BEACH_COAST_WEIGHT;
@@ -535,13 +537,13 @@ void Chunk::generate_terrain(const TerrainNoise& noise)
                     // How much of the surface-carving strength above still
                     // applies here, fading from 1 (full open valley) at
                     // RIVER_BED itself down to 0 by RIVER_TUNNEL_DEPTH
-                    // blocks above it — a *gradual* handoff to the
+                    // blocks above it - a *gradual* handoff to the
                     // underground channel below as the natural land
                     // rises, instead of the two switching all-or-nothing
                     // at a single depth (which, since real terrain crosses
                     // that depth repeatedly along a winding river, made
                     // the river flicker between a visible valley and a
-                    // fully hidden tunnel every few blocks — reading as
+                    // fully hidden tunnel every few blocks - reading as
                     // scattered points from above rather than one
                     // continuous line).
                     float surface_ratio = 1.0f - std::clamp((height_f - RIVER_BED) / RIVER_TUNNEL_DEPTH, 0.0f, 1.0f);
@@ -549,7 +551,7 @@ void Chunk::generate_terrain(const TerrainNoise& noise)
                     height_f = height_f * (1.0f - surface_carve) + RIVER_BED * surface_carve;
                     // Always try the underground channel too, not just
                     // where the surface carve above faded out completely
-                    // — it naturally has no visible effect wherever the
+                    // - it naturally has no visible effect wherever the
                     // (possibly still-lowered) surface already reaches
                     // down that far, since the fill loop below clamps the
                     // tunnel to stay under the actual surface.
@@ -559,7 +561,7 @@ void Chunk::generate_terrain(const TerrainNoise& noise)
 
             int height = std::clamp(static_cast<int>(std::lround(height_f)), 1, CHUNK_HEIGHT - 1);
 
-            // The dominant biome's own surface blocks — except Hills, whose
+            // The dominant biome's own surface blocks - except Hills, whose
             // tallest peaks break through the tree line into bare stone
             // regardless of what biome_terrain() would otherwise say.
             BiomeTerrain terrain = biome_terrain(dominant);
@@ -572,7 +574,7 @@ void Chunk::generate_terrain(const TerrainNoise& noise)
 
             // Beach: a shallow shelf of land right at a Sea/Ocean coastline
             // gets a shoreline material instead of whatever its own land
-            // biome would otherwise put there (grass, etc.) — sand for a
+            // biome would otherwise put there (grass, etc.) - sand for a
             // calm Sea coastline, gravel for a "wild" Ocean one. Only
             // applies on the land side (Sea/Ocean columns already get
             // their own gravel floor from biome_terrain() above).
@@ -583,7 +585,7 @@ void Chunk::generate_terrain(const TerrainNoise& noise)
                 subsurface_block = surface_block;
             }
 
-            // Grass never generates underwater — same as real Minecraft,
+            // Grass never generates underwater - same as real Minecraft,
             // where a grass block needs open air/sunlight above it and
             // reverts to dirt without that. A land column's own blended
             // height can still dip below WATER_LEVEL from height noise
@@ -595,7 +597,7 @@ void Chunk::generate_terrain(const TerrainNoise& noise)
             }
 
             // Clay: small patches within underwater sand only (a beach
-            // shelf, or Desert dipping below sea level) — see CLAY_
+            // shelf, or Desert dipping below sea level) - see CLAY_
             // THRESHOLD above. Never touches subsurface_block, so a patch
             // reads as a thin deposit sitting in the sand.
             if (surface_block == BlockType::Sand && height < WATER_LEVEL &&
@@ -630,7 +632,7 @@ void Chunk::generate_terrain(const TerrainNoise& noise)
             // River tunnel: carved after the column above is already
             // filled solid, so it reads as a channel bored straight
             // through the rock rather than a shape generate_terrain built
-            // in from the start — flooded the same way a river itself is
+            // in from the start - flooded the same way a river itself is
             // filled with water above.
             if (river_tunnel) {
                 int tunnel_bottom = std::max(1, RIVER_BED - RIVER_TUNNEL_HALF_HEIGHT);
@@ -657,12 +659,12 @@ namespace {
     // How far, in chunks, a tunnel's *origin* can be from the chunk
     // actually being carved and still possibly reach into it. A tunnel
     // starting further away than this and somehow still reaching in would
-    // simply not get carved — an acceptable trade-off for how rarely a
+    // simply not get carved - an acceptable trade-off for how rarely a
     // single tunnel runs longer than this many chunks.
     constexpr int CAVE_CHUNK_RADIUS = 4;
 
     // How many chunks, on average, go by between one that actually
-    // originates a cave system — most don't. Tuned empirically (a first
+    // originates a cave system - most don't. Tuned empirically (a first
     // pass using Beta's own reported triple-nested-random.nextInt formula
     // for the count averaged nearly 5 systems per origin chunk, riddling
     // ~80% of the underground with exposed voids and making initial
@@ -671,7 +673,7 @@ namespace {
     constexpr int CAVE_CHUNK_RARITY = 6;
 
     // How many blocks of world Y a tunnel's random starting height is
-    // drawn from, added to MIN_WORLD_Y — biased toward the *bottom* of
+    // drawn from, added to MIN_WORLD_Y - biased toward the *bottom* of
     // that range (see cave_start_y), same as Beta's own bias toward deep
     // caves, just rescaled from Beta's 0-128 world onto this one's own
     // range.
@@ -679,7 +681,7 @@ namespace {
 
     // Deterministic per-chunk seed: the same (world_seed, chunk_x,
     // chunk_z) always produces the same tunnels regardless of which chunk
-    // asks for them first or when — the whole reason a tunnel can be
+    // asks for them first or when - the whole reason a tunnel can be
     // carved consistently from both sides of a chunk border. A small
     // ad-hoc mixing hash (not cryptographic, just decorrelated enough)
     // rather than something simpler like addition, so nearby chunk
@@ -713,7 +715,7 @@ namespace {
     // Clears every block within an axis-aligned ellipsoid centered on
     // (center_x, center_y, center_z) with the given horizontal (X/Z) and
     // vertical (Y) radii, but only wherever that lands inside chunk
-    // (chunk_x, chunk_z) — a tunnel step's ellipsoid is computed in full
+    // (chunk_x, chunk_z) - a tunnel step's ellipsoid is computed in full
     // world-space and this simply no-ops for the part of it (usually most
     // of it) outside this one chunk. Never touches Water (so a tunnel
     // can't drain into or flood from a lake it happens to pass near),
@@ -749,7 +751,7 @@ namespace {
         }
     }
 
-    // Walks one tunnel from (x, y, z), carving as it goes — everything
+    // Walks one tunnel from (x, y, z), carving as it goes - everything
     // past the starting point (heading, length, how the radius tapers) is
     // decided here from `rng`, which the caller has already seeded
     // deterministically, so replaying this from any chunk within
@@ -775,7 +777,7 @@ namespace {
 
             // Pitch decays back toward level and yaw/pitch's own drift is
             // itself randomly (and smoothly, since it's velocity rather
-            // than position) perturbed each step — an organically curving
+            // than position) perturbed each step - an organically curving
             // path instead of one long straight line or pure noise-free
             // randomness at every step.
             pitch *= 0.92;
@@ -792,7 +794,7 @@ namespace {
     // separate winding tunnels branching from one starting point, but
     // occasionally (1 in 4) a single much fatter cavern-like tunnel
     // instead. `origin_chunk_x/z` is where the system starts (and where
-    // its own share of `rng`'s random calls come from) — `carve_chunk_x/z`
+    // its own share of `rng`'s random calls come from) - `carve_chunk_x/z`
     // is the chunk actually being written to right now, which may or may
     // not be the same chunk.
     void carve_cave_system(Chunk& chunk, int carve_chunk_x, int carve_chunk_z,
@@ -823,17 +825,17 @@ namespace {
     // Beta 1.7.3 carved ravines as their own thing alongside normal cave
     // tunnels: one single long crack, narrow side-to-side but stretched
     // much taller than it is wide, wandering far less than a cave tunnel
-    // does and starting closer to the surface — often breaking through
+    // does and starting closer to the surface - often breaking through
     // into a visible open-air gorge rather than staying safely buried.
 
     // How many chunks, on average, go by between one that actually
-    // originates a ravine — deliberately much rarer than a cave system
+    // originates a ravine - deliberately much rarer than a cave system
     // (see CAVE_CHUNK_RARITY above), since a ravine is meant to read as a
     // rare, striking find rather than a common feature.
     constexpr int RAVINE_CHUNK_RARITY = 30; // 60;
 
     // Ravines are biased toward starting higher up than caves are (see
-    // cave_start_y's own deep bias) — real ravines commonly cut close to
+    // cave_start_y's own deep bias) - real ravines commonly cut close to
     // the surface, sometimes exposing themselves as an open gorge.
     constexpr float RAVINE_HEIGHT_RANGE = 220.0f;
 
@@ -849,7 +851,7 @@ namespace {
     // A ravine's own walk: the same drifting-heading idea as carve_tunnel,
     // but with far less yaw/pitch drift (a ravine reads as one long,
     // mostly-straight crack, not a winding cave) and a very different
-    // cross-section — narrow horizontally, stretched tall vertically, so
+    // cross-section - narrow horizontally, stretched tall vertically, so
     // it carves like a canyon rather than a round tunnel.
     void carve_ravine(Chunk& chunk, int chunk_x, int chunk_z, std::mt19937_64& rng,
                        double x, double y, double z, int length) {
@@ -908,6 +910,61 @@ void Chunk::carve_caves(uint32_t world_seed, int chunk_x, int chunk_z)
     }
 }
 
+namespace {
+    constexpr uint32_t CHUNK_FILE_MAGIC = 0x4D434348u; // "MCCH"
+    constexpr uint32_t CHUNK_FILE_VERSION = 1u;
+}
+
+bool Chunk::save_to_file(const std::string& path) const
+{
+    std::filesystem::path target(path);
+    std::filesystem::path tmp = target;
+    tmp += ".tmp";
+
+    std::error_code ec;
+    if (target.has_parent_path()) std::filesystem::create_directories(target.parent_path(), ec);
+
+    std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+    if (!out) return false;
+
+    uint32_t magic = CHUNK_FILE_MAGIC;
+    uint32_t version = CHUNK_FILE_VERSION;
+    int32_t highest = static_cast<int32_t>(highest_block_y);
+    out.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
+    out.write(reinterpret_cast<const char*>(&version), sizeof(version));
+    out.write(reinterpret_cast<const char*>(blocks.data()), blocks.size());
+    out.write(reinterpret_cast<const char*>(fluid_level.data()), fluid_level.size());
+    out.write(reinterpret_cast<const char*>(column_grass_tint.data()), column_grass_tint.size() * sizeof(Color));
+    out.write(reinterpret_cast<const char*>(&highest), sizeof(highest));
+    out.close();
+    if (!out) return false;
+
+    std::filesystem::rename(tmp, target, ec);
+    return !ec;
+}
+
+bool Chunk::load_from_file(const std::string& path)
+{
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return false;
+
+    uint32_t magic = 0;
+    uint32_t version = 0;
+    in.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+    in.read(reinterpret_cast<char*>(&version), sizeof(version));
+    if (!in || magic != CHUNK_FILE_MAGIC || version != CHUNK_FILE_VERSION) return false;
+
+    in.read(reinterpret_cast<char*>(blocks.data()), blocks.size());
+    in.read(reinterpret_cast<char*>(fluid_level.data()), fluid_level.size());
+    in.read(reinterpret_cast<char*>(column_grass_tint.data()), column_grass_tint.size() * sizeof(Color));
+    int32_t highest = 0;
+    in.read(reinterpret_cast<char*>(&highest), sizeof(highest));
+    if (!in) return false; // truncated - don't trust a partial read
+
+    highest_block_y = highest;
+    return true;
+}
+
 BlockType Chunk::get_block(int x, int y, int z) const
 {
     return blocks[index(x, y, z)];
@@ -916,7 +973,7 @@ BlockType Chunk::get_block(int x, int y, int z) const
 void Chunk::set_block(int x, int y, int z, BlockType type)
 {
     blocks[index(x, y, z)] = type;
-    // Only ever raises highest_block_y, never lowers it — see its
+    // Only ever raises highest_block_y, never lowers it - see its
     // declaration in Chunk.hpp for why that's the safe direction to be
     // wrong in. Covers both generation (each column's own content) and any
     // later player-placed block above it (e.g. a tower).
@@ -946,14 +1003,14 @@ bool Chunk::is_opaque(int x, int y, int z) const
 int Chunk::get_sky_light(int x, int y, int z) const
 {
     if (x < 0 || x >= CHUNK_SIZE || y < 0 || y >= CHUNK_HEIGHT || z < 0 || z >= CHUNK_SIZE) {
-        // No neighbor-chunk data yet (same as is_opaque) — assume open,
+        // No neighbor-chunk data yet (same as is_opaque) - assume open,
         // sunlit space rather than reading as pitch black at chunk edges.
         return MAX_LIGHT;
     }
     if (y > highest_block_y) {
         // compute_lighting()'s top-down scan starts at highest_block_y, not
         // CHUNK_HEIGHT-1, since everything above it is guaranteed air in
-        // every column of this chunk — so it never actually writes a value
+        // every column of this chunk - so it never actually writes a value
         // up here. That's still genuinely open sky, same as the out-of-
         // chunk case above, not the light[]'s untouched 0 default.
         return MAX_LIGHT;
@@ -991,7 +1048,7 @@ int Chunk::get_light(int x, int y, int z) const
 void Chunk::compute_lighting()
 {
     // Only y <= highest_block_y is ever read back (get_sky_light() reports
-    // MAX_LIGHT, without touching the array, for anything above it) — and
+    // MAX_LIGHT, without touching the array, for anything above it) - and
     // since y is the slowest-varying index in Chunk::index(), every cell
     // with y <= highest_block_y occupies one contiguous prefix of this flat
     // array. No need to reset (or, below, scan) anything past that; called
@@ -1007,7 +1064,7 @@ void Chunk::compute_lighting()
     // Direct sky exposure: scan each column from the top, stop at the first
     // opaque block. Cells below it get lit later, if at all, by the BFS
     // spreading sideways from a neighboring open column. Starts at
-    // highest_block_y, not CHUNK_HEIGHT-1 — every cell above that is
+    // highest_block_y, not CHUNK_HEIGHT-1 - every cell above that is
     // guaranteed air in every column of this chunk (get_sky_light() reports
     // MAX_LIGHT up there without this scan ever needing to visit it).
     for (int x = 0; x < CHUNK_SIZE; ++x) {
@@ -1021,7 +1078,7 @@ void Chunk::compute_lighting()
     }
 
     // Block light sources: any block with luminance > 0. Bounded the same
-    // way — no block exists above highest_block_y to be a light source.
+    // way - no block exists above highest_block_y to be a light source.
     for (int x = 0; x < CHUNK_SIZE; ++x) {
         for (int y = 0; y <= highest_block_y; ++y) {
             for (int z = 0; z < CHUNK_SIZE; ++z) {
@@ -1088,14 +1145,14 @@ void Chunk::build_mesh(const Chunk* west, const Chunk* east, const Chunk* north,
         water_mesh_uploaded = false;
     }
 
-    // Built up separately since they're drawn separately — see draw_water().
+    // Built up separately since they're drawn separately - see draw_water().
     MeshData opaque_data;
     MeshData water_data;
     Neighborhood nb{this, west, east, north, south, northwest, northeast, southwest, southeast};
 
     // A coordinate that steps outside this chunk's own 0..CHUNK_SIZE-1 range
     // is looked up in the appropriate neighbor instead of being treated as
-    // open — that neighbor's own block data has already been generated by
+    // open - that neighbor's own block data has already been generated by
     // the time build_mesh() runs. A null neighbor (the edge of the world),
     // same as stepping above/below the world on Y, reads as Air. A face's
     // own normal only ever steps one axis at a time, so the diagonal
@@ -1133,8 +1190,8 @@ void Chunk::build_mesh(const Chunk* west, const Chunk* east, const Chunk* north,
 
                 // Water-only: a block with Water directly above it is
                 // interior to a body of water, not its surface (and its Top
-                // face is never actually meshed anyway — same-translucent-
-                // type culling below skips it) — only a true surface block
+                // face is never actually meshed anyway - same-translucent-
+                // type culling below skips it) - only a true surface block
                 // gets the lowered top geometry (top_drop, WATER_SURFACE_
                 // DROP) real still water has in Minecraft.
                 float top_drop = 0.0f;
@@ -1153,14 +1210,16 @@ void Chunk::build_mesh(const Chunk* west, const Chunk* east, const Chunk* north,
                     // Hidden-face culling: a face whose neighbor is opaque
                     // can never be seen, so it's left out of the mesh
                     // entirely rather than drawn and hidden behind it. A
-                    // face between two blocks of the same translucent type
-                    // (e.g. two water blocks) is skipped the same way —
-                    // Minecraft doesn't draw the water-water (or
-                    // glass-glass) boundary inside a solid body of it
-                    // either, only where it meets something actually
-                    // different.
+                    // face between two blocks of the exact same transparent
+                    // type (e.g. two water blocks, or two foliage/glass
+                    // blocks) is skipped the same way - Minecraft doesn't
+                    // draw the water-water or leaves-leaves (or glass-glass)
+                    // boundary inside a solid body of it either, only where
+                    // it meets something actually different (including
+                    // Air). Different transparent types still show their
+                    // shared face normally - glass against foliage, say.
                     if (!get_block_properties(neighbor_type).transparent) continue;
-                    if (properties.translucent && neighbor_type == type) continue;
+                    if (properties.transparent && neighbor_type == type) continue;
 
                     Vector3 corners[4] = {f.v1, f.v2, f.v3, f.v4};
                     float brightness[4];
@@ -1176,7 +1235,7 @@ void Chunk::build_mesh(const Chunk* west, const Chunk* east, const Chunk* north,
                     // blocks.json's texture_tints would give every Grass
                     // block regardless of where it is. Water's own tint
                     // deliberately does *not* vary with depth the same way
-                    // — it stays blocks.json's one plain color everywhere,
+                    // - it stays blocks.json's one plain color everywhere,
                     // same as real Minecraft's water surface; depth instead
                     // darkens *visibility* (World::draw's underwater fog
                     // override, set_chunk_fog), not the water block itself.
@@ -1225,7 +1284,7 @@ void Chunk::draw_water() const
 {
     if (!water_mesh_uploaded) return;
 
-    // Same material (texture, shader, fog) as draw()'s opaque mesh — only
+    // Same material (texture, shader, fog) as draw()'s opaque mesh - only
     // the GL blend/depth state around this call differs, and that's
     // World::draw()'s job, not this one's: every chunk's draw() needs to
     // happen before every chunk's draw_water() (see World::draw()'s own
