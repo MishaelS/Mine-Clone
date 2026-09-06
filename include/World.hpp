@@ -274,6 +274,12 @@ private:
     // edits are lost once it unloads.
     void unload_chunk(int chunk_x, int chunk_z);
 
+    // Kept separately from terrain_noise (which only exposes specific
+    // named noise layers) since cave generation needs the raw seed itself
+    // to derive its own per-chunk deterministic RNG — see
+    // Chunk::carve_caves.
+    uint32_t seed;
+
     std::unique_ptr<TerrainNoise> terrain_noise;
     ChunkMap chunks;
 

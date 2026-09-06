@@ -75,6 +75,7 @@ namespace {
     const std::unordered_map<std::string, BlockType> NAME_TO_TYPE = {
         {"grass"       , BlockType::Grass      },
         {"dirt"        , BlockType::Dirt       },
+        {"foliage"     , BlockType::Foliage    },
         {"oak_log"     , BlockType::OakLog     },
         {"oak_planks"  , BlockType::OakPlanks  },
         {"sand"        , BlockType::Sand       },
@@ -89,6 +90,7 @@ namespace {
         {"redstone_ore", BlockType::RedstoneOre},
         {"bedrock"     , BlockType::Bedrock    },
         {"water"       , BlockType::Water      },
+        {"workbench"   , BlockType::Workbench  },
     };
 }
 

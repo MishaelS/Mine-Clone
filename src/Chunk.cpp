@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <queue>
+#include <random>
 #include <vector>
 
 namespace {
@@ -637,6 +638,271 @@ void Chunk::generate_terrain(const TerrainNoise& noise)
                 for (int y = tunnel_bottom; y <= tunnel_top; ++y) {
                     set_block(x, y, z, BlockType::Water);
                 }
+            }
+        }
+    }
+}
+
+namespace {
+    // --- Cave generation: Beta 1.7.3-style "Perlin worms" ---
+    //
+    // A tunnel is a 3D random walk: start at a point, then repeatedly step
+    // forward along a (yaw, pitch) heading that itself drifts by a small
+    // random amount each step (rather than being re-picked from scratch),
+    // carving an ellipsoid of empty space around every point along the
+    // way. This is the same shape of algorithm real Minecraft used from
+    // early Alpha through 1.17, before 1.18 replaced it with 3D
+    // noise-density "cheese/spaghetti" caves.
+
+    // How far, in chunks, a tunnel's *origin* can be from the chunk
+    // actually being carved and still possibly reach into it. A tunnel
+    // starting further away than this and somehow still reaching in would
+    // simply not get carved — an acceptable trade-off for how rarely a
+    // single tunnel runs longer than this many chunks.
+    constexpr int CAVE_CHUNK_RADIUS = 4;
+
+    // How many chunks, on average, go by between one that actually
+    // originates a cave system — most don't. Tuned empirically (a first
+    // pass using Beta's own reported triple-nested-random.nextInt formula
+    // for the count averaged nearly 5 systems per origin chunk, riddling
+    // ~80% of the underground with exposed voids and making initial
+    // world load ~9x slower) rather than by trying to reproduce that
+    // formula exactly.
+    constexpr int CAVE_CHUNK_RARITY = 6;
+
+    // How many blocks of world Y a tunnel's random starting height is
+    // drawn from, added to MIN_WORLD_Y — biased toward the *bottom* of
+    // that range (see cave_start_y), same as Beta's own bias toward deep
+    // caves, just rescaled from Beta's 0-128 world onto this one's own
+    // range.
+    constexpr float CAVE_HEIGHT_RANGE = 150.0f;
+
+    // Deterministic per-chunk seed: the same (world_seed, chunk_x,
+    // chunk_z) always produces the same tunnels regardless of which chunk
+    // asks for them first or when — the whole reason a tunnel can be
+    // carved consistently from both sides of a chunk border. A small
+    // ad-hoc mixing hash (not cryptographic, just decorrelated enough)
+    // rather than something simpler like addition, so nearby chunk
+    // coordinates don't produce suspiciously similar seeds.
+    uint64_t cave_chunk_seed(uint32_t world_seed, int chunk_x, int chunk_z) {
+        uint64_t h = world_seed + 0x9E3779B97F4A7C15ULL;
+        h ^= static_cast<uint64_t>(static_cast<uint32_t>(chunk_x)) * 0xBF58476D1CE4E5B9ULL;
+        h ^= h >> 33; h *= 0xFF51AFD7ED558CCDULL; h ^= h >> 33;
+        h ^= static_cast<uint64_t>(static_cast<uint32_t>(chunk_z)) * 0xC4CEB9FE1A85EC53ULL;
+        h ^= h >> 33; h *= 0xFF51AFD7ED558CCDULL; h ^= h >> 33;
+        return h;
+    }
+
+    double cave_random_double(std::mt19937_64& rng) {
+        return std::uniform_real_distribution<double>(0.0, 1.0)(rng);
+    }
+
+    int cave_random_int(std::mt19937_64& rng, int bound) {
+        if (bound <= 1) return 0;
+        return std::uniform_int_distribution<int>(0, bound - 1)(rng);
+    }
+
+    // Biased toward MIN_WORLD_Y: the product of two uniform [0,1) values
+    // skews toward 0 (real Minecraft's own trick for making deep caves
+    // more common than shallow ones without excluding shallow ones
+    // outright).
+    float cave_start_y(std::mt19937_64& rng) {
+        return MIN_WORLD_Y + static_cast<float>(cave_random_double(rng) * cave_random_double(rng)) * CAVE_HEIGHT_RANGE;
+    }
+
+    // Clears every block within an axis-aligned ellipsoid centered on
+    // (center_x, center_y, center_z) with the given horizontal (X/Z) and
+    // vertical (Y) radii, but only wherever that lands inside chunk
+    // (chunk_x, chunk_z) — a tunnel step's ellipsoid is computed in full
+    // world-space and this simply no-ops for the part of it (usually most
+    // of it) outside this one chunk. Never touches Water (so a tunnel
+    // can't drain into or flood from a lake it happens to pass near),
+    // Bedrock, or cells already Air.
+    void carve_ellipsoid(Chunk& chunk, int chunk_x, int chunk_z, double center_x, double center_y, double center_z,
+                          double horizontal_radius, double vertical_radius) {
+        if (horizontal_radius <= 0.0 || vertical_radius <= 0.0) return;
+
+        int chunk_min_x = chunk_x * CHUNK_SIZE;
+        int chunk_min_z = chunk_z * CHUNK_SIZE;
+        int min_x = std::max(0, static_cast<int>(std::floor(center_x - horizontal_radius)) - chunk_min_x);
+        int max_x = std::min(CHUNK_SIZE - 1, static_cast<int>(std::ceil(center_x + horizontal_radius)) - chunk_min_x);
+        int min_z = std::max(0, static_cast<int>(std::floor(center_z - horizontal_radius)) - chunk_min_z);
+        int max_z = std::min(CHUNK_SIZE - 1, static_cast<int>(std::ceil(center_z + horizontal_radius)) - chunk_min_z);
+        int min_y = std::max(1, static_cast<int>(std::floor(center_y - vertical_radius)) - MIN_WORLD_Y);
+        int max_y = std::min(CHUNK_HEIGHT - 1, static_cast<int>(std::ceil(center_y + vertical_radius)) - MIN_WORLD_Y);
+
+        for (int lx = min_x; lx <= max_x; ++lx) {
+            double dx = (chunk_min_x + lx + 0.5 - center_x) / horizontal_radius;
+            for (int lz = min_z; lz <= max_z; ++lz) {
+                double dz = (chunk_min_z + lz + 0.5 - center_z) / horizontal_radius;
+                double horizontal = dx * dx + dz * dz;
+                if (horizontal >= 1.0) continue; // outside the ellipse at every height
+                for (int ly = min_y; ly <= max_y; ++ly) {
+                    double dy = (ly + MIN_WORLD_Y + 0.5 - center_y) / vertical_radius;
+                    if (horizontal + dy * dy >= 1.0) continue;
+
+                    BlockType existing = chunk.get_block(lx, ly, lz);
+                    if (existing == BlockType::Air || existing == BlockType::Water || existing == BlockType::Bedrock) continue;
+                    chunk.set_block(lx, ly, lz, BlockType::Air);
+                }
+            }
+        }
+    }
+
+    // Walks one tunnel from (x, y, z), carving as it goes — everything
+    // past the starting point (heading, length, how the radius tapers) is
+    // decided here from `rng`, which the caller has already seeded
+    // deterministically, so replaying this from any chunk within
+    // CAVE_CHUNK_RADIUS reproduces the identical path.
+    void carve_tunnel(Chunk& chunk, int chunk_x, int chunk_z, std::mt19937_64& rng,
+                       double x, double y, double z, float radius_scale, int length) {
+        double yaw = cave_random_double(rng) * 2.0 * PI;
+        double pitch = (cave_random_double(rng) - 0.5) * 0.25;
+        double yaw_velocity = 0.0;
+        double pitch_velocity = 0.0;
+        double base_radius = (cave_random_double(rng) * 2.0 + cave_random_double(rng)) * radius_scale;
+
+        for (int step = 0; step < length; ++step) {
+            // Widest around the middle of its length, tapering to a point
+            // at both ends, rather than a uniform-diameter pipe.
+            double taper = std::sin(PI * step / length);
+            double horizontal_radius = 1.5 + taper * base_radius;
+            double vertical_radius = horizontal_radius * 0.5; // flatter than it is wide, same as Beta's own tunnels
+
+            x += std::cos(yaw) * std::cos(pitch);
+            z += std::sin(yaw) * std::cos(pitch);
+            y += std::sin(pitch);
+
+            // Pitch decays back toward level and yaw/pitch's own drift is
+            // itself randomly (and smoothly, since it's velocity rather
+            // than position) perturbed each step — an organically curving
+            // path instead of one long straight line or pure noise-free
+            // randomness at every step.
+            pitch *= 0.92;
+            yaw_velocity += (cave_random_double(rng) - cave_random_double(rng)) * cave_random_double(rng) * 2.0;
+            pitch_velocity += (cave_random_double(rng) - cave_random_double(rng)) * cave_random_double(rng) * 4.0;
+            yaw += yaw_velocity * 0.1;
+            pitch += pitch_velocity * 0.1;
+
+            carve_ellipsoid(chunk, chunk_x, chunk_z, x, y, z, horizontal_radius, vertical_radius);
+        }
+    }
+
+    // Every tunnel *system* originating in one chunk: usually a handful of
+    // separate winding tunnels branching from one starting point, but
+    // occasionally (1 in 4) a single much fatter cavern-like tunnel
+    // instead. `origin_chunk_x/z` is where the system starts (and where
+    // its own share of `rng`'s random calls come from) — `carve_chunk_x/z`
+    // is the chunk actually being written to right now, which may or may
+    // not be the same chunk.
+    void carve_cave_system(Chunk& chunk, int carve_chunk_x, int carve_chunk_z,
+                            int origin_chunk_x, int origin_chunk_z, std::mt19937_64& rng) {
+        double start_x = origin_chunk_x * CHUNK_SIZE + cave_random_double(rng) * CHUNK_SIZE;
+        double start_y = cave_start_y(rng);
+        double start_z = origin_chunk_z * CHUNK_SIZE + cave_random_double(rng) * CHUNK_SIZE;
+
+        int branch_count = 1;
+        float radius_scale = 1.0f;
+        if (cave_random_int(rng, 4) == 0) {
+            radius_scale = static_cast<float>(cave_random_double(rng) * 6.0 + 1.0); // one big cavern instead
+        } else {
+            branch_count = 1 + cave_random_int(rng, 4);
+        }
+
+        for (int branch = 0; branch < branch_count; ++branch) {
+            int length = 25 + cave_random_int(rng, 15);
+            if (cave_random_int(rng, 6) == 0) {
+                length += cave_random_int(rng, 100); // a rare, much longer system
+            }
+            carve_tunnel(chunk, carve_chunk_x, carve_chunk_z, rng, start_x, start_y, start_z, radius_scale, length);
+        }
+    }
+
+    // --- Ravines: a separate, much rarer carving feature ---
+    //
+    // Beta 1.7.3 carved ravines as their own thing alongside normal cave
+    // tunnels: one single long crack, narrow side-to-side but stretched
+    // much taller than it is wide, wandering far less than a cave tunnel
+    // does and starting closer to the surface — often breaking through
+    // into a visible open-air gorge rather than staying safely buried.
+
+    // How many chunks, on average, go by between one that actually
+    // originates a ravine — deliberately much rarer than a cave system
+    // (see CAVE_CHUNK_RARITY above), since a ravine is meant to read as a
+    // rare, striking find rather than a common feature.
+    constexpr int RAVINE_CHUNK_RARITY = 30; // 60;
+
+    // Ravines are biased toward starting higher up than caves are (see
+    // cave_start_y's own deep bias) — real ravines commonly cut close to
+    // the surface, sometimes exposing themselves as an open gorge.
+    constexpr float RAVINE_HEIGHT_RANGE = 220.0f;
+
+    // XORed into world_seed before deriving a ravine's own per-chunk RNG,
+    // so a chunk's ravine roll and its cave roll are decorrelated instead
+    // of being (or not being) the exact same coin flip every time.
+    constexpr uint32_t RAVINE_SEED_SALT = 0x52415649u; // "RAVI"
+
+    float ravine_start_y(std::mt19937_64& rng) {
+        return MIN_WORLD_Y + static_cast<float>(cave_random_double(rng)) * RAVINE_HEIGHT_RANGE;
+    }
+
+    // A ravine's own walk: the same drifting-heading idea as carve_tunnel,
+    // but with far less yaw/pitch drift (a ravine reads as one long,
+    // mostly-straight crack, not a winding cave) and a very different
+    // cross-section — narrow horizontally, stretched tall vertically, so
+    // it carves like a canyon rather than a round tunnel.
+    void carve_ravine(Chunk& chunk, int chunk_x, int chunk_z, std::mt19937_64& rng,
+                       double x, double y, double z, int length) {
+        double yaw = cave_random_double(rng) * 2.0 * PI;
+        double pitch = (cave_random_double(rng) - 0.5) * 0.15;
+        double yaw_velocity = 0.0;
+        double pitch_velocity = 0.0;
+        double horizontal_scale = cave_random_double(rng) * 1.5 + 1.0; // stays narrow
+        double vertical_scale = cave_random_double(rng) * 3.0 + 4.0;   // but tall
+
+        for (int step = 0; step < length; ++step) {
+            double taper = std::sin(PI * step / length);
+            double horizontal_radius = 1.0 + taper * horizontal_scale;
+            double vertical_radius = 2.0 + taper * vertical_scale;
+
+            x += std::cos(yaw) * std::cos(pitch);
+            z += std::sin(yaw) * std::cos(pitch);
+            y += std::sin(pitch) * 0.5; // shallower descent than a cave tunnel's own
+
+            pitch *= 0.95;
+            yaw_velocity += (cave_random_double(rng) - cave_random_double(rng)) * cave_random_double(rng) * 0.5;
+            pitch_velocity += (cave_random_double(rng) - cave_random_double(rng)) * cave_random_double(rng) * 1.0;
+            yaw += yaw_velocity * 0.05;
+            pitch += pitch_velocity * 0.05;
+
+            carve_ellipsoid(chunk, chunk_x, chunk_z, x, y, z, horizontal_radius, vertical_radius);
+        }
+    }
+}
+
+void Chunk::carve_caves(uint32_t world_seed, int chunk_x, int chunk_z)
+{
+    for (int origin_x = chunk_x - CAVE_CHUNK_RADIUS; origin_x <= chunk_x + CAVE_CHUNK_RADIUS; ++origin_x) {
+        for (int origin_z = chunk_z - CAVE_CHUNK_RADIUS; origin_z <= chunk_z + CAVE_CHUNK_RADIUS; ++origin_z) {
+            std::mt19937_64 rng(cave_chunk_seed(world_seed, origin_x, origin_z));
+
+            // Most chunks originate nothing at all.
+            if (cave_random_int(rng, CAVE_CHUNK_RARITY) == 0) {
+                int system_count = 1 + cave_random_int(rng, 3);
+                for (int i = 0; i < system_count; ++i) {
+                    carve_cave_system(*this, chunk_x, chunk_z, origin_x, origin_z, rng);
+                }
+            }
+
+            // A separate RNG stream (own salted seed) so a chunk's ravine
+            // roll isn't the same coin flip as its cave roll above.
+            std::mt19937_64 ravine_rng(cave_chunk_seed(world_seed ^ RAVINE_SEED_SALT, origin_x, origin_z));
+            if (cave_random_int(ravine_rng, RAVINE_CHUNK_RARITY) == 0) {
+                double start_x = origin_x * CHUNK_SIZE + cave_random_double(ravine_rng) * CHUNK_SIZE;
+                double start_y = ravine_start_y(ravine_rng);
+                double start_z = origin_z * CHUNK_SIZE + cave_random_double(ravine_rng) * CHUNK_SIZE;
+                int length = 40 + cave_random_int(ravine_rng, 40);
+                carve_ravine(*this, chunk_x, chunk_z, ravine_rng, start_x, start_y, start_z, length);
             }
         }
     }

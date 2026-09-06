@@ -115,6 +115,28 @@ public:
     // height and biome are continuous across chunk borders.
     void generate_terrain(const TerrainNoise& noise);
 
+    // Carves cave tunnels (and, much more rarely, ravines) into this
+    // chunk's already-generated terrain, Beta 1.7.3-style: a "Perlin worm"
+    // random walk (see the .cpp) rather than the 3D density-function
+    // caves modern Minecraft replaced this with in 1.18. A ravine is the
+    // same idea carved narrow-and-tall instead of round, starting closer
+    // to the surface, and rolled on its own separate rarity so it doesn't
+    // just track wherever a cave system happens to roll too. A tunnel (or
+    // ravine) can start in a neighboring chunk and wind its way into this
+    // one, so `world_seed` and every chunk coordinate within
+    // CAVE_CHUNK_RADIUS (Chunk.cpp) of (chunk_x, chunk_z) are re-walked
+    // here too, purely as geometry — only the parts of each path landing
+    // inside *this* chunk are actually carved. Because each path's shape
+    // is a deterministic function of (world_seed, its own origin chunk),
+    // not of generation order, a chunk generated later still carves the
+    // exact same path a neighbor generated earlier already carved its own
+    // half of, so the two halves always line up into one continuous
+    // tunnel/ravine. Call after generate_terrain() and before
+    // compute_lighting() (so sky/block light correctly floods into the
+    // new voids) — never carves Water, Air, or Bedrock, so it can't drain
+    // a lake or breach the world floor.
+    void carve_caves(uint32_t world_seed, int chunk_x, int chunk_z);
+
     // Full sky+block light recompute via BFS flood fill. Call after the block
     // layout is set. Incremental (BFS-from-the-change-only) updates for
     // placing/breaking single blocks come with Block Interaction.

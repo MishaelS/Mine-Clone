@@ -169,7 +169,8 @@ namespace {
 }
 
 World::World(uint32_t seed)
-    : terrain_noise(std::make_unique<TerrainNoise>(seed))
+    : seed(seed)
+    , terrain_noise(std::make_unique<TerrainNoise>(seed))
 {
     // Nothing is loaded yet — the first update_chunk_states() call (see
     // GameEngine::set_world()/tick()) populates the world around wherever
@@ -810,6 +811,7 @@ void World::generate_chunk(int chunk_x, int chunk_z)
     // neighbors') into one pass after every generate/unload this call needs
     // is done, instead of doing it immediately per chunk.
     chunk->generate_terrain(*terrain_noise);
+    chunk->carve_caves(seed, chunk_x, chunk_z);
     chunk->compute_lighting();
     chunks.emplace(chunk_key(chunk_x, chunk_z), std::move(chunk));
 }

@@ -13,6 +13,7 @@ enum class BlockType : uint8_t {
     Air,
     Grass,
     Dirt,
+    Foliage,
     OakLog,
     OakPlanks,
     Sand,
@@ -27,6 +28,7 @@ enum class BlockType : uint8_t {
     RedstoneOre,
     Bedrock,
     Water,
+    Workbench,
     Count, // not a real block; sentinel for table/array sizing
 };
 
