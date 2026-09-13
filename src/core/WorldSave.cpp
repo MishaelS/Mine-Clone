@@ -43,6 +43,70 @@ namespace {
         return out;
     }
 
+    // Shared by player.json's hotbar/inventory arrays and items.json's own
+    // dropped-item list (see save_dropped_items()/load_dropped_items()) -
+    // one canonical ItemStack<->JSON mapping instead of two copies that
+    // could quietly drift apart.
+    void write_item_stack(std::ostream& out, const ItemStack& stack) {
+        if (stack.empty()) {
+            out << "{ \"type\": \"air\", \"count\": 0 }";
+        } else if (stack.is_tool()) {
+            out << "{ \"tool\": \"" << get_item_name(stack.tool) << "\", \"durability\": " << stack.durability << " }";
+        } else if (stack.is_material()) {
+            out << "{ \"item\": \"" << get_item_name(stack.tool) << "\", \"count\": " << stack.count << " }";
+        } else {
+            out << "{ \"type\": \"" << get_block_name(stack.block) << "\", \"count\": " << stack.count << " }";
+        }
+    }
+
+    std::optional<ItemStack> read_item_stack(const Json& value) {
+        // Legacy saves stored each hotbar entry as a plain block name.
+        if (value.get_type() == Json::Type::String) {
+            std::string name = value.as_string();
+            if (name == "air") return ItemStack{};
+            std::optional<BlockType> type = block_type_from_name(name);
+            if (!type) return std::nullopt;
+            ItemStack stack;
+            stack.block = *type;
+            stack.count = 1;
+            return stack;
+        }
+
+        if (value["tool"].get_type() == Json::Type::String) {
+            std::optional<ItemType> tool_type = item_type_from_name(value["tool"].as_string());
+            if (!tool_type) return std::nullopt;
+            int max_durability = get_item_properties(*tool_type).max_durability;
+            int durability = std::clamp(
+                static_cast<int>(value["durability"].as_number(max_durability)), 1, max_durability);
+            ItemStack stack;
+            stack.tool = *tool_type;
+            stack.count = 1;
+            stack.durability = durability;
+            return stack;
+        }
+
+        if (value["item"].get_type() == Json::Type::String) {
+            std::optional<ItemType> item_type = item_type_from_name(value["item"].as_string());
+            if (!item_type) return std::nullopt;
+            int count = static_cast<int>(value["count"].as_number(0));
+            if (count <= 0) return ItemStack{};
+            ItemStack stack;
+            stack.tool = *item_type;
+            stack.count = std::clamp(count, 1, MAX_ITEM_STACK);
+            return stack;
+        }
+
+        std::string name = value["type"].as_string("air");
+        int count = static_cast<int>(value["count"].as_number(0));
+        if (name == "air" || count <= 0) return ItemStack{};
+        std::optional<BlockType> type = block_type_from_name(name);
+        if (!type) return std::nullopt;
+        ItemStack stack;
+        stack.block = *type;
+        stack.count = std::clamp(count, 1, MAX_ITEM_STACK);
+        return stack;
+    }
+
     const char* game_mode_json_value(GameMode mode) {
         return mode == GameMode::Survival ? "survival" : "creative";
     }
@@ -176,24 +240,15 @@ namespace WorldSave {
         out << "{\n";
         out << "  \"position\": { \"x\": " << state.position.x << ", \"y\": " << state.position.y << ", \"z\": " << state.position.z << " },\n";
         out << "  \"forward\": { \"x\": " << state.forward.x << ", \"y\": " << state.forward.y << ", \"z\": " << state.forward.z << " },\n";
-        auto write_stack = [&out](const ItemStack& stack) {
-            if (stack.empty()) {
-                out << "{ \"type\": \"air\", \"count\": 0 }";
-            } else if (stack.is_tool()) {
-                out << "{ \"tool\": \"" << get_item_name(stack.tool) << "\", \"durability\": " << stack.durability << " }";
-            } else {
-                out << "{ \"type\": \"" << get_block_name(stack.block) << "\", \"count\": " << stack.count << " }";
-            }
-        };
         out << "  \"hotbar\": [";
         for (size_t i = 0; i < state.inventory.hotbar.size(); ++i) {
-            write_stack(state.inventory.hotbar[i]);
+            write_item_stack(out, state.inventory.hotbar[i]);
             if (i + 1 < state.inventory.hotbar.size()) out << ", ";
         }
         out << "],\n";
         out << "  \"inventory\": [";
         for (size_t i = 0; i < state.inventory.storage.size(); ++i) {
-            write_stack(state.inventory.storage[i]);
+            write_item_stack(out, state.inventory.storage[i]);
             if (i + 1 < state.inventory.storage.size()) out << ", ";
         }
         out << "],\n";
@@ -224,52 +279,15 @@ namespace WorldSave {
             const std::vector<Json>& hotbar_json = root["hotbar"].as_array();
             if (hotbar_json.size() != HOTBAR_SIZE) return std::nullopt; // corrupted/foreign format - discard, don't partial-fill
 
-            auto read_stack = [](const Json& value) -> std::optional<ItemStack> {
-                // Legacy saves stored each hotbar entry as a plain block name.
-                if (value.get_type() == Json::Type::String) {
-                    std::string name = value.as_string();
-                    if (name == "air") return ItemStack{};
-                    std::optional<BlockType> type = block_type_from_name(name);
-                    if (!type) return std::nullopt;
-                    ItemStack stack;
-                    stack.block = *type;
-                    stack.count = 1;
-                    return stack;
-                }
-
-                if (value["tool"].get_type() == Json::Type::String) {
-                    std::optional<ItemType> tool_type = item_type_from_name(value["tool"].as_string());
-                    if (!tool_type) return std::nullopt;
-                    int max_durability = get_item_properties(*tool_type).max_durability;
-                    int durability = std::clamp(
-                        static_cast<int>(value["durability"].as_number(max_durability)), 1, max_durability);
-                    ItemStack stack;
-                    stack.tool = *tool_type;
-                    stack.count = 1;
-                    stack.durability = durability;
-                    return stack;
-                }
-
-                std::string name = value["type"].as_string("air");
-                int count = static_cast<int>(value["count"].as_number(0));
-                if (name == "air" || count <= 0) return ItemStack{};
-                std::optional<BlockType> type = block_type_from_name(name);
-                if (!type) return std::nullopt;
-                ItemStack stack;
-                stack.block = *type;
-                stack.count = std::clamp(count, 1, MAX_ITEM_STACK);
-                return stack;
-            };
-
             for (size_t i = 0; i < hotbar_json.size(); ++i) {
-                std::optional<ItemStack> stack = read_stack(hotbar_json[i]);
+                std::optional<ItemStack> stack = read_item_stack(hotbar_json[i]);
                 if (!stack) return std::nullopt;
                 state.inventory.hotbar[i] = *stack;
             }
             const std::vector<Json>& inventory_json = root["inventory"].as_array();
             if (!inventory_json.empty() && inventory_json.size() != INVENTORY_STORAGE_SIZE) return std::nullopt;
             for (size_t i = 0; i < inventory_json.size(); ++i) {
-                std::optional<ItemStack> stack = read_stack(inventory_json[i]);
+                std::optional<ItemStack> stack = read_item_stack(inventory_json[i]);
                 if (!stack) return std::nullopt;
                 state.inventory.storage[i] = *stack;
             }
@@ -282,5 +300,136 @@ namespace WorldSave {
         } catch (const std::exception&) {
             return std::nullopt;
         }
+    }
+
+    bool save_dropped_items(const std::string& folder_name, const std::vector<DroppedItemSaveState>& items) {
+        std::ofstream out(world_directory(folder_name) + "/items.json", std::ios::binary | std::ios::trunc);
+        if (!out) return false;
+
+        out << "{\n  \"items\": [\n";
+        for (size_t i = 0; i < items.size(); ++i) {
+            const DroppedItemSaveState& item = items[i];
+            out << "    { \"position\": { \"x\": " << item.position.x << ", \"y\": " << item.position.y
+                << ", \"z\": " << item.position.z << " }, \"stack\": ";
+            write_item_stack(out, item.stack);
+            out << ", \"age\": " << item.age;
+            if (item.block_tint) {
+                out << ", \"tint\": { \"r\": " << static_cast<int>(item.block_tint->r)
+                    << ", \"g\": " << static_cast<int>(item.block_tint->g)
+                    << ", \"b\": " << static_cast<int>(item.block_tint->b) << " }";
+            }
+            out << " }";
+            if (i + 1 < items.size()) out << ",";
+            out << "\n";
+        }
+        out << "  ]\n}\n";
+
+        return static_cast<bool>(out);
+    }
+
+    std::vector<DroppedItemSaveState> load_dropped_items(const std::string& folder_name) {
+        std::vector<DroppedItemSaveState> result;
+        std::string text = read_whole_file(world_directory(folder_name) + "/items.json");
+        if (text.empty()) return result;
+
+        try {
+            Json root = Json::parse(text);
+            for (const Json& entry : root["items"].as_array()) {
+                std::optional<ItemStack> stack = read_item_stack(entry["stack"]);
+                // An unresolvable stack (a name from a newer/foreign build)
+                // skips just this one item rather than discarding the
+                // whole file the way a corrupted player.json is discarded
+                // wholesale - one bad entry among many independent ones
+                // shouldn't cost every other item still on the ground.
+                if (!stack || stack->empty()) continue;
+
+                DroppedItemSaveState item;
+                item.stack = *stack;
+                item.position = {
+                    static_cast<float>(entry["position"]["x"].as_number(0.0)),
+                    static_cast<float>(entry["position"]["y"].as_number(0.0)),
+                    static_cast<float>(entry["position"]["z"].as_number(0.0)),
+                };
+                item.age = std::max(0.0f, static_cast<float>(entry["age"].as_number(0.0)));
+                if (entry["tint"].get_type() == Json::Type::Object) {
+                    item.block_tint = Color{
+                        static_cast<unsigned char>(entry["tint"]["r"].as_number(255)),
+                        static_cast<unsigned char>(entry["tint"]["g"].as_number(255)),
+                        static_cast<unsigned char>(entry["tint"]["b"].as_number(255)),
+                        255,
+                    };
+                }
+                result.push_back(item);
+            }
+        } catch (const std::exception&) {
+            return {};
+        }
+        return result;
+    }
+
+    bool save_chests(const std::string& folder_name, const std::vector<ChestSaveState>& chests) {
+        std::ofstream out(world_directory(folder_name) + "/chests.json", std::ios::binary | std::ios::trunc);
+        if (!out) return false;
+
+        out << "{\n  \"chests\": [\n";
+        bool wrote_any = false;
+        for (const ChestSaveState& chest : chests) {
+            // A chest that was opened but never actually had anything put
+            // in it (or had everything taken back out) has nothing worth
+            // writing - skipping it keeps this file proportional to actual
+            // player activity instead of growing by one entry per chest
+            // ever merely looked at.
+            bool has_any_item = false;
+            for (const ItemStack& slot : chest.slots) {
+                if (!slot.empty()) { has_any_item = true; break; }
+            }
+            if (!has_any_item) continue;
+
+            if (wrote_any) out << ",\n";
+            wrote_any = true;
+            out << "    { \"x\": " << chest.x << ", \"y\": " << chest.y << ", \"z\": " << chest.z
+                << ", \"slots\": [";
+            for (size_t i = 0; i < chest.slots.size(); ++i) {
+                write_item_stack(out, chest.slots[i]);
+                if (i + 1 < chest.slots.size()) out << ", ";
+            }
+            out << "] }";
+        }
+        out << "\n  ]\n}\n";
+
+        return static_cast<bool>(out);
+    }
+
+    std::vector<ChestSaveState> load_chests(const std::string& folder_name) {
+        std::vector<ChestSaveState> result;
+        std::string text = read_whole_file(world_directory(folder_name) + "/chests.json");
+        if (text.empty()) return result;
+
+        try {
+            Json root = Json::parse(text);
+            for (const Json& entry : root["chests"].as_array()) {
+                const std::vector<Json>& slots_json = entry["slots"].as_array();
+                // A foreign/corrupted entry (wrong slot count) is skipped,
+                // same "one bad entry doesn't cost every other chest"
+                // reasoning as load_dropped_items().
+                if (slots_json.size() != INVENTORY_STORAGE_SIZE) continue;
+
+                ChestSaveState chest;
+                chest.x = static_cast<int>(entry["x"].as_number(0));
+                chest.y = static_cast<int>(entry["y"].as_number(0));
+                chest.z = static_cast<int>(entry["z"].as_number(0));
+                bool all_resolved = true;
+                for (size_t i = 0; i < slots_json.size(); ++i) {
+                    std::optional<ItemStack> stack = read_item_stack(slots_json[i]);
+                    if (!stack) { all_resolved = false; break; }
+                    chest.slots[i] = *stack;
+                }
+                if (!all_resolved) continue;
+                result.push_back(chest);
+            }
+        } catch (const std::exception&) {
+            return {};
+        }
+        return result;
     }
 }

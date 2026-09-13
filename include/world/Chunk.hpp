@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <shared_mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 class TerrainNoise;
@@ -28,6 +29,16 @@ constexpr int MIN_WORLD_Y = -64;
 // overlay) can express its own out-of-range fallback in the same units
 // rather than a bare magic number.
 constexpr int MAX_LIGHT = 15;
+
+// Minimum brightness fraction (of full light) anything ever renders at,
+// even in a fully-dark (light level 0) cell - real Minecraft's ambient
+// occlusion still leaves shapes faintly readable in total darkness rather
+// than rendering flat black, and a shared floor keeps every light consumer
+// (chunk mesh faces, cross-shaped foliage, dropped items/mobs/the player
+// via entity_environment_tint) agreeing on the same darkest brightness -
+// without that, whichever path floored higher would read as visibly
+// brighter than its own genuinely-dark surroundings.
+constexpr float MIN_LIGHT_FRACTION = 0.2f;
 
 // A chunk's simulation/render tier, based on distance from an observer (see
 // World::update_chunk_states). There's no Chunk object for an Unloaded
@@ -91,6 +102,13 @@ void set_chunk_water_time(float time);
 // the only caller.
 void set_chunk_water_pass(bool active);
 
+// Dynamic immediate-mode geometry (players, item entities, particles) must
+// use the same fog program as chunk meshes.  Without it, a camera inside
+// water sees fogged terrain but perfectly sharp entities, making them look
+// as if they were composited on top of the water volume.
+void begin_dynamic_entity_shader();
+void end_dynamic_entity_shader();
+
 // Frees the shader set_chunk_fog()/every Chunk's mesh material shares.
 // Call once before CloseWindow() - unlike the plain-texture default
 // material this replaced, it isn't a raylib-internal resource freed
@@ -153,6 +171,20 @@ public:
     // `noise` is sampled at this chunk's world-space X/Z so both terrain
     // height and biome are continuous across chunk borders.
     void generate_terrain(const TerrainNoise& noise);
+
+    // Scatters ore veins (Coal/Iron/Gold/Lapis/Redstone/Diamond) plus
+    // underground Dirt/Gravel patches through this chunk's already-solid
+    // stone, Beta 1.7.3-style Y bands (see ORE_VEINS in the .cpp) - each
+    // vein is a small random-walk blob replacing only Stone, so it can
+    // never eat into an ore vein or patch generated moments earlier by this
+    // same pass. Deterministic per-chunk from (world_seed, chunk_x,
+    // chunk_z), same idea as carve_caves()'s own seeding, just without that
+    // one's cross-chunk reach - a vein is small enough to just accept never
+    // spanning a chunk border. Call after generate_terrain() and before
+    // carve_caves(), so a cave carved afterward can naturally expose (or
+    // partially destroy) a vein it happens to cut through, instead of
+    // veins only ever appearing in solid, unreachable stone.
+    void generate_ores(uint32_t world_seed, int chunk_x, int chunk_z);
 
     // Carves cave tunnels (and, much more rarely, ravines) into this
     // chunk's already-generated terrain, Beta 1.7.3-style: a "Perlin worm"
@@ -285,6 +317,25 @@ public:
     BlockType get_block(int x, int y, int z) const;
     void set_block(int x, int y, int z, BlockType type);
 
+    // Per-instance facing for a directional block (see HorizontalDirection's
+    // own comment) - South (blocks.json's own authored default front) if
+    // this position was never explicitly set. Sparse (a plain
+    // unordered_map, not a parallel CHUNK_SIZE^2*CHUNK_HEIGHT array like
+    // `blocks`/`light`) since only a handful of block *types* ever need
+    // this at all; set_block() clears any stale entry for a position
+    // whenever it changes what block lives there. Persisted by save_to_file()/
+    // load_from_file() (chunk file version 3+) as a compact (index,
+    // direction) list rather than a full parallel array, for the same
+    // sparseness reason.
+    HorizontalDirection get_orientation(int x, int y, int z) const;
+    void set_orientation(int x, int y, int z, HorizontalDirection direction);
+
+    // Exact biome-blended foliage color generated for this local (x, z)
+    // column. Used by a broken foliage block so its dropped-item cube keeps
+    // the same color instead of reverting to the atlas' gray tint mask.
+    Color get_grass_tint(int x, int z) const;
+    Color get_foliage_tint(int x, int z) const;
+
     // FLUID_LEVEL_SOURCE/FLOWING(1-7)/FALLING - see the constants' own
     // comments. Only meaningful where get_block() is Water; garbage
     // (whatever this cell's array slot happens to hold) otherwise, since
@@ -371,6 +422,10 @@ private:
     void set_block_light(int x, int y, int z, int value);
 
     std::array<BlockType, CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE> blocks;
+
+    // See get_orientation()/set_orientation() above - keyed by the same
+    // flat local index() every other per-block array uses.
+    std::unordered_map<int, HorizontalDirection> orientation;
 
     // Packed per-cell light: upper nibble = sky light, lower nibble = block
     // light, each 0-15.

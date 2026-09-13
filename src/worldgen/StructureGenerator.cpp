@@ -13,6 +13,7 @@ namespace {
     constexpr int TREE_RADIUS = 2;
     constexpr int MIN_TREE_HEIGHT = 4;
     constexpr int TREE_HEIGHT_VARIANTS = 3;
+    constexpr uint32_t SHORT_GRASS_SEED_SALT = 0x6A09E667u;
 
     // One candidate per 4x4 cell, then a biome-specific chance. This gives
     // roughly 1-2 trees/chunk in Plains, 10-11 in Forest, and 3-4 in Hills.
@@ -22,6 +23,19 @@ namespace {
             case Biome::Forest: return 0.68f;
             case Biome::Hills:  return 0.23f;
             case Biome::Plains: return 0.09f;
+            case Biome::Desert:
+            case Biome::Ocean:
+            case Biome::Sea:    return 0.0f;
+        }
+        return 0.0f;
+    }
+
+    float short_grass_chance(Biome biome)
+    {
+        switch (biome) {
+            case Biome::Plains: return 0.30f;
+            case Biome::Forest: return 0.20f;
+            case Biome::Hills:  return 0.10f;
             case Biome::Desert:
             case Biome::Ocean:
             case Biome::Sea:    return 0.0f;
@@ -102,6 +116,31 @@ void StructureGenerator::generate(Chunk& chunk, const TerrainNoise& noise, int c
 
             Structure tree = make_oak_tree(trunk_height);
             place(chunk, tree, local_x, surface_y + 1, local_z);
+        }
+    }
+
+    // Ground plants are generated after trees. This lets trunks/crowns own
+    // their cells first and keeps the plant pass from rejecting otherwise
+    // valid trees as an obstruction. Every world column has its own stable
+    // hash, so generation remains independent of chunk load order.
+    for (int local_z = 0; local_z < CHUNK_SIZE; ++local_z) {
+        for (int local_x = 0; local_x < CHUNK_SIZE; ++local_x) {
+            int world_x = chunk_x * CHUNK_SIZE + local_x;
+            int world_z = chunk_z * CHUNK_SIZE + local_z;
+            Biome biome = noise.biome(static_cast<float>(world_x), static_cast<float>(world_z));
+            float chance = short_grass_chance(biome);
+            if (chance <= 0.0f) continue;
+
+            uint64_t hash = candidate_hash(world_seed ^ SHORT_GRASS_SEED_SALT, world_x, world_z);
+            if (unit_float(hash) >= chance) continue;
+
+            for (int y = CHUNK_HEIGHT - 2; y >= 0; --y) {
+                if (chunk.get_block(local_x, y, local_z) != BlockType::Grass) continue;
+                if (chunk.get_block(local_x, y + 1, local_z) == BlockType::Air) {
+                    chunk.set_block(local_x, y + 1, local_z, BlockType::ShortGrass);
+                }
+                break;
+            }
         }
     }
 }

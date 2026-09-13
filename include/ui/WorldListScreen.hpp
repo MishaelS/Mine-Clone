@@ -6,9 +6,7 @@
 #include <string>
 #include <vector>
 
-// Lists saved worlds (WorldSave::list_worlds()) with per-row Play/Delete,
-// plus "Create World" and "Back". Reachable from MainMenuScreen's
-// Singleplayer button - see GameEngine::update_and_draw_menu().
+// Scrollable world list with a selected row and shared footer actions.
 class WorldListScreen {
 public:
     enum class ActionType { None, LoadWorld, CreateWorld, Back };
@@ -26,10 +24,9 @@ public:
 
 private:
     std::vector<WorldInfo> worlds;
+    std::optional<size_t> selected_world;
+    int first_visible = 0;
 
-    // First "Удалить" click on a row arms it for a two-click confirm
-    // (re-rendered as "Точно?"); a second click on that *same* row
-    // actually deletes. Clicking anything else clears this first, without
-    // acting, so a stray click can never confirm the wrong world.
+    // Confirmation is tied to the folder, and cleared when selection changes.
     std::optional<std::string> pending_delete_folder;
 };

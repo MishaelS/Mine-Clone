@@ -1,0 +1,2380 @@
+{
+  "recipes": [
+    {
+      "output": {
+        "type": "block",
+        "name": "oak_planks",
+        "count": 4
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "block",
+          "name": "oak_log",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "oak_planks",
+        "count": 4
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "block",
+          "name": "spruce_log",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "oak_planks",
+        "count": 4
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "block",
+          "name": "birch_log",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "stick",
+        "count": 4
+      },
+      "shape": "shaped",
+      "grid_size": "2x2",
+      "pattern": [
+        [
+          "oak_planks",
+          null
+        ],
+        [
+          "oak_planks",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "workbench",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "2x2",
+      "pattern": [
+        [
+          "oak_planks",
+          "oak_planks"
+        ],
+        [
+          "oak_planks",
+          "oak_planks"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "wooden_pickaxe",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "oak_planks",
+          "oak_planks",
+          "oak_planks"
+        ],
+        [
+          null,
+          "stick",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "wooden_shovel",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          null,
+          "oak_planks",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "wooden_axe",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "oak_planks",
+          "oak_planks",
+          null
+        ],
+        [
+          "oak_planks",
+          "stick",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "wooden_hoe",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "oak_planks",
+          "oak_planks",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "wooden_sword",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          null,
+          "oak_planks",
+          null
+        ],
+        [
+          null,
+          "oak_planks",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "stone_pickaxe",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "cobblestone",
+          "cobblestone",
+          "cobblestone"
+        ],
+        [
+          null,
+          "stick",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "stone_shovel",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          null,
+          "cobblestone",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "stone_axe",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "cobblestone",
+          "cobblestone",
+          null
+        ],
+        [
+          "cobblestone",
+          "stick",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "stone_hoe",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "cobblestone",
+          "cobblestone",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "stone_sword",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          null,
+          "cobblestone",
+          null
+        ],
+        [
+          null,
+          "cobblestone",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "iron_pickaxe",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "iron_ingot",
+          "iron_ingot",
+          "iron_ingot"
+        ],
+        [
+          null,
+          "stick",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "iron_shovel",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          null,
+          "iron_ingot",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "iron_axe",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "iron_ingot",
+          "iron_ingot",
+          null
+        ],
+        [
+          "iron_ingot",
+          "stick",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "iron_hoe",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "iron_ingot",
+          "iron_ingot",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "iron_sword",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          null,
+          "iron_ingot",
+          null
+        ],
+        [
+          null,
+          "iron_ingot",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "gold_pickaxe",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "gold_ingot",
+          "gold_ingot",
+          "gold_ingot"
+        ],
+        [
+          null,
+          "stick",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "gold_shovel",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          null,
+          "gold_ingot",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "gold_axe",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "gold_ingot",
+          "gold_ingot",
+          null
+        ],
+        [
+          "gold_ingot",
+          "stick",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "gold_hoe",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "gold_ingot",
+          "gold_ingot",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "gold_sword",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          null,
+          "gold_ingot",
+          null
+        ],
+        [
+          null,
+          "gold_ingot",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "diamond_pickaxe",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "diamond",
+          "diamond",
+          "diamond"
+        ],
+        [
+          null,
+          "stick",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "diamond_shovel",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          null,
+          "diamond",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "diamond_axe",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "diamond",
+          "diamond",
+          null
+        ],
+        [
+          "diamond",
+          "stick",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "diamond_hoe",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "diamond",
+          "diamond",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "diamond_sword",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          null,
+          "diamond",
+          null
+        ],
+        [
+          null,
+          "diamond",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "torch",
+        "count": 4
+      },
+      "shape": "shaped",
+      "grid_size": "2x2",
+      "pattern": [
+        [
+          "coal",
+          null
+        ],
+        [
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "torch",
+        "count": 4
+      },
+      "shape": "shaped",
+      "grid_size": "2x2",
+      "pattern": [
+        [
+          "charcoal",
+          null
+        ],
+        [
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "furnace",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "cobblestone",
+          "cobblestone",
+          "cobblestone"
+        ],
+        [
+          "cobblestone",
+          null,
+          "cobblestone"
+        ],
+        [
+          "cobblestone",
+          "cobblestone",
+          "cobblestone"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "chest",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "oak_planks",
+          "oak_planks",
+          "oak_planks"
+        ],
+        [
+          "oak_planks",
+          null,
+          "oak_planks"
+        ],
+        [
+          "oak_planks",
+          "oak_planks",
+          "oak_planks"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "bookshelf",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "oak_planks",
+          "oak_planks",
+          "oak_planks"
+        ],
+        [
+          "book",
+          "book",
+          "book"
+        ],
+        [
+          "oak_planks",
+          "oak_planks",
+          "oak_planks"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "ladder",
+        "count": 2
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "stick",
+          null,
+          "stick"
+        ],
+        [
+          "stick",
+          "stick",
+          "stick"
+        ],
+        [
+          "stick",
+          null,
+          "stick"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "fence",
+        "count": 2
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          null,
+          null,
+          null
+        ],
+        [
+          "stick",
+          "stick",
+          "stick"
+        ],
+        [
+          "stick",
+          "stick",
+          "stick"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "wooden_stairs",
+        "count": 4
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "oak_planks",
+          null,
+          null
+        ],
+        [
+          "oak_planks",
+          "oak_planks",
+          null
+        ],
+        [
+          "oak_planks",
+          "oak_planks",
+          "oak_planks"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "cobblestone_stairs",
+        "count": 4
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "cobblestone",
+          null,
+          null
+        ],
+        [
+          "cobblestone",
+          "cobblestone",
+          null
+        ],
+        [
+          "cobblestone",
+          "cobblestone",
+          "cobblestone"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "wooden_door_item",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "oak_planks",
+          "oak_planks",
+          null
+        ],
+        [
+          "oak_planks",
+          "oak_planks",
+          null
+        ],
+        [
+          "oak_planks",
+          "oak_planks",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "iron_door_item",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "iron_ingot",
+          "iron_ingot",
+          null
+        ],
+        [
+          "iron_ingot",
+          "iron_ingot",
+          null
+        ],
+        [
+          "iron_ingot",
+          "iron_ingot",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "boat",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          null,
+          null,
+          null
+        ],
+        [
+          "oak_planks",
+          null,
+          "oak_planks"
+        ],
+        [
+          "oak_planks",
+          "oak_planks",
+          "oak_planks"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "minecart",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          null,
+          null,
+          null
+        ],
+        [
+          "iron_ingot",
+          null,
+          "iron_ingot"
+        ],
+        [
+          "iron_ingot",
+          "iron_ingot",
+          "iron_ingot"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "bed",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "white_wool",
+          "white_wool",
+          "white_wool"
+        ],
+        [
+          "oak_planks",
+          "oak_planks",
+          "oak_planks"
+        ],
+        [
+          null,
+          null,
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "bread",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "wheat",
+          "wheat",
+          "wheat"
+        ],
+        [
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          null,
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "bowl",
+        "count": 4
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "oak_planks",
+          null,
+          "oak_planks"
+        ],
+        [
+          null,
+          "oak_planks",
+          null
+        ],
+        [
+          null,
+          null,
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "mushroom_stew",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "brown_mushroom",
+          null,
+          null
+        ],
+        [
+          "red_mushroom",
+          null,
+          null
+        ],
+        [
+          "bowl",
+          null,
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "cake",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "milk_bucket",
+          "milk_bucket",
+          "milk_bucket"
+        ],
+        [
+          "sugar",
+          "egg",
+          "sugar"
+        ],
+        [
+          "wheat",
+          "wheat",
+          "wheat"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "cookie",
+        "count": 8
+      },
+      "shape": "shapeless",
+      "grid_size": "3x3",
+      "ingredients": [
+        {
+          "type": "item",
+          "name": "wheat",
+          "count": 2
+        },
+        {
+          "type": "item",
+          "name": "cocoa_beans",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "golden_apple",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "gold_block",
+          "gold_block",
+          "gold_block"
+        ],
+        [
+          "gold_block",
+          "apple",
+          "gold_block"
+        ],
+        [
+          "gold_block",
+          "gold_block",
+          "gold_block"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "paper",
+        "count": 3
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "sugar_cane_item",
+          null,
+          null
+        ],
+        [
+          "sugar_cane_item",
+          null,
+          null
+        ],
+        [
+          "sugar_cane_item",
+          null,
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "book",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          null,
+          "paper",
+          null
+        ],
+        [
+          null,
+          "paper",
+          null
+        ],
+        [
+          null,
+          "paper",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "sign",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "oak_planks",
+          "oak_planks",
+          "oak_planks"
+        ],
+        [
+          "oak_planks",
+          "oak_planks",
+          "oak_planks"
+        ],
+        [
+          null,
+          "stick",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "bucket",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          null,
+          null,
+          null
+        ],
+        [
+          "iron_ingot",
+          null,
+          "iron_ingot"
+        ],
+        [
+          null,
+          "iron_ingot",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "compass",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          null,
+          "iron_ingot",
+          null
+        ],
+        [
+          "iron_ingot",
+          "redstone_dust",
+          "iron_ingot"
+        ],
+        [
+          null,
+          "iron_ingot",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "clock",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          null,
+          "gold_ingot",
+          null
+        ],
+        [
+          "gold_ingot",
+          "redstone_dust",
+          "gold_ingot"
+        ],
+        [
+          null,
+          "gold_ingot",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "flint_and_steel",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "2x2",
+      "pattern": [
+        [
+          "iron_ingot",
+          null
+        ],
+        [
+          null,
+          "flint"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "shears",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "2x2",
+      "pattern": [
+        [
+          null,
+          "iron_ingot"
+        ],
+        [
+          "iron_ingot",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "bow",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          null,
+          "stick",
+          "string"
+        ],
+        [
+          "stick",
+          null,
+          "string"
+        ],
+        [
+          null,
+          "stick",
+          "string"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "arrow",
+        "count": 4
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          null,
+          "flint",
+          null
+        ],
+        [
+          null,
+          "stick",
+          null
+        ],
+        [
+          null,
+          "feather",
+          null
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "fishing_rod",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          null,
+          null,
+          "stick"
+        ],
+        [
+          null,
+          "stick",
+          "string"
+        ],
+        [
+          "stick",
+          null,
+          "string"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "painting",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "stick",
+          "stick",
+          "stick"
+        ],
+        [
+          "stick",
+          "white_wool",
+          "stick"
+        ],
+        [
+          "stick",
+          "stick",
+          "stick"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "tnt",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "gunpowder",
+          "sand",
+          "gunpowder"
+        ],
+        [
+          "sand",
+          "gunpowder",
+          "sand"
+        ],
+        [
+          "gunpowder",
+          "sand",
+          "gunpowder"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "white_wool",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "2x2",
+      "pattern": [
+        [
+          "string",
+          "string"
+        ],
+        [
+          "string",
+          "string"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "glowstone",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "2x2",
+      "pattern": [
+        [
+          "glowstone_dust",
+          "glowstone_dust"
+        ],
+        [
+          "glowstone_dust",
+          "glowstone_dust"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "snow_block",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "2x2",
+      "pattern": [
+        [
+          "snowball",
+          "snowball"
+        ],
+        [
+          "snowball",
+          "snowball"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "sandstone",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "2x2",
+      "pattern": [
+        [
+          "sand",
+          "sand"
+        ],
+        [
+          "sand",
+          "sand"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "bricks",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "2x2",
+      "pattern": [
+        [
+          "brick",
+          "brick"
+        ],
+        [
+          "brick",
+          "brick"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "iron_block",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "iron_ingot",
+          "iron_ingot",
+          "iron_ingot"
+        ],
+        [
+          "iron_ingot",
+          "iron_ingot",
+          "iron_ingot"
+        ],
+        [
+          "iron_ingot",
+          "iron_ingot",
+          "iron_ingot"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "iron_ingot",
+        "count": 9
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "block",
+          "name": "iron_block",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "gold_block",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "gold_ingot",
+          "gold_ingot",
+          "gold_ingot"
+        ],
+        [
+          "gold_ingot",
+          "gold_ingot",
+          "gold_ingot"
+        ],
+        [
+          "gold_ingot",
+          "gold_ingot",
+          "gold_ingot"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "gold_ingot",
+        "count": 9
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "block",
+          "name": "gold_block",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "diamond_block",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "diamond",
+          "diamond",
+          "diamond"
+        ],
+        [
+          "diamond",
+          "diamond",
+          "diamond"
+        ],
+        [
+          "diamond",
+          "diamond",
+          "diamond"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "diamond",
+        "count": 9
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "block",
+          "name": "diamond_block",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "lapis_block",
+        "count": 1
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "lapis_lazuli",
+          "lapis_lazuli",
+          "lapis_lazuli"
+        ],
+        [
+          "lapis_lazuli",
+          "lapis_lazuli",
+          "lapis_lazuli"
+        ],
+        [
+          "lapis_lazuli",
+          "lapis_lazuli",
+          "lapis_lazuli"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "lapis_lazuli",
+        "count": 9
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "block",
+          "name": "lapis_block",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "bone_meal",
+        "count": 3
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "item",
+          "name": "bone",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "red_dye",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "block",
+          "name": "rose",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "yellow_dye",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "block",
+          "name": "dandelion",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "purple_dye",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "item",
+          "name": "red_dye",
+          "count": 1
+        },
+        {
+          "type": "item",
+          "name": "lapis_lazuli",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "light_blue_dye",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "item",
+          "name": "lapis_lazuli",
+          "count": 1
+        },
+        {
+          "type": "item",
+          "name": "bone_meal",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "pink_dye",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "item",
+          "name": "red_dye",
+          "count": 1
+        },
+        {
+          "type": "item",
+          "name": "bone_meal",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "lime_dye",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "item",
+          "name": "green_dye",
+          "count": 1
+        },
+        {
+          "type": "item",
+          "name": "bone_meal",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "gray_dye",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "item",
+          "name": "ink_sac",
+          "count": 1
+        },
+        {
+          "type": "item",
+          "name": "bone_meal",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "light_gray_dye",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "item",
+          "name": "ink_sac",
+          "count": 1
+        },
+        {
+          "type": "item",
+          "name": "bone_meal",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "cyan_dye",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "item",
+          "name": "green_dye",
+          "count": 1
+        },
+        {
+          "type": "item",
+          "name": "lapis_lazuli",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "orange_dye",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "item",
+          "name": "red_dye",
+          "count": 1
+        },
+        {
+          "type": "item",
+          "name": "yellow_dye",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "item",
+        "name": "magenta_dye",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "item",
+          "name": "purple_dye",
+          "count": 1
+        },
+        {
+          "type": "item",
+          "name": "pink_dye",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "orange_wool",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "block",
+          "name": "white_wool",
+          "count": 1
+        },
+        {
+          "type": "item",
+          "name": "orange_dye",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "magenta_wool",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "block",
+          "name": "white_wool",
+          "count": 1
+        },
+        {
+          "type": "item",
+          "name": "magenta_dye",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "light_blue_wool",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "block",
+          "name": "white_wool",
+          "count": 1
+        },
+        {
+          "type": "item",
+          "name": "light_blue_dye",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "yellow_wool",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "block",
+          "name": "white_wool",
+          "count": 1
+        },
+        {
+          "type": "item",
+          "name": "yellow_dye",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "lime_wool",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "block",
+          "name": "white_wool",
+          "count": 1
+        },
+        {
+          "type": "item",
+          "name": "lime_dye",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "pink_wool",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "block",
+          "name": "white_wool",
+          "count": 1
+        },
+        {
+          "type": "item",
+          "name": "pink_dye",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "gray_wool",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "block",
+          "name": "white_wool",
+          "count": 1
+        },
+        {
+          "type": "item",
+          "name": "gray_dye",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "light_gray_wool",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "block",
+          "name": "white_wool",
+          "count": 1
+        },
+        {
+          "type": "item",
+          "name": "light_gray_dye",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "cyan_wool",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "block",
+          "name": "white_wool",
+          "count": 1
+        },
+        {
+          "type": "item",
+          "name": "cyan_dye",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "purple_wool",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "block",
+          "name": "white_wool",
+          "count": 1
+        },
+        {
+          "type": "item",
+          "name": "purple_dye",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "blue_wool",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "block",
+          "name": "white_wool",
+          "count": 1
+        },
+        {
+          "type": "item",
+          "name": "lapis_lazuli",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "brown_wool",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "block",
+          "name": "white_wool",
+          "count": 1
+        },
+        {
+          "type": "item",
+          "name": "cocoa_beans",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "green_wool",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "block",
+          "name": "white_wool",
+          "count": 1
+        },
+        {
+          "type": "item",
+          "name": "green_dye",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "red_wool",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "block",
+          "name": "white_wool",
+          "count": 1
+        },
+        {
+          "type": "item",
+          "name": "red_dye",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
+        "name": "black_wool",
+        "count": 1
+      },
+      "shape": "shapeless",
+      "grid_size": "2x2",
+      "ingredients": [
+        {
+          "type": "block",
+          "name": "white_wool",
+          "count": 1
+        },
+        {
+          "type": "item",
+          "name": "ink_sac",
+          "count": 1
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1424 @@
+{
+  "drops": [
+    {
+      "block": "dirt",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "dirt",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "sand",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "sand",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "sponge",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "sponge",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "white_wool",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "white_wool",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "black_wool",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "black_wool",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "gray_wool",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "gray_wool",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "red_wool",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "red_wool",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "pink_wool",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "pink_wool",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "green_wool",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "green_wool",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "lime_wool",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "lime_wool",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "brown_wool",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "brown_wool",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "yellow_wool",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "yellow_wool",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "blue_wool",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "blue_wool",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "light_blue_wool",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "light_blue_wool",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "purple_wool",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "purple_wool",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "magenta_wool",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "magenta_wool",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "cyan_wool",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "cyan_wool",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "orange_wool",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "orange_wool",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "light_gray_wool",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "light_gray_wool",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "lapis_block",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "lapis_block",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "note_block",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "note_block",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "jukebox",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "jukebox",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "gold_block",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "gold_block",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "iron_block",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "iron_block",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "diamond_block",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "diamond_block",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "bricks",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "bricks",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "tnt",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "tnt",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "netherrack",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "netherrack",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "soul_sand",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "soul_sand",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "piston",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "piston",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "sticky_piston",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "sticky_piston",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "pumpkin",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "pumpkin",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "cactus",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "cactus",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "workbench",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "workbench",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "chest",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "chest",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "furnace",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "furnace",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "dispenser",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "dispenser",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "mob_spawner",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "mob_spawner",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "cobblestone",
+      "requires_tool": "pickaxe",
+      "min_tool_tier": "wood",
+      "drops": [
+        {
+          "type": "block",
+          "name": "cobblestone",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "sandstone",
+      "requires_tool": "pickaxe",
+      "min_tool_tier": "wood",
+      "drops": [
+        {
+          "type": "block",
+          "name": "sandstone",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "mossy_cobblestone",
+      "requires_tool": "pickaxe",
+      "min_tool_tier": "wood",
+      "drops": [
+        {
+          "type": "block",
+          "name": "mossy_cobblestone",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "double_stone_slab",
+      "requires_tool": "pickaxe",
+      "min_tool_tier": "wood",
+      "drops": [
+        {
+          "type": "block",
+          "name": "double_stone_slab",
+          "count_min": 2,
+          "count_max": 2,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "coal_ore",
+      "requires_tool": "pickaxe",
+      "min_tool_tier": "wood",
+      "drops": [
+        {
+          "type": "item",
+          "name": "coal",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "iron_ore",
+      "requires_tool": "pickaxe",
+      "min_tool_tier": "stone",
+      "drops": [
+        {
+          "type": "block",
+          "name": "iron_ore",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "gold_ore",
+      "requires_tool": "pickaxe",
+      "min_tool_tier": "iron",
+      "drops": [
+        {
+          "type": "block",
+          "name": "gold_ore",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "diamond_ore",
+      "requires_tool": "pickaxe",
+      "min_tool_tier": "iron",
+      "drops": [
+        {
+          "type": "item",
+          "name": "diamond",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "redstone_ore",
+      "requires_tool": "pickaxe",
+      "min_tool_tier": "iron",
+      "drops": [
+        {
+          "type": "item",
+          "name": "redstone_dust",
+          "count_min": 4,
+          "count_max": 5,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "lapis_ore",
+      "requires_tool": "pickaxe",
+      "min_tool_tier": "stone",
+      "drops": [
+        {
+          "type": "item",
+          "name": "lapis_lazuli",
+          "count_min": 4,
+          "count_max": 9,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "obsidian",
+      "requires_tool": "pickaxe",
+      "min_tool_tier": "diamond",
+      "drops": [
+        {
+          "type": "block",
+          "name": "obsidian",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "glowstone",
+      "requires_tool": "pickaxe",
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "item",
+          "name": "glowstone_dust",
+          "count_min": 2,
+          "count_max": 4,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "stone",
+      "requires_tool": "pickaxe",
+      "min_tool_tier": "wood",
+      "drops": [
+        {
+          "type": "block",
+          "name": "cobblestone",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "grass",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "dirt",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "snowy_grass",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "dirt",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "gravel",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "gravel",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 0.9
+        },
+        {
+          "type": "item",
+          "name": "flint",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 0.1
+        }
+      ]
+    },
+    {
+      "block": "clay",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "item",
+          "name": "clay_ball",
+          "count_min": 4,
+          "count_max": 4,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "bookshelf",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": []
+    },
+    {
+      "block": "glass",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": []
+    },
+    {
+      "block": "ice",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": []
+    },
+    {
+      "block": "bedrock",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": []
+    },
+    {
+      "block": "water",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": []
+    },
+    {
+      "block": "lava",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": []
+    },
+    {
+      "block": "air",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": []
+    },
+    {
+      "block": "snow_block",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "item",
+          "name": "snowball",
+          "count_min": 4,
+          "count_max": 4,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "oak_log",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "oak_log",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "spruce_log",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "spruce_log",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "birch_log",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "birch_log",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "oak_planks",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "oak_planks",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "foliage",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "item",
+          "name": "sapling",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 0.05
+        },
+        {
+          "type": "item",
+          "name": "stick",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 0.025
+        },
+        {
+          "type": "item",
+          "name": "apple",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 0.005
+        }
+      ]
+    },
+    {
+      "block": "oak_sapling",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "oak_sapling",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "spruce_foliage",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "item",
+          "name": "sapling",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 0.05
+        },
+        {
+          "type": "item",
+          "name": "stick",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 0.025
+        }
+      ]
+    },
+    {
+      "block": "spruce_sapling",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "spruce_sapling",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "birch_foliage",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "item",
+          "name": "sapling",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 0.05
+        },
+        {
+          "type": "item",
+          "name": "stick",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 0.025
+        }
+      ]
+    },
+    {
+      "block": "birch_sapling",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "birch_sapling",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "redstone_wire",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "item",
+          "name": "redstone_dust",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "wheat_crop",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "item",
+          "name": "wheat",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0,
+          "note": "ONLY if the crop has reached its final growth stage (7/7); otherwise nothing drops (not even seeds), per this specific source."
+        }
+      ]
+    },
+    {
+      "block": "farmland",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "dirt",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "tall_grass",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "item",
+          "name": "wheat_seeds",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 0.125
+        }
+      ]
+    },
+    {
+      "block": "dead_bush",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": []
+    },
+    {
+      "block": "cobweb",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "item",
+          "name": "string",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "rose",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "rose",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "dandelion",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "dandelion",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "brown_mushroom",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "brown_mushroom",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "red_mushroom",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "red_mushroom",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "sugar_cane",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "item",
+          "name": "sugar_cane_item",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "snow_layer",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "item",
+          "name": "snowball",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "sign",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "item",
+          "name": "sign",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "bed",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "item",
+          "name": "bed",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "wooden_door",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "item",
+          "name": "wooden_door_item",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "iron_door",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "item",
+          "name": "iron_door_item",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "wooden_stairs",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "wooden_stairs",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "cobblestone_stairs",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "cobblestone_stairs",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "ladder",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "item",
+          "name": "ladder",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "fence",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "item",
+          "name": "fence",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "torch",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "torch",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "lit_furnace",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "furnace",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0,
+          "note": "Breaking a LIT furnace yields the unlit Furnace block item, not 'lit_furnace' itself."
+        }
+      ]
+    },
+    {
+      "block": "jack_o_lantern",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "jack_o_lantern",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "locked_chest",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": []
+    },
+    {
+      "block": "trapdoor",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "item",
+          "name": "trapdoor",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "redstone_torch",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "item",
+          "name": "redstone_torch",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0,
+          "note": "Unlit Redstone Torch drops itself normally (implied; only the LIT variant has a documented special case - see next entry)."
+        }
+      ]
+    },
+    {
+      "block": "lit_redstone_torch",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "item",
+          "name": "redstone_torch",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "lit_redstone_ore",
+      "requires_tool": "pickaxe",
+      "min_tool_tier": "iron",
+      "drops": [
+        {
+          "type": "item",
+          "name": "redstone_dust",
+          "count_min": 4,
+          "count_max": 5,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "redstone_repeater",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "item",
+          "name": "redstone_repeater",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "cake",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": []
+    },
+    {
+      "block": "nether_portal",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": []
+    },
+    {
+      "block": "short_grass",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "item",
+          "name": "wheat_seeds",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 0.125
+        }
+      ]
+    }
+  ]
+}

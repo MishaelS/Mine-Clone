@@ -4,7 +4,17 @@
 #include "player/Inventory.hpp" // ItemStack
 #include "core/TickMotion.hpp"
 
+#include <optional>
+
 class World;
+
+// Player-thrown stacks need a longer owner-safe window than natural block
+// drops. A named origin keeps that gameplay distinction explicit at spawn
+// sites instead of hiding it behind a boolean constructor argument.
+enum class DroppedItemOrigin {
+    Natural,
+    PlayerThrown,
+};
 
 // A block or tool, popped out into the world as a physical item - after
 // being broken, or thrown out with Q (GameEngine.cpp's drop handling).
@@ -21,7 +31,10 @@ public:
     // player) give this a real direction instead of every drop popping
     // straight up in place. `stack` is copied, not consumed - the caller
     // still owns clearing/decrementing whatever slot it came from.
-    DroppedItem(Vector3 position, ItemStack stack, Vector3 launch_velocity = {0.0f, 0.0f, 0.0f});
+    DroppedItem(Vector3 position, ItemStack stack,
+                Vector3 launch_velocity = {0.0f, 0.0f, 0.0f},
+                DroppedItemOrigin origin = DroppedItemOrigin::Natural,
+                std::optional<Color> block_tint = std::nullopt);
 
     // One tick's worth of gravity/drag/water-buoyancy and ground collision
     // (see the .cpp), plus aging toward MAX_AGE. Called from
@@ -39,17 +52,27 @@ public:
     // virtual draw(), and DroppedItem is only ever used through a concrete
     // pointer (GameEngine's own dropped_items list), never polymorphically
     // through a GameObject*, so this is deliberately a distinct method
-    // rather than an override with a mismatched signature. A block renders
-    // as a small 3D cube (draw_block_cube(), same atlas/shading a chunk
-    // mesh uses); a tool renders as a flat cross-plane icon sampled from
-    // items.png instead - it has no 3D block texture to draw a cube with.
-    void render(float tick_alpha) const;
+    // rather than an override with a mismatched signature. Blocks render as
+    // small 3D cubes using terrain.png. Non-block items use one flat icon
+    // from items.png; that billboard faces `viewer_position` only around the
+    // vertical axis, so looking up/down never tilts its top or bottom edge.
+    void render(float tick_alpha, Vector3 viewer_position, const World& world) const;
 
     const ItemStack& get_stack() const { return stack; }
-    bool can_pick_up() const { return age >= PICKUP_DELAY; }
+    bool can_pick_up() const { return age >= pickup_delay; }
     bool is_active() const { return active; }
     void set_active(bool value) { active = value; }
     Vector3 get_position() const { return motion.current; }
+    float get_age() const { return age; }
+    std::optional<Color> get_block_tint() const { return block_tint; }
+
+    // Restores a saved despawn countdown (WorldSave::load_dropped_items())
+    // instead of starting fresh at 0 - a reloaded item keeps counting down
+    // from wherever it was when the world was last saved, rather than
+    // getting another full MAX_AGE on every relog. Safe to call any time;
+    // pickup_delay is a separate, much smaller window that's already long
+    // past for any item old enough to have been worth persisting at all.
+    void set_age(float value) { age = value; }
 
     // Same kind of stack (both blocks of the same BlockType, never
     // tools - a tool carries its own durability, so two tools never merge
@@ -64,10 +87,13 @@ public:
     bool try_merge(DroppedItem& other);
 
 private:
-    static constexpr float PICKUP_DELAY = 0.25f;
+    static constexpr float NATURAL_PICKUP_DELAY = 0.25f;
+    static constexpr float PLAYER_THROWN_PICKUP_DELAY = 2.0f;
     static constexpr float MAX_AGE = 300.0f; // 6000 ticks - the same despawn time real Minecraft uses
 
     ItemStack stack;
     float age = 0.0f;
+    float pickup_delay = NATURAL_PICKUP_DELAY;
+    std::optional<Color> block_tint;
     TickMotion motion;
 };

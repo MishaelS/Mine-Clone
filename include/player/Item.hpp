@@ -7,12 +7,12 @@
 #include <optional>
 #include <string>
 
-// Non-block inventory items - tools today, nothing else yet (no armor,
-// food, or dye system - those need their own prerequisite mechanics, most
-// obviously a way to take damage/get hungry in the first place, that don't
-// exist here yet). Unlike BlockType, an ItemType is never placed in the
-// world - see ItemStack in Inventory.hpp, which holds either a BlockType or
-// one of these, never both.
+// Non-block inventory items - tools plus, now, plain crafting/drop
+// materials (no armor, food, or dye system yet - those need their own
+// prerequisite mechanics, most obviously a way to take damage/get hungry in
+// the first place, that don't exist here yet). Unlike BlockType, an
+// ItemType is never placed in the world - see ItemStack in Inventory.hpp,
+// which holds either a BlockType or one of these, never both.
 enum class ItemType : uint8_t {
     None, // "not a tool" - ItemStack's own sentinel, not a real item
     WoodenSword, WoodenPickaxe, WoodenShovel, WoodenAxe, WoodenHoe,
@@ -20,14 +20,35 @@ enum class ItemType : uint8_t {
     IronSword, IronPickaxe, IronShovel, IronAxe, IronHoe,
     GoldSword, GoldPickaxe, GoldShovel, GoldAxe, GoldHoe,
     DiamondSword, DiamondPickaxe, DiamondShovel, DiamondAxe, DiamondHoe,
+
+    // Materials - the crafting/drop system's ingredients, distinct from
+    // tools (see ItemCategory below): they stack up to MAX_ITEM_STACK
+    // instead of always sitting alone, and never carry durability.
+    Stick, Coal, IronIngot, GoldIngot, Diamond, RedstoneDust,
+    Sapling, Apple, WheatSeeds,
+
     Count, // not a real item; sentinel for table sizing
 };
 
+// Tool: equips into the hotbar's single-slot durability system
+// (ItemStack::durability, mining speed vs. a block's effective_tool).
+// Material: a plain crafting ingredient/drop - stacks like a block does,
+// never breaks. ItemStack::is_tool() checks this instead of just "holds an
+// ItemType" so a stack of, say, Coal is never mistaken for a wielded tool.
+enum class ItemCategory : uint8_t { Tool, Material };
+
 struct ItemProperties {
-    std::string display_name; // Russian, matching get_block_name()'s own language
-    ToolKind tool_kind;
-    int max_durability;            // "uses" before the tool breaks
+    std::string display_name; // Legacy label; UI uses ui::item_display_name for the selected language.
+    ItemCategory category = ItemCategory::Tool;
+    ToolKind tool_kind;             // Material entries leave this ToolKind::None
+    int max_durability;            // "uses" before the tool breaks - unused (0) for a Material
     float mining_speed_multiplier; // only applied when tool_kind matches the targeted block's own category
+    // Mining *level* (1=Wood/Gold, 2=Stone, 3=Iron, 4=Diamond) - gates
+    // BlockDropTable::resolve()'s min_tool_tier, distinct from raw speed:
+    // Gold sits at tier 1 despite mining_speed_multiplier being the
+    // highest, matching real Minecraft's own long-standing quirk (a Gold
+    // pickaxe still can't mine Iron ore). 0 for a Material (unused).
+    int tier = 0;
     Rectangle atlas_source;        // pixel-space rect within items.png (not normalized - DrawTexturePro takes pixels)
 };
 

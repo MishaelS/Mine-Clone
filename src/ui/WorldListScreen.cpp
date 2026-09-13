@@ -1,95 +1,72 @@
 #include "ui/WorldListScreen.hpp"
 #include "ui/Widgets.hpp"
-
-#include "raylib.h"
+#include "ui/Localization.hpp"
 
 #include <algorithm>
-#include <cstdio>
-
-namespace {
-    constexpr float ROW_HEIGHT = 56.0f;
-    constexpr float ROW_SPACING = 10.0f;
-    constexpr float ROW_WIDTH = 640.0f;
-    constexpr float PLAY_BUTTON_WIDTH = 140.0f;
-    constexpr float DELETE_BUTTON_WIDTH = 140.0f;
-    constexpr float BOTTOM_BUTTON_WIDTH = 220.0f;
-    constexpr float BOTTOM_BUTTON_HEIGHT = 48.0f;
-    constexpr int TITLE_FONT_SIZE = 36;
-    constexpr int EMPTY_FONT_SIZE = 20;
-}
+#include <cmath>
 
 void WorldListScreen::enter()
 {
     worlds = WorldSave::list_worlds();
     pending_delete_folder.reset();
+    selected_world.reset();
+    first_visible = 0;
 }
 
 WorldListScreen::Action WorldListScreen::update()
 {
-    int screen_width = GetScreenWidth();
-    int screen_height = GetScreenHeight();
-    float list_x = (screen_width - ROW_WIDTH) / 2.0f;
-
-    ui::label({0.0f, 40.0f, static_cast<float>(screen_width), 50.0f}, "Одиночная игра", TITLE_FONT_SIZE, WHITE);
-
-    Action result;
-
-    float list_top = 120.0f;
-    float list_bottom = screen_height - 100.0f;
-    int max_rows = std::max(0, static_cast<int>((list_bottom - list_top) / (ROW_HEIGHT + ROW_SPACING)));
-
-    if (worlds.empty()) {
-        ui::label({0.0f, list_top, static_cast<float>(screen_width), 40.0f}, "Пока нет сохранённых миров", EMPTY_FONT_SIZE, GRAY);
+    const float width = ui::scaled(ui::MENU_WIDTH);
+    const float x = (GetScreenWidth() - width) * 0.5f;
+    const float height = ui::scaled(ui::BUTTON_HEIGHT);
+    const float gap = ui::scaled(ui::BUTTON_GAP);
+    const float half = (width - gap) * 0.5f;
+    ui::label({0, ui::scaled(28), static_cast<float>(GetScreenWidth()), height}, ui::tr("worlds.title"));
+    const float top = ui::scaled(100);
+    const float bottom = GetScreenHeight() - ui::scaled(136);
+    const float row_height = ui::scaled(64);
+    const int count = std::max(1, static_cast<int>((bottom - top) / row_height));
+    Rectangle list = {x, top, width, bottom - top};
+    ui::panel(list, Color{0, 0, 0, 115});
+    if (CheckCollisionPointRec(GetMousePosition(), list)) {
+        first_visible -= static_cast<int>(std::round(GetMouseWheelMove()));
     }
+    first_visible = std::clamp(first_visible, 0, std::max(0, static_cast<int>(worlds.size()) - count));
 
-    float y = list_top;
-    int shown = 0;
-    for (auto& world : worlds) {
-        if (shown >= max_rows) break;
-        ++shown;
-
-        Rectangle name_bounds = {list_x, y, ROW_WIDTH - PLAY_BUTTON_WIDTH - DELETE_BUTTON_WIDTH - 20.0f, ROW_HEIGHT};
-        Rectangle play_bounds = {name_bounds.x + name_bounds.width + 10.0f, y, PLAY_BUTTON_WIDTH, ROW_HEIGHT};
-        Rectangle delete_bounds = {play_bounds.x + PLAY_BUTTON_WIDTH + 10.0f, y, DELETE_BUTTON_WIDTH, ROW_HEIGHT};
-
-        ui::panel(name_bounds, Color{40, 40, 46, 255});
-        char label_text[192];
-        std::snprintf(label_text, sizeof(label_text), "%s  (seed %u)", world.display_name.c_str(), world.seed);
-        ui::label(name_bounds, label_text, 20, WHITE);
-
-        if (ui::button(play_bounds, "Играть")) {
-            result = {ActionType::LoadWorld, world.folder_name};
+    if (worlds.empty()) ui::label({x, top, width, height}, ui::tr("worlds.empty"), LIGHTGRAY);
+    for (int row = 0; row < count && first_visible + row < static_cast<int>(worlds.size()); ++row) {
+        const size_t index = static_cast<size_t>(first_visible + row);
+        const WorldInfo& world = worlds[index];
+        Rectangle bounds = {x + ui::scaled(4), top + row * row_height + ui::scaled(2), width - ui::scaled(8), row_height - ui::scaled(4)};
+        if (CheckCollisionPointRec(GetMousePosition(), bounds) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            selected_world = index;
             pending_delete_folder.reset();
         }
-
-        bool armed = pending_delete_folder && *pending_delete_folder == world.folder_name;
-        if (armed) {
-            if (ui::button(delete_bounds, "Точно?")) {
-                WorldSave::delete_world(world.folder_name);
-                enter(); // refresh from disk - `worlds` is invalidated, stop iterating it now
-                return {ActionType::None, {}};
-            }
-        } else {
-            if (ui::button(delete_bounds, "Удалить")) {
-                pending_delete_folder = world.folder_name;
-            }
+        if (selected_world && *selected_world == index) {
+            ui::panel(bounds, Color{0, 0, 0, 180});
+            DrawRectangleLinesEx(bounds, ui::scaled(2), LIGHTGRAY);
         }
-
-        y += ROW_HEIGHT + ROW_SPACING;
+        ui::label({bounds.x + ui::scaled(6), bounds.y + ui::scaled(4), bounds.width - ui::scaled(12), ui::scaled(26)},
+                  world.display_name, WHITE, ui::TextAlign::Left);
+        ui::label({bounds.x + ui::scaled(6), bounds.y + ui::scaled(30), bounds.width - ui::scaled(12), ui::scaled(24)},
+                  ui::tr(world.game_mode == GameMode::Survival ? "mode.survival" : "mode.creative") +
+                  " / " + ui::tr("worlds.seed") + ": " + std::to_string(world.seed), GRAY, ui::TextAlign::Left);
     }
 
-    float bottom_y = screen_height - BOTTOM_BUTTON_HEIGHT - 30.0f;
-    float create_x = screen_width / 2.0f - BOTTOM_BUTTON_WIDTH - 10.0f;
-    float back_x = screen_width / 2.0f + 10.0f;
-
-    if (ui::button({create_x, bottom_y, BOTTOM_BUTTON_WIDTH, BOTTOM_BUTTON_HEIGHT}, "Создать мир")) {
-        result = {ActionType::CreateWorld, {}};
-        pending_delete_folder.reset();
+    const bool has_selection = selected_world && *selected_world < worlds.size();
+    const float footer = GetScreenHeight() - ui::scaled(116);
+    if (ui::button({x, footer, half, height}, ui::tr("worlds.play"), false, has_selection))
+        return {ActionType::LoadWorld, worlds[*selected_world].folder_name};
+    if (ui::button({x + half + gap, footer, half, height}, ui::tr("worlds.create")))
+        return {ActionType::CreateWorld, {}};
+    const bool armed = has_selection && pending_delete_folder &&
+                       *pending_delete_folder == worlds[*selected_world].folder_name;
+    if (ui::button({x, footer + height + gap, half, height}, ui::tr(armed ? "worlds.confirm" : "worlds.delete"), false, has_selection)) {
+        if (armed) {
+            WorldSave::delete_world(worlds[*selected_world].folder_name);
+            enter();
+        } else pending_delete_folder = worlds[*selected_world].folder_name;
     }
-    if (ui::button({back_x, bottom_y, BOTTOM_BUTTON_WIDTH, BOTTOM_BUTTON_HEIGHT}, "Назад")) {
-        result = {ActionType::Back, {}};
-        pending_delete_folder.reset();
-    }
-
-    return result;
+    if (ui::button({x + half + gap, footer + height + gap, half, height}, ui::tr("common.back")) || IsKeyPressed(KEY_ESCAPE))
+        return {ActionType::Back, {}};
+    return {};
 }

@@ -26,7 +26,7 @@ public:
     // here reads game state back out, it just looks right against real
     // terrain now instead of clipping through it.
     void update(float delta_time, const World* world);
-    void draw(const Camera3D& camera) const;
+    void draw(const Camera3D& camera, const World* world) const;
     void clear();
 
 private:

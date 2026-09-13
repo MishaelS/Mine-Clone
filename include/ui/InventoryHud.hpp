@@ -4,7 +4,12 @@
 #include "player/Inventory.hpp"
 #include "ui/Widgets.hpp"
 
+#include <array>
 #include <optional>
+#include <cstdint>
+
+enum class GameMode : uint8_t;
+class World;
 
 // The in-game inventory UI: a 9-slot hotbar always drawn during play and a
 // 27-slot storage panel toggled by GameEngine's E-key handling, or opened
@@ -31,8 +36,12 @@ public:
     // Right-click-on-block interaction (GameEngine::update()): opens the
     // given container. Only meant to be called while nothing is open yet -
     // GameEngine gates that with its own is_open() check first, same as it
-    // already does before the E-key toggle.
-    void open_container(ContainerKind kind);
+    // already does before the E-key toggle. `x`/`y`/`z` are the targeted
+    // block's own world position - unused for Workbench/Furnace/Inventory,
+    // but for Chest it's what update_grid() looks up World::chest_inventory()
+    // with, so a right-clicked chest actually shows *that* chest's own
+    // contents rather than some other one.
+    void open_container(ContainerKind kind, int x = 0, int y = 0, int z = 0);
 
     // Always called during Playing - draws the 9 slots at the bottom of
     // the screen with `inventory.selected_slot` highlighted. No input
@@ -40,24 +49,38 @@ public:
     // GameEngine::update() just sets inventory.selected_slot directly.
     void draw_hotbar(const Inventory& inventory) const;
 
-    // Draws storage + the mirrored hotbar row and handles drag-and-drop
-    // movement between every slot, plus Q to drop one item out of whatever
-    // slot the mouse is currently hovering (only while nothing's being
-    // dragged - GameEngine spawns the actual DroppedItem for whatever this
-    // returns, since only it knows the player's position/aim). For
-    // Workbench/Furnace/Chest, the container's own special slots (crafting
-    // grid, furnace input/fuel/output, chest storage) are drawn as pure
-    // background decoration, not interactive slots - this project has no
-    // crafting, smelting, or per-chest storage system yet (same reasoning
-    // the plain survival inventory's own crafting/armor cells were already
-    // left inert for).
-    std::optional<ItemStack> update_grid(Inventory& inventory);
+    // Creative shows its paged unlimited block catalog. Survival draws
+    // storage + mirrored hotbar and implements vanilla-style left/right
+    // click, half stacks, Shift quick-move, double-click gather, number-key
+    // swaps and Q/Shift+Q drops. GameEngine spawns the returned DroppedItem.
+    // Inventory/Workbench also get a real crafting grid (see Recipe.hpp).
+    // Chest gets its own 27-slot storage, read from `world` via
+    // World::chest_inventory() at whatever position open_container() was
+    // last called with - `world` may be null only in states this is never
+    // actually called from (chest slots just render empty then). Furnace's
+    // own input/fuel/output slots are still pure background decoration -
+    // this project has no smelting simulation yet.
+    std::optional<ItemStack> update_grid(Inventory& inventory, GameMode game_mode, World* world);
 
 private:
     bool open = false;
     ContainerKind kind = ContainerKind::Inventory;
+    // Only meaningful while kind == Chest - the world position
+    // open_container() was last called with, i.e. which chest's own
+    // World::chest_inventory() update_grid() should read/mutate.
+    int chest_x = 0, chest_y = 0, chest_z = 0;
     ItemStack carried_stack;
-    ItemStack* drag_source = nullptr;
+
+    // Real crafting grids - Inventory's own small 2x2 (always available) and
+    // the Workbench's 3x3 (see Recipe.hpp). Furnace/Chest have no crafting
+    // grid of their own, so these two just sit unused (and stay empty -
+    // update_grid() never lets carried_stack land in the wrong container's
+    // grid) whenever `kind` is neither.
+    std::array<ItemStack, 4> inventory_craft_grid{};
+    std::array<ItemStack, 9> workbench_craft_grid{};
+    int creative_page = 0;
+    double last_click_time = -1.0;
+    ItemStack* last_clicked_slot = nullptr;
     ui::Tooltip tooltip;
 };
 

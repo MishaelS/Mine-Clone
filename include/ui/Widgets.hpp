@@ -5,6 +5,7 @@
 #include "player/Item.hpp"
 
 #include <cstddef>
+#include <functional>
 #include <string>
 
 // Minimal hand-rolled immediate-mode widget set for the menu screens - no
@@ -16,6 +17,24 @@
 // that needs focus (text_input) tracks which field is focused itself and
 // passes it in.
 namespace ui {
+    // One scale shared by every menu widget and in-game HUD. Levels mirror
+    // Minecraft's GUI scale option: 1 standard, 2 medium, 3 large, 4 huge.
+    void set_scale_level(int level);
+    int scale_level();
+    float scale_factor();
+    float scaled(float value);
+    int scaled_font(int value);
+    int text_size();
+    constexpr float BUTTON_HEIGHT = 40.0f;
+    constexpr float BUTTON_GAP = 8.0f;
+    constexpr float MENU_WIDTH = 640.0f;
+    enum class TextAlign { Center, Left };
+    void begin_frame();
+
+    enum class SoundEvent { Click, Hover };
+    using SoundCallback = std::function<void(SoundEvent)>;
+    void set_sound_callback(SoundCallback callback);
+
     // Deferred overlay kept in the widget module because it is reusable UI
     // chrome, not a standalone screen. Draw after the hovered content so it
     // always remains on top.
@@ -33,15 +52,11 @@ namespace ui {
 
     void panel(Rectangle bounds, Color color);
 
-    // Full-window backdrop for the main menu (titleBlur.png, stretched to
-    // the current window size - it's already a 1920x1080 blurred panorama,
-    // no tiling needed).
-    void title_background();
-
-    // Full-window tiled dirt-pattern backdrop (optionsBackground.png) for
-    // every other menu screen (world list/create, settings, the pause
-    // menu) - Minecraft's own "options background".
+    // Dark tiled dirt for out-of-game menus. In-game menus use a blurred
+    // snapshot of the world instead.
     void menu_background();
+    // Capture the current completed draw batch; caller owns the texture.
+    Texture2D capture_blurred_background();
 
     // Minecraft-style inverted crosshair, centered in the current window.
     void crosshair();
@@ -57,7 +72,10 @@ namespace ui {
     void block_breaking_overlay(int block_x, int block_y, int block_z, float progress);
 
     // Centered text within `bounds` - doesn't draw a background of its own.
-    void label(Rectangle bounds, const std::string& text, int font_size = 22, Color color = WHITE);
+    // One font size for all chrome. Long labels are elided, never shrunk.
+    // Text fields scroll horizontally at exactly the same font size.
+    void label(Rectangle bounds, const std::string& text, Color color = WHITE,
+               TextAlign align = TextAlign::Center);
 
     // Minecraft-textured button with centered text. `selected` uses the
     // highlighted texture for one of a pair (e.g. Creative/Survival,
@@ -83,11 +101,8 @@ namespace ui {
     // this function doesn't track focus across calls.
     bool text_input(Rectangle bounds, TextInputState& state, bool focused);
 
-    // A labeled horizontal drag slider over `bounds` (the whole row - label
-    // and track are both laid out inside it). Integer-snapped. Tracks
-    // while the mouse button is held anywhere within `bounds`, not just on
-    // the handle itself, so a slider is easy to grab. Returns true only on
-    // a frame `value` actually changed.
+    // Full button-height Minecraft slider with its caption centered on the
+    // track. Captures the pointer until release, even outside its bounds.
     bool slider_int(Rectangle bounds, const std::string& label_text, int& value, int min_value, int max_value);
 
     // Draws `type` as a three-face isometric block item using its top and

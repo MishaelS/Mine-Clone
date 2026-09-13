@@ -53,6 +53,12 @@ public:
     // deposits.
     float clay(float world_x, float world_z) const;
 
+    // Small-scale noise, roughly in [-1, 1] - Chunk::generate_terrain turns
+    // a patch of river-bed sand into gravel wherever this crosses above a
+    // threshold, same patchy-deposit idea as clay() above, just for a
+    // river's own bed instead of a beach.
+    float gravel(float world_x, float world_z) const;
+
 private:
     // Wavelength ~900 blocks: biomes need to span whole regions, not
     // flicker chunk to chunk, so this samples much lower frequency than
@@ -77,6 +83,9 @@ private:
     // threshold only spans a handful of blocks, not a whole beach.
     static constexpr float CLAY_FREQUENCY = 1.0f / 12.0f;
 
+    // Same idea as CLAY_FREQUENCY, for gravel patches in a river bed.
+    static constexpr float GRAVEL_FREQUENCY = 1.0f / 10.0f;
+
     PerlinNoise height_noise;
     PerlinNoise temperature_noise;
     PerlinNoise humidity_noise;
@@ -84,4 +93,5 @@ private:
     PerlinNoise river_noise;
     PerlinNoise coast_noise;
     PerlinNoise clay_noise;
+    PerlinNoise gravel_noise;
 };

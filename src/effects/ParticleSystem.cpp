@@ -1,5 +1,6 @@
 #include "effects/ParticleSystem.hpp"
 #include "world/World.hpp"
+#include "rendering/EntityLighting.hpp"
 
 #include "raymath.h"
 
@@ -147,12 +148,13 @@ void ParticleSystem::update(float delta_time, const World* world)
         [](const Particle& particle) { return particle.age >= particle.lifetime; }), particles.end());
 }
 
-void ParticleSystem::draw(const Camera3D& camera) const
+void ParticleSystem::draw(const Camera3D& camera, const World* world) const
 {
     const Texture2D& atlas = get_block_atlas_texture();
     for (const Particle& particle : particles) {
         float remaining = 1.0f - particle.age / particle.lifetime;
         Color tint = particle.tint;
+        if (world) tint = multiply_tint(tint, entity_environment_tint(*world, particle.position));
         tint.a = static_cast<unsigned char>(static_cast<float>(tint.a) * Clamp(remaining * 1.6f, 0.0f, 1.0f));
         DrawBillboardRec(camera, atlas, particle.texture_source, particle.position,
                          Vector2{particle.size, particle.size}, tint);

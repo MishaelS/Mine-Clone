@@ -1,4 +1,5 @@
 #include "rendering/BlockMesh.hpp"
+#include "rendering/EntityLighting.hpp"
 
 #include "rlgl.h"
 
@@ -21,20 +22,36 @@ namespace {
         {{{ H, H, -H}, { H, H, H}, { H,-H, H}, { H,-H,-H}}, BlockFace::East},
         {{{-H, H,  H}, {-H, H,-H}, {-H,-H,-H}, {-H,-H, H}}, BlockFace::West},
     };
+
+    // Two diagonal planes, duplicated with reversed winding so the texture
+    // remains visible from all four horizontal directions while ordinary
+    // back-face culling stays enabled.
+    const Face CROSS_FACES[4] = {
+        {{{-H, H,-H}, { H, H, H}, { H,-H, H}, {-H,-H,-H}}, BlockFace::North},
+        {{{ H, H, H}, {-H, H,-H}, {-H,-H,-H}, { H,-H, H}}, BlockFace::North},
+        {{{ H, H,-H}, {-H, H, H}, {-H,-H, H}, { H,-H,-H}}, BlockFace::North},
+        {{{-H, H, H}, { H, H,-H}, { H,-H,-H}, {-H,-H, H}}, BlockFace::North},
+    };
 }
 
-void draw_block_cube(BlockType type, unsigned char alpha)
+void draw_block_cube(BlockType type, unsigned char alpha, std::optional<Color> tint_override,
+                     Color environment_tint)
 {
     const Texture2D& atlas = get_block_atlas_texture();
     const BlockProperties& properties = get_block_properties(type);
 
     rlSetTexture(atlas.id);
     rlBegin(RL_QUADS);
-    for (const Face& face : FACES) {
+    const Face* faces = properties.render_shape == BlockRenderShape::Cross ? CROSS_FACES : FACES;
+    int face_count = properties.render_shape == BlockRenderShape::Cross ? 4 : 6;
+    for (int face_number = 0; face_number < face_count; ++face_number) {
+        const Face& face = faces[face_number];
         int face_index = static_cast<int>(face.texture_face);
         Rectangle uv = get_sample_safe_block_uv(properties.texture_uvs[face_index]);
-        Color tint = properties.texture_tints[face_index];
-        float shade = FACE_DIRECTION_SHADE[face_index];
+        Color tint = multiply_tint(
+            tint_override.value_or(properties.texture_tints[face_index]), environment_tint);
+        float shade = properties.render_shape == BlockRenderShape::Cross
+            ? 0.9f : FACE_DIRECTION_SHADE[face_index];
         rlColor4ub(static_cast<unsigned char>(tint.r * shade),
                    static_cast<unsigned char>(tint.g * shade),
                    static_cast<unsigned char>(tint.b * shade),

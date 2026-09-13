@@ -20,42 +20,41 @@ namespace {
     // Only the keys default_keybindings() (or a reasonable rebind) actually
     // uses need a friendly name - anything else falls back to its raw
     // raylib key code so the row still shows *something* legible.
-    const char* key_display_name(int key) {
+    const char* key_display_name(int key, bool english) {
         switch (key) {
             case KEY_W           : return "W";
             case KEY_A           : return "A";
             case KEY_S           : return "S";
             case KEY_D           : return "D";
-            case KEY_SPACE       : return "Пробел";
+            case KEY_SPACE       : return english ? "Space" : "Пробел";
             case KEY_LEFT_SHIFT  : return "Shift";
             case KEY_LEFT_CONTROL: return "Ctrl";
             case KEY_LEFT_ALT    : return "Alt";
             case KEY_TAB         : return "Tab";
-            case KEY_UP          : return "Стрелка вверх";
-            case KEY_DOWN        : return "Стрелка вниз";
-            case KEY_LEFT        : return "Стрелка влево";
-            case KEY_RIGHT       : return "Стрелка вправо";
+            case KEY_UP          : return english ? "Up" : "Стрелка вверх";
+            case KEY_DOWN        : return english ? "Down" : "Стрелка вниз";
+            case KEY_LEFT        : return english ? "Left" : "Стрелка влево";
+            case KEY_RIGHT       : return english ? "Right" : "Стрелка вправо";
             default:
                 return nullptr;
         }
     }
 
-    const char* mouse_display_name(int button) {
+    const char* mouse_display_name(int button, bool english) {
         switch (button) {
-            case MOUSE_BUTTON_LEFT  : return "Мышь: ЛКМ";
-            case MOUSE_BUTTON_RIGHT : return "Мышь: ПКМ";
-            case MOUSE_BUTTON_MIDDLE: return "Мышь: СКМ";
-            default:
-                return "Мышь: кнопка";
+            case MOUSE_BUTTON_LEFT  : return english ? "Mouse: Left" : "Мышь: ЛКМ";
+            case MOUSE_BUTTON_RIGHT : return english ? "Mouse: Right" : "Мышь: ПКМ";
+            case MOUSE_BUTTON_MIDDLE: return english ? "Mouse: Middle" : "Мышь: СКМ";
+            default: return english ? "Mouse button" : "Мышь: кнопка";
         }
     }
 }
 
-std::string binding_display_name(const Binding& binding)
+std::string binding_display_name(const Binding& binding, bool english)
 {
-    if (binding.kind == BindingKind::MouseButton) return mouse_display_name(binding.code);
+    if (binding.kind == BindingKind::MouseButton) return mouse_display_name(binding.code, english);
 
-    if (const char* name = key_display_name(binding.code)) return name;
+    if (const char* name = key_display_name(binding.code, english)) return name;
 
     // Printable ASCII keys (letters/digits not already named above, plus
     // punctuation) - raylib's KeyboardKey values for these match their own
@@ -65,7 +64,7 @@ std::string binding_display_name(const Binding& binding)
     }
 
     char buffer[48];
-    std::snprintf(buffer, sizeof(buffer), "Клавиша #%d", binding.code);
+    std::snprintf(buffer, sizeof(buffer), english ? "Key #%d" : "Клавиша #%d", binding.code);
     return buffer;
 }
 
@@ -89,7 +88,7 @@ namespace {
         "move_backward",
         "move_left",
         "move_right",
-        "jump", "break_block", "place_block",
+        "jump", "sneak", "sprint", "break_block", "place_block",
     };
 
     constexpr const char* ACTION_DISPLAY_NAMES[] = {
@@ -97,7 +96,10 @@ namespace {
         "Назад",
         "Влево",
         "Вправо",
-        "Прыжок", "Ломать блок", "Ставить блок",
+        "Прыжок", "Красться / вниз", "Бег", "Ломать блок", "Ставить блок",
+    };
+    constexpr const char* ACTION_DISPLAY_NAMES_EN[] = {
+        "Forward", "Back", "Left", "Right", "Jump", "Sneak / down", "Sprint", "Break block", "Place block",
     };
 }
 
@@ -106,9 +108,9 @@ const char* game_action_json_key(GameAction action)
     return ACTION_JSON_KEYS[static_cast<size_t>(action)];
 }
 
-const char* game_action_display_name(GameAction action)
+const char* game_action_display_name(GameAction action, bool english)
 {
-    return ACTION_DISPLAY_NAMES[static_cast<size_t>(action)];
+    return (english ? ACTION_DISPLAY_NAMES_EN : ACTION_DISPLAY_NAMES)[static_cast<size_t>(action)];
 }
 
 std::array<Binding, static_cast<size_t>(GameAction::Count)> default_keybindings()
@@ -119,6 +121,8 @@ std::array<Binding, static_cast<size_t>(GameAction::Count)> default_keybindings(
     bindings[static_cast<size_t>(GameAction::MoveLeft)]     = {BindingKind::Key, KEY_A};
     bindings[static_cast<size_t>(GameAction::MoveRight)]    = {BindingKind::Key, KEY_D};
     bindings[static_cast<size_t>(GameAction::Jump)]         = {BindingKind::Key, KEY_SPACE};
+    bindings[static_cast<size_t>(GameAction::Sneak)]        = {BindingKind::Key, KEY_LEFT_SHIFT};
+    bindings[static_cast<size_t>(GameAction::Sprint)]       = {BindingKind::Key, KEY_LEFT_CONTROL};
     bindings[static_cast<size_t>(GameAction::BreakBlock)]   = {BindingKind::MouseButton, MOUSE_BUTTON_LEFT};
     bindings[static_cast<size_t>(GameAction::PlaceBlock)]   = {BindingKind::MouseButton, MOUSE_BUTTON_RIGHT};
     return bindings;

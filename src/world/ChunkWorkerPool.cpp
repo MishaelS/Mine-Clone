@@ -79,6 +79,7 @@ std::shared_ptr<Chunk> generate_chunk_data(int chunk_x, int chunk_z, uint32_t wo
     bool loaded_from_disk = save_directory && chunk->load_from_file(worker_chunk_file_path(*save_directory, chunk_x, chunk_z));
     if (!loaded_from_disk) {
         chunk->generate_terrain(noise);
+        chunk->generate_ores(world_seed, chunk_x, chunk_z);
         chunk->carve_caves(world_seed, chunk_x, chunk_z);
         StructureGenerator(world_seed).generate(*chunk, noise, chunk_x, chunk_z);
     }

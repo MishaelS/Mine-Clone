@@ -3,11 +3,11 @@
 #include "core/Block.hpp"
 #include "raylib.h"
 
-// Rendering module: draws one full block-textured cube in world space,
-// using the same atlas UVs/tints/per-face shading a chunk mesh would for
-// this BlockType - shared by anything that needs to render a single block
-// outside of chunk meshing (dropped items, falling-block entities) instead
-// of each reimplementing its own copy of the same 6-quad geometry.
+#include <optional>
+
+// Rendering module: draws one block in world space using its configured
+// cube or crossed-plane shape and the same atlas UVs/tints a chunk mesh
+// uses. Shared by dropped items and falling-block entities.
 //
 // Caller is responsible for whatever transform (translation, scale,
 // rotation for a dropped item's spin/bob) is active before calling this -
@@ -16,7 +16,9 @@
 // `alpha` multiplies every vertex color's own alpha, for fading a dropped
 // item out or a block-breaking overlay in - 255 (opaque) for a normal
 // solid block.
-void draw_block_cube(BlockType type, unsigned char alpha = 255);
+void draw_block_cube(BlockType type, unsigned char alpha = 255,
+                     std::optional<Color> tint_override = std::nullopt,
+                     Color environment_tint = WHITE);
 
 // Same unit cube and calling convention as draw_block_cube(), but with one
 // UV rectangle sampled identically on all 6 faces at a flat `tint`

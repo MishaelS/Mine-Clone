@@ -2,6 +2,7 @@
 #include "player/Item.hpp"
 #include "world/World.hpp"
 #include "rendering/BlockMesh.hpp"
+#include "rendering/EntityLighting.hpp"
 #include "core/Tick.hpp"
 
 #include "raymath.h"
@@ -41,7 +42,7 @@ namespace {
     constexpr float ITEM_HALF_SIZE = 0.14f;
     constexpr float BOB_HEIGHT = 0.04f;
     constexpr float BOB_SPEED = 3.0f;
-    constexpr float ROTATION_SPEED = 45.0f;
+    constexpr float BLOCK_ROTATION_SPEED = 45.0f;
 
     constexpr float MERGE_RADIUS = 0.7f;
     constexpr float MAGNET_RADIUS = 1.0f;
@@ -54,49 +55,65 @@ namespace {
         return get_block_properties(world->get_block(x, y, z)).solid;
     }
 
-    // A tool has no BlockType (and so no BlockProperties::density) of its
-    // own to fall/float by - treated as exactly water's own density
-    // (falls at the plain baseline rate, neither floats nor sinks
+    // A tool or material has no BlockType (and so no BlockProperties::
+    // density) of its own to fall/float by - treated as exactly water's own
+    // density (falls at the plain baseline rate, neither floats nor sinks
     // unusually fast), same neutral-default spirit as a block that never
     // overrode "density" in blocks.json.
     float effective_density(const ItemStack& stack) {
-        return stack.is_tool() ? WATER_REFERENCE_DENSITY : get_block_properties(stack.block).density;
+        return stack.holds_item() ? WATER_REFERENCE_DENSITY : get_block_properties(stack.block).density;
     }
 
-    // A tool's flat icon (items.png), as a cross of two quads at 90
-    // degrees to each other - the same trick cross-plane plant sprites use
-    // - so it still reads as an icon from any horizontal angle as it spins
-    // in place, without this project needing to add a camera-facing
-    // billboard path just for this one case.
-    void draw_item_cross_quad(const ItemProperties& properties)
+    struct BillboardTexture {
+        const Texture2D* texture;
+        Rectangle uv;
+        Color tint;
+        float size;
+    };
+
+    BillboardTexture item_billboard_texture(ItemType type)
     {
         const Texture2D& atlas = get_item_atlas_texture();
-        float u0 = properties.atlas_source.x / static_cast<float>(atlas.width);
-        float v0 = properties.atlas_source.y / static_cast<float>(atlas.height);
-        float u1 = u0 + properties.atlas_source.width / static_cast<float>(atlas.width);
-        float v1 = v0 + properties.atlas_source.height / static_cast<float>(atlas.height);
-        constexpr float H = 0.5f;
-        const Vector3 planes[2][4] = {
-            {{-H, H, 0.0f}, {-H, -H, 0.0f}, {H, -H, 0.0f}, {H, H, 0.0f}},
-            {{0.0f, H, -H}, {0.0f, -H, -H}, {0.0f, -H, H}, {0.0f, H, H}},
+        const Rectangle source = get_item_properties(type).atlas_source;
+        constexpr float sub_texel = 1.0f / 1024.0f;
+        Rectangle uv = {
+            (source.x + sub_texel) / static_cast<float>(atlas.width),
+            (source.y + sub_texel) / static_cast<float>(atlas.height),
+            (source.width - sub_texel * 2.0f) / static_cast<float>(atlas.width),
+            (source.height - sub_texel * 2.0f) / static_cast<float>(atlas.height),
         };
+        return {&atlas, uv, WHITE, ITEM_HALF_SIZE * 3.0f};
+    }
 
-        rlSetTexture(atlas.id);
+    void draw_billboard_quad(const BillboardTexture& billboard)
+    {
+        const float half = billboard.size * 0.5f;
+        const float u0 = billboard.uv.x;
+        const float v0 = billboard.uv.y;
+        const float u1 = billboard.uv.x + billboard.uv.width;
+        const float v1 = billboard.uv.y + billboard.uv.height;
+
+        rlSetTexture(billboard.texture->id);
         rlBegin(RL_QUADS);
-        rlColor4ub(255, 255, 255, 255);
-        for (const auto& plane : planes) {
-            rlTexCoord2f(u0, v0); rlVertex3f(plane[0].x, plane[0].y, plane[0].z);
-            rlTexCoord2f(u0, v1); rlVertex3f(plane[1].x, plane[1].y, plane[1].z);
-            rlTexCoord2f(u1, v1); rlVertex3f(plane[2].x, plane[2].y, plane[2].z);
-            rlTexCoord2f(u1, v0); rlVertex3f(plane[3].x, plane[3].y, plane[3].z);
-        }
+        rlColor4ub(billboard.tint.r, billboard.tint.g, billboard.tint.b, billboard.tint.a);
+        rlNormal3f(0.0f, 0.0f, 1.0f);
+        rlTexCoord2f(u0, v0); rlVertex3f(-half,  half, 0.0f);
+        rlTexCoord2f(u0, v1); rlVertex3f(-half, -half, 0.0f);
+        rlTexCoord2f(u1, v1); rlVertex3f( half, -half, 0.0f);
+        rlTexCoord2f(u1, v0); rlVertex3f( half,  half, 0.0f);
         rlEnd();
         rlSetTexture(0);
     }
 }
 
-DroppedItem::DroppedItem(Vector3 item_position, ItemStack item_stack, Vector3 launch_velocity)
-    : Entity(item_position), stack(item_stack)
+DroppedItem::DroppedItem(Vector3 item_position, ItemStack item_stack,
+                         Vector3 launch_velocity, DroppedItemOrigin origin,
+                         std::optional<Color> item_block_tint)
+    : Entity(item_position)
+    , stack(item_stack)
+    , pickup_delay(origin == DroppedItemOrigin::PlayerThrown
+          ? PLAYER_THROWN_PICKUP_DELAY : NATURAL_PICKUP_DELAY)
+    , block_tint(item_block_tint)
 {
     motion.reset(item_position);
     velocity = Vector3Add({0.0f, INITIAL_POP_VELOCITY, 0.0f}, launch_velocity);
@@ -165,6 +182,11 @@ void DroppedItem::tick_physics(const World* world)
 
 void DroppedItem::update_magnet_pull(float delta_time, Vector3 target)
 {
+    // The pickup delay also disables attraction. Merely preventing the
+    // final collect is not enough: a Q-thrown item would otherwise reverse
+    // direction immediately and wait at the player's hitbox.
+    if (!can_pick_up()) return;
+
     Vector3 to_target = Vector3Subtract(target, motion.current);
     float distance = Vector3Length(to_target);
     if (distance <= 0.0001f || distance > MAGNET_RADIUS) return;
@@ -182,9 +204,13 @@ bool DroppedItem::try_merge(DroppedItem& other)
 {
     if (this == &other || !active || !other.active) return false;
     if (stack.is_tool() || other.stack.is_tool()) return false; // tools carry their own durability - never merge
-    if (stack.block != other.stack.block) return false;
+    // A material's `block` field is unused (stays Air) same as another
+    // material's - comparing blocks alone would let two different
+    // materials (e.g. Coal and Stick) merge into one bogus stack, so item
+    // type has to match too.
+    if (stack.block != other.stack.block || stack.tool != other.stack.tool) return false;
     // Still fresh from the same break - let them visibly separate first,
-    // same PICKUP_DELAY that already gates picking one up too soon.
+    // same per-item pickup delay that already gates picking one up too soon.
     if (!can_pick_up() || !other.can_pick_up()) return false;
     if (stack.count >= MAX_ITEM_STACK) return false;
     if (Vector3Distance(motion.current, other.motion.current) > MERGE_RADIUS) return false;
@@ -196,20 +222,27 @@ bool DroppedItem::try_merge(DroppedItem& other)
     return true;
 }
 
-void DroppedItem::render(float tick_alpha) const
+void DroppedItem::render(float tick_alpha, Vector3 viewer_position, const World& world) const
 {
     Vector3 render_position = motion.interpolated(tick_alpha);
     float bob = std::sin(static_cast<float>(GetTime()) * BOB_SPEED) * BOB_HEIGHT;
+    Color environment_tint = entity_environment_tint(world, render_position);
 
     rlPushMatrix();
     rlTranslatef(render_position.x, render_position.y + bob, render_position.z);
-    rlRotatef(static_cast<float>(GetTime()) * ROTATION_SPEED, 0.0f, 1.0f, 0.0f);
-    if (stack.is_tool()) {
-        rlScalef(ITEM_HALF_SIZE * 3.0f, ITEM_HALF_SIZE * 3.0f, ITEM_HALF_SIZE * 3.0f);
-        draw_item_cross_quad(get_item_properties(stack.tool));
+    if (stack.holds_item()) {
+        Vector3 to_viewer = Vector3Subtract(viewer_position, render_position);
+        // Cylindrical billboard: ignore pitch so the item remains vertical
+        // even when the camera is above or below it.
+        float yaw = std::atan2(to_viewer.x, to_viewer.z) * RAD2DEG;
+        rlRotatef(yaw, 0.0f, 1.0f, 0.0f);
+        BillboardTexture billboard = item_billboard_texture(stack.tool);
+        billboard.tint = multiply_tint(billboard.tint, environment_tint);
+        draw_billboard_quad(billboard);
     } else {
+        rlRotatef(static_cast<float>(GetTime()) * BLOCK_ROTATION_SPEED, 0.0f, 1.0f, 0.0f);
         rlScalef(ITEM_HALF_SIZE * 2.0f, ITEM_HALF_SIZE * 2.0f, ITEM_HALF_SIZE * 2.0f);
-        draw_block_cube(stack.block);
+        draw_block_cube(stack.block, 255, block_tint, environment_tint);
     }
     rlPopMatrix();
     // A merged stack (count > 1) still renders as a single icon, same as

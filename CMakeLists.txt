@@ -37,8 +37,11 @@ add_executable(${PROJECT_NAME}
     # Player-domain state and world-visible effects
     src/player/Entity.cpp
     src/player/Inventory.cpp
+    src/player/PlayerController.cpp
     src/player/Item.cpp
     src/player/DroppedItem.cpp
+    src/player/DropTable.cpp
+    src/player/Recipe.cpp
     src/effects/ParticleSystem.cpp
 
     # World, generation, and rendering
@@ -47,11 +50,13 @@ add_executable(${PROJECT_NAME}
     src/world/World.cpp
     src/rendering/Skybox.cpp
     src/rendering/BlockMesh.cpp
+    src/rendering/PlayerRenderer.cpp
     src/worldgen/Structure.cpp
     src/worldgen/StructureGenerator.cpp
 
     # UI: reusable widgets and independent screens
     src/ui/Widgets.cpp
+    src/ui/Localization.cpp
     src/ui/FontManager.cpp
     src/ui/DebugOverlay.cpp
     src/ui/MainMenuScreen.cpp

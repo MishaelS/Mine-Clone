@@ -185,6 +185,7 @@ namespace {
         {"orange_wool"      , BlockType::OrangeWool      },
         {"light_gray_wool"  , BlockType::LightGrayWool   },
         {"lava"             , BlockType::Lava            },
+        {"short_grass"      , BlockType::ShortGrass      },
     };
 
     BlockSoundGroup sound_group_from_name(const std::string& name) {
@@ -211,18 +212,27 @@ void Load_block_definitions()
     // lands in which field.
     {
         BlockProperties& air = block_table[static_cast<uint8_t>(BlockType::Air)];
-        air = BlockProperties{};
-        air.solid = false;
-        air.transparent = true;
+        air                 = BlockProperties{};
+        air.solid           = false;
+        air.transparent     = true;
+        air.selectable      = false;
+        air.replaceable     = true;
+        air.render_shape    = BlockRenderShape::Cube;
         air.cull_same_faces = true;
-        air.sound_group = BlockSoundGroup::None;
-        air.hardness = 0.0f;
-        air.effective_tool = ToolKind::None;
-        air.density = 0.0f; // never dropped/simulated - air has no falling/buoyancy meaning
+        air.sound_group     = BlockSoundGroup::None;
+        air.hardness        = 0.0f;
+        air.effective_tool  = ToolKind::None;
+        air.density         = 0.0f; // never dropped/simulated - air has no falling/buoyancy meaning
     }
     block_names[static_cast<uint8_t>(BlockType::Air)] = "air";
 
     block_atlas_texture = &TextureManager::get(TERRAIN_TEXTURE_PATH);
+    if (block_atlas_texture->width != TILE_PIXELS * GRID_TILES ||
+        block_atlas_texture->height != TILE_PIXELS * GRID_TILES) {
+        throw std::runtime_error(
+            "sprites/terrain.png must be exactly 256x256 pixels "
+            "(16x16 tiles, each tile 16x16 pixels)");
+    }
 
     char* fileText = LoadFileText(ASSETS_PATH "blocks.json");
     if (fileText == nullptr) {
@@ -251,17 +261,21 @@ void Load_block_definitions()
         };
         FaceTexture north = optional_face("north");
         FaceTexture south = optional_face("south");
-        FaceTexture east = optional_face("east");
-        FaceTexture west = optional_face("west");
+        FaceTexture east  = optional_face("east");
+        FaceTexture west  = optional_face("west");
 
         BlockProperties properties;
-        properties.solid = entry["solid"].as_bool(true);
-        properties.transparent = entry["transparent"].as_bool(false);
-        properties.translucent = entry["translucent"].as_bool(false);
-        properties.cutout = entry["cutout"].as_bool(false);
+        properties.solid           = entry["solid"].as_bool(true);
+        properties.transparent     = entry["transparent"].as_bool(false);
+        properties.selectable      = entry["selectable"].as_bool(true);
+        properties.replaceable     = entry["replaceable"].as_bool(!properties.solid);
+        properties.render_shape    = entry["render_shape"].as_string() == "cross"
+            ? BlockRenderShape::Cross : BlockRenderShape::Cube;
+        properties.translucent     = entry["translucent"].as_bool(false);
+        properties.cutout          = entry["cutout"].as_bool(false);
         properties.cull_same_faces = entry["cull_same_faces"].as_bool(true);
-        properties.sound_group = sound_group_from_name(entry["sound"].as_string("stone"));
-        properties.luminance = static_cast<int>(entry["luminance"].as_number(0.0));
+        properties.sound_group     = sound_group_from_name(entry["sound"].as_string("stone"));
+        properties.luminance       = static_cast<int>(entry["luminance"].as_number(0.0));
 
         PhysicalDefaults physical_defaults = physical_defaults_for(properties.sound_group);
         properties.hardness = static_cast<float>(entry["hardness"].as_number(physical_defaults.hardness));
@@ -298,6 +312,13 @@ const BlockProperties& get_block_properties(BlockType type)
     return block_table[static_cast<uint8_t>(type)];
 }
 
+bool block_is_directional(BlockType type)
+{
+    return type == BlockType::Chest     || type == BlockType::Furnace || type == BlockType::LitFurnace ||
+           type == BlockType::Workbench || type == BlockType::Dispenser ||
+           type == BlockType::Pumpkin || type == BlockType::JackOLantern;
+}
+
 const std::string& get_block_name(BlockType type)
 {
     return block_names[static_cast<uint8_t>(type)];
@@ -318,11 +339,19 @@ const Texture2D& get_block_atlas_texture()
 Rectangle get_sample_safe_block_uv(Rectangle uv)
 {
     const Texture2D& atlas = get_block_atlas_texture();
-    float half_u = 0.5f / static_cast<float>(atlas.width);
-    float half_v = 0.5f / static_cast<float>(atlas.height);
-    return {uv.x + half_u, uv.y + half_v,
-            std::max(0.0f, uv.width - half_u * 2.0f),
-            std::max(0.0f, uv.height - half_v * 2.0f)};
+    // Keep the coordinates just inside their tile so floating-point
+    // rounding can never select the neighbouring tile.  The old half-texel
+    // inset mapped the centres of texels 0..15 onto the complete face.  With
+    // point sampling that makes the first/last source pixels half as wide as
+    // the other fourteen, which is why the 16x16 artwork looked uneven on a
+    // one-block face.  A tiny sub-texel inset preserves sixteen equal pixel
+    // columns/rows while still keeping the shared atlas boundary exclusive.
+    constexpr float SUB_TEXEL_INSET = 1.0f / 1024.0f;
+    float inset_u = SUB_TEXEL_INSET / static_cast<float>(atlas.width);
+    float inset_v = SUB_TEXEL_INSET / static_cast<float>(atlas.height);
+    return {uv.x + inset_u, uv.y + inset_v,
+            std::max(0.0f, uv.width - inset_u * 2.0f),
+            std::max(0.0f, uv.height - inset_v * 2.0f)};
 }
 
 Rectangle block_atlas_tile_uv(int column, int row)

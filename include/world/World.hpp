@@ -5,10 +5,12 @@
 #include "world/ChunkWorkerPool.hpp"
 #include "core/Block.hpp"
 #include "core/TickMotion.hpp"
+#include "player/Inventory.hpp"
 
 #include <array>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -119,6 +121,11 @@ public:
     // there to be loaded at all.
     Biome get_biome(int x, int z) const;
 
+    // Biome-gradient color of foliage in this world column. Falls back to
+    // the ordinary foliage definition if the chunk is not currently loaded.
+    Color get_foliage_tint(int x, int z) const;
+    Color get_grass_tint(int x, int z) const;
+
     // std::nullopt if `position` isn't inside a Water block; otherwise how
     // many more Water blocks sit directly above it before the water body
     // ends (0 = already the topmost, i.e. right under the surface) - for
@@ -134,6 +141,7 @@ public:
     struct RaycastHit {
         int x, y, z;
         Vector3 normal; // outward-facing normal of the face the ray entered through
+        float distance = 0.0f;
     };
     std::optional<RaycastHit> raycast(Vector3 origin, Vector3 direction, float max_distance) const;
 
@@ -269,7 +277,57 @@ public:
     // Call from inside the same BeginMode3D block World::draw() runs in.
     void draw_falling_blocks(float tick_alpha) const;
 
+    // Which way a directional block (Furnace/Workbench/Dispenser/Pumpkin/
+    // JackOLantern) at this position is facing - see Chunk::get_orientation()'s
+    // own comment. South (its blocks.json-authored default) for any
+    // position that was never explicitly set, including one in an unloaded
+    // chunk.
+    HorizontalDirection get_block_orientation(int x, int y, int z) const;
+    void set_block_orientation(int x, int y, int z, HorizontalDirection direction);
+
+    // A Chest block's own 27-slot storage, keyed by its world position -
+    // created empty the first time a given position is looked up (opening
+    // a chest that's never been opened before), so InventoryHud can read
+    // and mutate it directly by reference. WorldSave persists every
+    // position this returns a reference into (see all_chest_inventories())
+    // whenever the world is saved, and GameEngine restores each one by
+    // writing straight into the reference this returns on load.
+    std::array<ItemStack, INVENTORY_STORAGE_SIZE>& chest_inventory(int x, int y, int z);
+
+    // Removes and returns whatever chest_inventory() had stored at this
+    // position (an all-empty array if it was never opened) - called when a
+    // Chest block is broken, so its contents can be spilled as dropped
+    // items instead of silently vanishing.
+    std::array<ItemStack, INVENTORY_STORAGE_SIZE> take_chest_inventory(int x, int y, int z);
+
+    // One entry per chest position chest_inventory() has ever been called
+    // for (including a now-empty one - a chest a player opened and took
+    // everything back out of), for WorldSave::save_chests() to write out
+    // wholesale. ChestPosKey stays private; this is the one sanctioned way
+    // to enumerate the map without exposing it.
+    struct ChestSnapshot {
+        int x, y, z;
+        std::array<ItemStack, INVENTORY_STORAGE_SIZE> slots;
+    };
+    std::vector<ChestSnapshot> all_chest_inventories() const;
+
 private:
+    struct ChestPosKey {
+        int x, y, z;
+        bool operator==(const ChestPosKey& other) const {
+            return x == other.x && y == other.y && z == other.z;
+        }
+    };
+    struct ChestPosKeyHash {
+        size_t operator()(const ChestPosKey& key) const {
+            size_t h = std::hash<int>()(key.x);
+            h = h * 31 + std::hash<int>()(key.y);
+            h = h * 31 + std::hash<int>()(key.z);
+            return h;
+        }
+    };
+    std::unordered_map<ChestPosKey, std::array<ItemStack, INVENTORY_STORAGE_SIZE>, ChestPosKeyHash> chest_storage;
+
     // shared_ptr, not unique_ptr: a chunk a ChunkWorkerPool mesh job is
     // still reading (as the target or as a neighbor) must stay alive even
     // if World::unload_chunk() erases it from this map while that job is

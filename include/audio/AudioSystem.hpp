@@ -26,6 +26,10 @@ public:
     void play_step(BlockType block, Vector3 source, Vector3 listener);
     void play_hit(BlockType block, Vector3 source, Vector3 listener);
     void play_break(BlockType block, Vector3 source, Vector3 listener);
+    void play_ui_click();
+    void play_ui_hover();
+    void play_item_pickup();
+    void update_water(float delta_time, bool in_water, bool moving);
 
 private:
     struct BlockSounds {
@@ -37,6 +41,11 @@ private:
     static constexpr size_t GROUP_COUNT = static_cast<size_t>(BlockSoundGroup::Metal) + 1;
     std::array<BlockSounds, GROUP_COUNT> block_sounds;
     std::vector<Sound> ambient_sounds;
+    std::vector<Sound> ui_click_sounds;
+    std::vector<Sound> ui_hover_sounds;
+    std::vector<Sound> item_pickup_sounds;
+    std::vector<Sound> swim_sounds;
+    std::vector<Sound> water_ambient_sounds;
     std::vector<Music> music_tracks;
     std::mt19937 random{std::random_device{}()};
 
@@ -48,7 +57,10 @@ private:
     float ambient_wait = 8.0f;
     float music_wait = 2.0f;
     int current_music = -1;
+    float swim_wait = 0.0f;
+    float water_ambient_wait = 1.0f;
 
     void load_config(const std::string& path);
     void play_spatial(std::vector<Sound>& variants, Vector3 source, Vector3 listener, float base_volume);
+    void play_nonspatial(std::vector<Sound>& variants, float volume, float pitch_min = 0.95f, float pitch_max = 1.05f);
 };

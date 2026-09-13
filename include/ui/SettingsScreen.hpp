@@ -12,6 +12,8 @@
 // right away, not just when leaving the screen.
 class SettingsScreen {
 public:
+    enum class Section { Overview, Controls, Graphics, Sound, Language };
+    void enter(Section initial = Section::Overview) { section = initial; rebinding_action.reset(); }
     enum class ActionType { None, Back };
     struct Action { ActionType type = ActionType::None; };
 
@@ -22,8 +24,7 @@ public:
     Action update(Settings& settings);
 
 private:
-    enum class Section { Controls, Graphics, Sound };
-    Section section = Section::Graphics;
+    Section section = Section::Overview;
 
     // Which action (if any) is currently waiting for its next key/mouse
     // press to become its new binding - see the .cpp for why update() must

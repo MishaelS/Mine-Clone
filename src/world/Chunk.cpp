@@ -142,6 +142,17 @@ namespace {
     // a solid clay column.
     constexpr float CLAY_THRESHOLD = 0.55f;
 
+    // River bed: wherever the river carve above (see `carve` in
+    // generate_terrain) is strong enough that this column sits solidly in
+    // the channel rather than on its sloped bank, the bed gets sand
+    // instead of whatever the land biome's own surface block would
+    // otherwise leave exposed underwater (plain dirt for Plains/Forest) -
+    // real rivers run over sand/gravel, not soil. GRAVEL_THRESHOLD then
+    // swaps some of that sand to gravel in small patches, same mechanism
+    // as CLAY_THRESHOLD above.
+    constexpr float RIVER_BED_CARVE_THRESHOLD = 0.3f;
+    constexpr float GRAVEL_THRESHOLD = 0.6f;
+
     // Beach: land within a few blocks of sea level, close enough to Sea or
     // Ocean to notice, gets a shoreline material instead of its own
     // biome's usual surface block - sand for a calm Sea coastline, gravel
@@ -234,6 +245,15 @@ namespace {
         { { HALF,  HALF,  HALF}, {-HALF,  HALF,  HALF}, {-HALF, -HALF,  HALF}, { HALF, -HALF,  HALF}, { 0.0f,  0.0f,  1.0f} }, // South
         { { HALF,  HALF, -HALF}, { HALF,  HALF,  HALF}, { HALF, -HALF,  HALF}, { HALF, -HALF, -HALF}, { 1.0f,  0.0f,  0.0f} }, // East
         { {-HALF,  HALF,  HALF}, {-HALF,  HALF, -HALF}, {-HALF, -HALF, -HALF}, {-HALF, -HALF,  HALF}, {-1.0f,  0.0f,  0.0f} }, // West
+    }};
+
+    // Cross-shaped vegetation: two diagonal planes, each emitted in both
+    // directions because the opaque/cutout pass keeps back-face culling on.
+    const std::array<Face, 4> CROSS_FACES = {{
+        { {-HALF, HALF,-HALF}, { HALF, HALF, HALF}, { HALF,-HALF, HALF}, {-HALF,-HALF,-HALF}, { 0.7071f, 0.0f,-0.7071f} },
+        { { HALF, HALF, HALF}, {-HALF, HALF,-HALF}, {-HALF,-HALF,-HALF}, { HALF,-HALF, HALF}, {-0.7071f, 0.0f, 0.7071f} },
+        { { HALF, HALF,-HALF}, {-HALF, HALF, HALF}, {-HALF,-HALF, HALF}, { HALF,-HALF,-HALF}, { 0.7071f, 0.0f, 0.7071f} },
+        { {-HALF, HALF, HALF}, { HALF, HALF,-HALF}, { HALF,-HALF,-HALF}, {-HALF,-HALF, HALF}, {-0.7071f, 0.0f,-0.7071f} },
     }};
 
     // The 9 chunks (this one plus its 8 border neighbors) a face-corner
@@ -356,7 +376,7 @@ namespace {
                   + light_at(nb, cells.side2[0] , cells.side2[1] , cells.side2[2] )
                   + light_at(nb, cells.corner[0], cells.corner[1], cells.corner[2]);
 
-        return (total / 4.0f) / MAX_LIGHT;
+        return std::max(MIN_LIGHT_FRACTION, (total / 4.0f) / MAX_LIGHT);
     }
 
     // One of these per distinct transparent-but-not-translucent BlockType
@@ -526,6 +546,17 @@ void set_chunk_water_pass(bool active)
     SetShaderValue(chunk_shader, water_pass_loc, &value, SHADER_UNIFORM_INT);
 }
 
+void begin_dynamic_entity_shader()
+{
+    set_chunk_water_pass(false);
+    BeginShaderMode(chunk_shader);
+}
+
+void end_dynamic_entity_shader()
+{
+    EndShaderMode();
+}
+
 void unload_chunk_fog_shader()
 {
     UnloadShader(chunk_shader);
@@ -609,9 +640,11 @@ void Chunk::generate_terrain(const TerrainNoise& noise)
             bool near_desert_border = weights.desert > 0.1f && weights.desert < 0.9f;
             bool near_coast = (weights.sea + weights.ocean) > BEACH_COAST_WEIGHT;
             bool river_tunnel = false;
+            bool river_bed = false; // solidly inside the channel, not just its sloped bank - see RIVER_BED_CARVE_THRESHOLD
             if (near_desert_border || near_coast) {
                 float river_distance = std::fabs(noise.river(world_x, world_z));
                 float carve = std::clamp(1.0f - river_distance / RIVER_WIDTH, 0.0f, 1.0f);
+                river_bed = carve > RIVER_BED_CARVE_THRESHOLD;
                 if (carve > 0.0f) {
                     // How much of the surface-carving strength above still
                     // applies here, fading from 1 (full open valley) at
@@ -661,6 +694,18 @@ void Chunk::generate_terrain(const TerrainNoise& noise)
             if (is_land && near_coast && height <= WATER_LEVEL + BEACH_HEIGHT_ABOVE_WATER) {
                 bool wild_coast = weights.ocean > weights.sea;
                 surface_block = wild_coast ? BlockType::Gravel : BlockType::Sand;
+                subsurface_block = surface_block;
+            }
+
+            // River bed: sand (with a chance of gravel, in small patches -
+            // see GRAVEL_THRESHOLD) instead of the land biome's own
+            // surface block, so a river carved through Plains/Forest
+            // exposes a proper sandy/gravelly bed rather than leaving
+            // plain dirt sitting underwater. Sea/Ocean columns keep their
+            // own biome_terrain floor untouched (is_land guards that).
+            if (is_land && river_bed && height < WATER_LEVEL) {
+                bool has_gravel = noise.gravel(world_x, world_z) > GRAVEL_THRESHOLD;
+                surface_block = has_gravel ? BlockType::Gravel : BlockType::Sand;
                 subsurface_block = surface_block;
             }
 
@@ -959,6 +1004,95 @@ namespace {
             carve_ellipsoid(chunk, chunk_x, chunk_z, x, y, z, horizontal_radius, vertical_radius);
         }
     }
+
+    // --- Ore/filler vein generation ---
+    //
+    // Beta 1.7.3's own per-ore Y bands, taken literally as local (chunk-
+    // relative) Y rather than rescaled the way CAVE_HEIGHT_RANGE above
+    // stretches Beta's shorter world onto this engine's taller one:
+    // bedrock sits at local Y 0 in both worlds (this engine's MIN_WORLD_Y
+    // is exactly where Beta's own Y=0 floor was), so "ore X generates at
+    // Beta Y 5-60" means local Y 5-60 here too, unchanged - keeping ore
+    // depth tied to actual distance from bedrock instead of drifting
+    // shallower relative to the world floor just because this world
+    // happens to have more empty sky above.
+    struct OreVein {
+        BlockType type;
+        int y_min, y_max;               // full band a vein can appear in
+        int y_common_min, y_common_max; // denser sub-band - most veins land here
+        int veins_per_chunk;
+        int max_vein_size;
+    };
+
+    constexpr OreVein ORE_VEINS[] = {
+        {BlockType::CoalOre,     0, 127, 5,  60, 12, 8},
+        {BlockType::IronOre,     0, 64,  10, 40, 8,  6},
+        {BlockType::GoldOre,     0, 32,  14, 28, 2,  6},
+        {BlockType::LapisOre,    0, 31,  10, 16, 1,  5},
+        {BlockType::RedstoneOre, 0, 16,  8,  12, 4,  6},
+        {BlockType::DiamondOre,  0, 16,  5,  12, 1,  4},
+    };
+
+    // Underground Dirt/Gravel patches - not ores, but generated the exact
+    // same way (small blobs replacing only Stone), same request as the ore
+    // veins above.
+    struct FillerPatch {
+        BlockType type;
+        int y_min, y_max;
+        int patches_per_chunk;
+        int max_patch_size;
+    };
+
+    constexpr FillerPatch FILLER_PATCHES[] = {
+        {BlockType::Dirt,   0, 128, 8, 28},
+        {BlockType::Gravel, 0, 128, 6, 24},
+    };
+
+    constexpr uint32_t ORE_SEED_SALT = 0x4F524553u; // "ORES" - decorrelates from cave_chunk_seed's own cave/ravine streams
+    constexpr float ORE_COMMON_BAND_CHANCE = 0.7f; // how often a vein rolls its Y within the denser common band instead of the full range
+
+    // A vein/patch is a short random walk (same shape idea as
+    // carve_tunnel() above, just replacing Stone with `type` instead of
+    // carving it to Air) - only ever touches Stone, so it can't eat into
+    // Bedrock, an already-placed vein from earlier in this same pass, or
+    // anything generate_terrain() itself put down (surface dirt, ore-free
+    // subsurface layers, etc.).
+    void place_vein(Chunk& chunk, std::mt19937_64& rng, BlockType type, int y_min, int y_max, int size) {
+        int x = cave_random_int(rng, CHUNK_SIZE);
+        int y = std::clamp(y_min + cave_random_int(rng, std::max(1, y_max - y_min + 1)), 0, CHUNK_HEIGHT - 1);
+        int z = cave_random_int(rng, CHUNK_SIZE);
+        for (int step = 0; step < size; ++step) {
+            if (x >= 0 && x < CHUNK_SIZE && y >= 0 && y < CHUNK_HEIGHT && z >= 0 && z < CHUNK_SIZE &&
+                chunk.get_block(x, y, z) == BlockType::Stone) {
+                chunk.set_block(x, y, z, type);
+            }
+            x += cave_random_int(rng, 3) - 1;
+            y += cave_random_int(rng, 3) - 1;
+            z += cave_random_int(rng, 3) - 1;
+        }
+    }
+}
+
+void Chunk::generate_ores(uint32_t world_seed, int chunk_x, int chunk_z)
+{
+    std::mt19937_64 rng(cave_chunk_seed(world_seed ^ ORE_SEED_SALT, chunk_x, chunk_z));
+
+    for (const OreVein& vein : ORE_VEINS) {
+        for (int i = 0; i < vein.veins_per_chunk; ++i) {
+            bool common_band = cave_random_double(rng) < ORE_COMMON_BAND_CHANCE;
+            int y_min = common_band ? vein.y_common_min : vein.y_min;
+            int y_max = common_band ? vein.y_common_max : vein.y_max;
+            int size = 1 + cave_random_int(rng, vein.max_vein_size);
+            place_vein(*this, rng, vein.type, y_min, y_max, size);
+        }
+    }
+
+    for (const FillerPatch& patch : FILLER_PATCHES) {
+        for (int i = 0; i < patch.patches_per_chunk; ++i) {
+            int size = 1 + cave_random_int(rng, patch.max_patch_size);
+            place_vein(*this, rng, patch.type, patch.y_min, patch.y_max, size);
+        }
+    }
 }
 
 void Chunk::carve_caves(uint32_t world_seed, int chunk_x, int chunk_z)
@@ -991,7 +1125,7 @@ void Chunk::carve_caves(uint32_t world_seed, int chunk_x, int chunk_z)
 
 namespace {
     constexpr uint32_t CHUNK_FILE_MAGIC = 0x4D434348u; // "MCCH"
-    constexpr uint32_t CHUNK_FILE_VERSION = 2u;
+    constexpr uint32_t CHUNK_FILE_VERSION = 3u;
 }
 
 bool Chunk::save_to_file(const std::string& path) const
@@ -1016,6 +1150,21 @@ bool Chunk::save_to_file(const std::string& path) const
     out.write(reinterpret_cast<const char*>(column_grass_tint.data()), column_grass_tint.size() * sizeof(Color));
     out.write(reinterpret_cast<const char*>(column_foliage_tint.data()), column_foliage_tint.size() * sizeof(Color));
     out.write(reinterpret_cast<const char*>(&highest), sizeof(highest));
+
+    // Directional-block facing (see HorizontalDirection's own comment) -
+    // sparse, so persisted the same shape it's kept in memory: a count
+    // followed by that many (local index, direction) pairs, rather than a
+    // parallel full-chunk array that would be all-default almost
+    // everywhere. Version 3+ only - see load_from_file()'s own handling of
+    // older files that predate this section entirely.
+    uint32_t orientation_count = static_cast<uint32_t>(orientation.size());
+    out.write(reinterpret_cast<const char*>(&orientation_count), sizeof(orientation_count));
+    for (const auto& [local_index, direction] : orientation) {
+        int32_t index32 = static_cast<int32_t>(local_index);
+        uint8_t direction8 = static_cast<uint8_t>(direction);
+        out.write(reinterpret_cast<const char*>(&index32), sizeof(index32));
+        out.write(reinterpret_cast<const char*>(&direction8), sizeof(direction8));
+    }
     out.close();
     if (!out) return false;
 
@@ -1032,7 +1181,7 @@ bool Chunk::load_from_file(const std::string& path)
     uint32_t version = 0;
     in.read(reinterpret_cast<char*>(&magic), sizeof(magic));
     in.read(reinterpret_cast<char*>(&version), sizeof(version));
-    if (!in || magic != CHUNK_FILE_MAGIC || (version != 1u && version != CHUNK_FILE_VERSION)) return false;
+    if (!in || magic != CHUNK_FILE_MAGIC || version < 1u || version > CHUNK_FILE_VERSION) return false;
 
     in.read(reinterpret_cast<char*>(blocks.data()), blocks.size());
     in.read(reinterpret_cast<char*>(fluid_level.data()), fluid_level.size());
@@ -1049,6 +1198,22 @@ bool Chunk::load_from_file(const std::string& path)
     in.read(reinterpret_cast<char*>(&highest), sizeof(highest));
     if (!in) return false; // truncated - don't trust a partial read
 
+    orientation.clear();
+    if (version >= 3u) {
+        uint32_t orientation_count = 0;
+        in.read(reinterpret_cast<char*>(&orientation_count), sizeof(orientation_count));
+        for (uint32_t i = 0; i < orientation_count && in; ++i) {
+            int32_t index32 = 0;
+            uint8_t direction8 = 0;
+            in.read(reinterpret_cast<char*>(&index32), sizeof(index32));
+            in.read(reinterpret_cast<char*>(&direction8), sizeof(direction8));
+            if (direction8 <= static_cast<uint8_t>(HorizontalDirection::West)) {
+                orientation[index32] = static_cast<HorizontalDirection>(direction8);
+            }
+        }
+        if (!in) return false; // truncated - don't trust a partial read
+    }
+
     highest_block_y = highest;
     return true;
 }
@@ -1056,6 +1221,16 @@ bool Chunk::load_from_file(const std::string& path)
 BlockType Chunk::get_block(int x, int y, int z) const
 {
     return blocks[index(x, y, z)];
+}
+
+Color Chunk::get_foliage_tint(int x, int z) const
+{
+    return column_foliage_tint[z * CHUNK_SIZE + x];
+}
+
+Color Chunk::get_grass_tint(int x, int z) const
+{
+    return column_grass_tint[z * CHUNK_SIZE + x];
 }
 
 void Chunk::set_block(int x, int y, int z, BlockType type)
@@ -1068,6 +1243,25 @@ void Chunk::set_block(int x, int y, int z, BlockType type)
     if (type != BlockType::Air && y > highest_block_y) {
         highest_block_y = y;
     }
+    // Whatever used to be here (if anything) is gone now - stale
+    // orientation would otherwise linger and could apply to a totally
+    // different block later placed at the same position. `orientation` is
+    // empty for the entire lifetime of the vast majority of chunks (only a
+    // player-placed directional block ever adds to it), so the emptiness
+    // check keeps this a no-op branch rather than a hash lookup on every
+    // single set_block() call generate_terrain() itself makes.
+    if (!orientation.empty()) orientation.erase(index(x, y, z));
+}
+
+HorizontalDirection Chunk::get_orientation(int x, int y, int z) const
+{
+    auto it = orientation.find(index(x, y, z));
+    return it != orientation.end() ? it->second : HorizontalDirection::South;
+}
+
+void Chunk::set_orientation(int x, int y, int z, HorizontalDirection direction)
+{
+    orientation[index(x, y, z)] = direction;
 }
 
 uint8_t Chunk::get_fluid_level(int x, int y, int z) const
@@ -1300,6 +1494,21 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                 }
                 ChunkMeshBuffers& mesh_data = *mesh_data_ptr;
 
+                if (properties.render_shape == BlockRenderShape::Cross) {
+                    float light = std::max(MIN_LIGHT_FRACTION,
+                        static_cast<float>(get_light(x, y, z)) / static_cast<float>(MAX_LIGHT));
+                    float brightness[4] = {light, light, light, light};
+                    Color tint = type == BlockType::ShortGrass
+                        ? column_grass_tint[z * CHUNK_SIZE + x]
+                        : properties.texture_tints[static_cast<int>(BlockFace::North)];
+                    for (const Face& cross_face : CROSS_FACES) {
+                        append_face(mesh_data, cross_face, center,
+                            properties.texture_uvs[static_cast<int>(BlockFace::North)],
+                            brightness, tint);
+                    }
+                    continue;
+                }
+
                 // Water-only: a block with Water directly above it is
                 // interior to a body of water, not its surface (and its Top
                 // face is never actually meshed anyway - same-translucent-
@@ -1360,7 +1569,22 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                     } else if (type == BlockType::Foliage) {
                         tint = column_foliage_tint[z * CHUNK_SIZE + x];
                     }
-                    append_face(mesh_data, f, center, properties.texture_uvs[face], brightness, tint, top_drop);
+
+                    // A directional block's front art is always baked under
+                    // texture_uvs[South] and everything else falls back to
+                    // texture_uvs[East]'s plain side texture (see
+                    // is_directional_block()'s own comment) - get_orientation()
+                    // says which actual world-facing side this placed
+                    // instance's front should appear on, so remap which of
+                    // those two slots backs *this* face instead of always
+                    // reading straight off texture_uvs[face].
+                    int texture_face = face;
+                    if (block_is_directional(type) && face >= static_cast<int>(BlockFace::North)) {
+                        HorizontalDirection facing = get_orientation(x, y, z);
+                        bool is_front = face == static_cast<int>(BlockFace::North) + static_cast<int>(facing);
+                        texture_face = is_front ? static_cast<int>(BlockFace::South) : static_cast<int>(BlockFace::East);
+                    }
+                    append_face(mesh_data, f, center, properties.texture_uvs[texture_face], brightness, tint, top_drop);
                 }
             }
         }

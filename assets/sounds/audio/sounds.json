@@ -1,0 +1,270 @@
+{
+  "block_groups": {
+    "grass": {
+      "step": [
+        "sounds/audio/sound/soundEffect6.ogg",
+        "sounds/audio/sound/soundEffect7.ogg",
+        "sounds/audio/sound/soundEffect8.ogg",
+        "sounds/audio/sound/soundEffect9.ogg"
+      ],
+      "hit": [
+        "sounds/audio/sound/soundEffect6.ogg",
+        "sounds/audio/sound/soundEffect7.ogg",
+        "sounds/audio/sound/soundEffect8.ogg",
+        "sounds/audio/sound/soundEffect9.ogg"
+      ],
+      "break": [
+        "sounds/audio/sound/soundEffect6.ogg",
+        "sounds/audio/sound/soundEffect7.ogg",
+        "sounds/audio/sound/soundEffect8.ogg",
+        "sounds/audio/sound/soundEffect9.ogg"
+      ]
+    },
+    "dirt": {
+      "step": [
+        "sounds/audio/sound/soundEffect10.ogg",
+        "sounds/audio/sound/soundEffect11.ogg",
+        "sounds/audio/sound/soundEffect12.ogg",
+        "sounds/audio/sound/soundEffect13.ogg"
+      ],
+      "hit": [
+        "sounds/audio/sound/soundEffect10.ogg",
+        "sounds/audio/sound/soundEffect11.ogg",
+        "sounds/audio/sound/soundEffect12.ogg",
+        "sounds/audio/sound/soundEffect13.ogg"
+      ],
+      "break": [
+        "sounds/audio/sound/soundEffect10.ogg",
+        "sounds/audio/sound/soundEffect11.ogg",
+        "sounds/audio/sound/soundEffect12.ogg",
+        "sounds/audio/sound/soundEffect13.ogg"
+      ]
+    },
+    "gravel": {
+      "step": [
+        "sounds/audio/sound/soundEffect10.ogg",
+        "sounds/audio/sound/soundEffect11.ogg",
+        "sounds/audio/sound/soundEffect12.ogg",
+        "sounds/audio/sound/soundEffect13.ogg"
+      ],
+      "hit": [
+        "sounds/audio/sound/soundEffect10.ogg",
+        "sounds/audio/sound/soundEffect11.ogg",
+        "sounds/audio/sound/soundEffect12.ogg",
+        "sounds/audio/sound/soundEffect13.ogg"
+      ],
+      "break": [
+        "sounds/audio/sound/soundEffect10.ogg",
+        "sounds/audio/sound/soundEffect11.ogg",
+        "sounds/audio/sound/soundEffect12.ogg",
+        "sounds/audio/sound/soundEffect13.ogg"
+      ]
+    },
+    "stone": {
+      "step": [
+        "sounds/audio/sound/soundEffect2.ogg",
+        "sounds/audio/sound/soundEffect3.ogg",
+        "sounds/audio/sound/soundEffect4.ogg",
+        "sounds/audio/sound/soundEffect5.ogg"
+      ],
+      "hit": [
+        "sounds/audio/sound/soundEffect2.ogg",
+        "sounds/audio/sound/soundEffect3.ogg",
+        "sounds/audio/sound/soundEffect4.ogg",
+        "sounds/audio/sound/soundEffect5.ogg"
+      ],
+      "break": [
+        "sounds/audio/sound/soundEffect2.ogg",
+        "sounds/audio/sound/soundEffect3.ogg",
+        "sounds/audio/sound/soundEffect4.ogg",
+        "sounds/audio/sound/soundEffect5.ogg"
+      ]
+    },
+    "wood": {
+      "step": [
+        "sounds/audio/sound/soundEffect18.ogg",
+        "sounds/audio/sound/soundEffect19.ogg",
+        "sounds/audio/sound/soundEffect20.ogg",
+        "sounds/audio/sound/soundEffect21.ogg"
+      ],
+      "hit": [
+        "sounds/audio/sound/soundEffect18.ogg",
+        "sounds/audio/sound/soundEffect19.ogg",
+        "sounds/audio/sound/soundEffect20.ogg",
+        "sounds/audio/sound/soundEffect21.ogg"
+      ],
+      "break": [
+        "sounds/audio/sound/soundEffect18.ogg",
+        "sounds/audio/sound/soundEffect19.ogg",
+        "sounds/audio/sound/soundEffect20.ogg",
+        "sounds/audio/sound/soundEffect21.ogg"
+      ]
+    },
+    "sand": {
+      "step": [
+        "sounds/audio/sound/soundEffect14.ogg",
+        "sounds/audio/sound/soundEffect15.ogg",
+        "sounds/audio/sound/soundEffect16.ogg",
+        "sounds/audio/sound/soundEffect17.ogg"
+      ],
+      "hit": [
+        "sounds/audio/sound/soundEffect14.ogg",
+        "sounds/audio/sound/soundEffect15.ogg",
+        "sounds/audio/sound/soundEffect16.ogg",
+        "sounds/audio/sound/soundEffect17.ogg"
+      ],
+      "break": [
+        "sounds/audio/sound/soundEffect14.ogg",
+        "sounds/audio/sound/soundEffect15.ogg",
+        "sounds/audio/sound/soundEffect16.ogg",
+        "sounds/audio/sound/soundEffect17.ogg"
+      ]
+    },
+    "snow": {
+      "step": [
+        "sounds/audio/sound/soundEffect78.ogg",
+        "sounds/audio/sound/soundEffect79.ogg",
+        "sounds/audio/sound/soundEffect80.ogg",
+        "sounds/audio/sound/soundEffect81.ogg"
+      ],
+      "hit": [
+        "sounds/audio/sound/soundEffect78.ogg",
+        "sounds/audio/sound/soundEffect79.ogg",
+        "sounds/audio/sound/soundEffect80.ogg",
+        "sounds/audio/sound/soundEffect81.ogg"
+      ],
+      "break": [
+        "sounds/audio/sound/soundEffect78.ogg",
+        "sounds/audio/sound/soundEffect79.ogg",
+        "sounds/audio/sound/soundEffect80.ogg",
+        "sounds/audio/sound/soundEffect81.ogg"
+      ]
+    },
+    "glass": {
+      "step": [],
+      "hit": [
+        "sounds/audio/sound/glass1.ogg",
+        "sounds/audio/sound/glass2.ogg",
+        "sounds/audio/sound/glass3.ogg"
+      ],
+      "break": [
+        "sounds/audio/sound/glass1.ogg",
+        "sounds/audio/sound/glass2.ogg",
+        "sounds/audio/sound/glass3.ogg"
+      ]
+    },
+    "cloth": {
+      "step": [
+        "sounds/audio/sound/soundEffect78.ogg",
+        "sounds/audio/sound/soundEffect79.ogg",
+        "sounds/audio/sound/soundEffect80.ogg",
+        "sounds/audio/sound/soundEffect81.ogg"
+      ],
+      "hit": [
+        "sounds/audio/sound/soundEffect78.ogg",
+        "sounds/audio/sound/soundEffect79.ogg",
+        "sounds/audio/sound/soundEffect80.ogg",
+        "sounds/audio/sound/soundEffect81.ogg"
+      ],
+      "break": [
+        "sounds/audio/sound/soundEffect78.ogg",
+        "sounds/audio/sound/soundEffect79.ogg",
+        "sounds/audio/sound/soundEffect80.ogg",
+        "sounds/audio/sound/soundEffect81.ogg"
+      ]
+    },
+    "foliage": {
+      "step": [
+        "sounds/audio/sound/soundEffect6.ogg",
+        "sounds/audio/sound/soundEffect9.ogg"
+      ],
+      "hit": [
+        "sounds/audio/sound/soundEffect6.ogg",
+        "sounds/audio/sound/soundEffect9.ogg"
+      ],
+      "break": [
+        "sounds/audio/sound/soundEffect6.ogg",
+        "sounds/audio/sound/soundEffect9.ogg"
+      ]
+    },
+    "metal": {
+      "step": [
+        "sounds/audio/sound/soundEffect74.ogg",
+        "sounds/audio/sound/soundEffect75.ogg",
+        "sounds/audio/sound/soundEffect76.ogg",
+        "sounds/audio/sound/soundEffect77.ogg"
+      ],
+      "hit": [
+        "sounds/audio/sound/soundEffect74.ogg",
+        "sounds/audio/sound/soundEffect75.ogg",
+        "sounds/audio/sound/soundEffect76.ogg",
+        "sounds/audio/sound/soundEffect77.ogg"
+      ],
+      "break": [
+        "sounds/audio/sound/soundEffect74.ogg",
+        "sounds/audio/sound/soundEffect75.ogg",
+        "sounds/audio/sound/soundEffect76.ogg",
+        "sounds/audio/sound/soundEffect77.ogg"
+      ]
+    }
+  },
+  "ambient": {
+    "thunder": [
+      "sounds/audio/sound/thunder1.ogg",
+      "sounds/audio/sound/thunder2.ogg",
+      "sounds/audio/sound/thunder3.ogg"
+    ],
+    "rain": [
+      "sounds/audio/sound/rain1.ogg",
+      "sounds/audio/sound/rain2.ogg",
+      "sounds/audio/sound/rain3.ogg",
+      "sounds/audio/sound/rain4.ogg"
+    ],
+    "cave": [
+      "sounds/audio/sound/cave1.ogg",
+      "sounds/audio/sound/cave2.ogg",
+      "sounds/audio/sound/cave3.ogg",
+      "sounds/audio/sound/cave4.ogg",
+      "sounds/audio/sound/cave5.ogg",
+      "sounds/audio/sound/cave6.ogg",
+      "sounds/audio/sound/cave7.ogg",
+      "sounds/audio/sound/cave8.ogg",
+      "sounds/audio/sound/cave9.ogg",
+      "sounds/audio/sound/cave10.ogg",
+      "sounds/audio/sound/cave11.ogg",
+      "sounds/audio/sound/cave12.ogg",
+      "sounds/audio/sound/cave13.ogg"
+    ]
+  },
+  "ui": {
+    "click": [
+      "sounds/audio/sound/soundEffect0.ogg"
+    ],
+    "hover": [
+      "sounds/audio/sound/soundEffect1.ogg"
+    ]
+  },
+  "water": {
+    "swim": [
+      "sounds/audio/sound/splash.ogg"
+    ],
+    "ambient": [
+      "sounds/audio/sound/water.ogg"
+    ]
+  },
+  "drop": {
+    "pick up": [
+      "sounds/audio/sound/soundEffect42.ogg"
+    ]
+  },
+  "music": [
+    "sounds/audio/music/calm1.ogg",
+    "sounds/audio/music/calm2.ogg",
+    "sounds/audio/music/calm3.ogg",
+    "sounds/audio/music/musicTrack0.ogg",
+    "sounds/audio/music/musicTrack1.ogg",
+    "sounds/audio/music/musicTrack2.ogg",
+    "sounds/audio/music/musicTrack3.ogg",
+    "sounds/audio/music/musicTrack4.ogg"
+  ]
+}

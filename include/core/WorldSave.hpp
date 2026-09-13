@@ -4,16 +4,16 @@
 
 #include "raylib.h"
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
 
-// Stored (but not yet acted on) alongside a world's own metadata - nothing
-// in World/Chunk reads this yet, since no survival mechanics (health,
-// hunger, inventory) exist to actually differ between the two. Just a
-// placeholder so the world-creation UI has something real to save, ahead of
-// whenever those mechanics get built.
+// Persistent world rule: creative enables flight, instant breaking and an
+// unlimited block catalog; survival enables player physics, timed mining,
+// finite stacks and block drops. Missing mode in an older save defaults to
+// Creative for backward compatibility.
 enum class GameMode : uint8_t { Creative, Survival };
 
 struct WorldInfo {
@@ -31,6 +31,25 @@ struct PlayerSaveState {
     Vector3 position = {0.0f, 0.0f, 0.0f};    // camera position (eye height already included)
     Vector3 forward = {0.0f, 0.0f, -1.0f};    // normalized look direction - camera.target is reconstructed from this on load
     Inventory inventory;
+};
+
+// A dropped item still sitting on the ground, last time this world was
+// exited - enough to reconstruct an equivalent DroppedItem on load,
+// including how far into its despawn countdown it already was (see
+// DroppedItem::set_age()), so it doesn't get another full 5 minutes just
+// for having been saved and reloaded.
+struct DroppedItemSaveState {
+    Vector3 position = {0.0f, 0.0f, 0.0f};
+    ItemStack stack;
+    float age = 0.0f;
+    std::optional<Color> block_tint; // grass/foliage tint - see DroppedItem's own field
+};
+
+// A Chest's own 27-slot storage at a specific block position - see
+// World::chest_inventory()/World::all_chest_inventories().
+struct ChestSaveState {
+    int x = 0, y = 0, z = 0;
+    std::array<ItemStack, INVENTORY_STORAGE_SIZE> slots{};
 };
 
 namespace WorldSave {
@@ -82,4 +101,26 @@ namespace WorldSave {
     // corrupted - callers fall back to World::find_spawn_position()/
     // default_inventory() either way.
     std::optional<PlayerSaveState> load_player_state(const std::string& folder_name);
+
+    // saves/<folder_name>/items.json - every dropped item still on the
+    // ground when the player last exited this world. Overwrites any
+    // previous save the same way save_player_state() does. An empty list
+    // still overwrites the file (with an empty array), same as leaving no
+    // items on the ground should mean none get reloaded either.
+    bool save_dropped_items(const std::string& folder_name, const std::vector<DroppedItemSaveState>& items);
+
+    // Empty (not nullopt) if the file is missing or corrupted - unlike
+    // load_player_state(), there's no meaningfully different fallback
+    // behavior for "never saved" vs "nothing was on the ground", so callers
+    // don't need to tell them apart.
+    std::vector<DroppedItemSaveState> load_dropped_items(const std::string& folder_name);
+
+    // saves/<folder_name>/chests.json - every Chest's own storage (see
+    // World::all_chest_inventories()). Same overwrite-on-every-save
+    // behavior as save_dropped_items().
+    bool save_chests(const std::string& folder_name, const std::vector<ChestSaveState>& chests);
+
+    // Empty if the file is missing/corrupted - same "no fallback needed"
+    // reasoning as load_dropped_items().
+    std::vector<ChestSaveState> load_chests(const std::string& folder_name);
 }

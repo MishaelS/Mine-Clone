@@ -12,6 +12,7 @@ TerrainNoise::TerrainNoise(uint32_t seed)
     , river_noise(seed + 4)
     , coast_noise(seed + 5)
     , clay_noise(seed + 6)
+    , gravel_noise(seed + 7)
 {
 }
 
@@ -42,4 +43,9 @@ float TerrainNoise::river(float world_x, float world_z) const
 float TerrainNoise::clay(float world_x, float world_z) const
 {
     return clay_noise.noise(world_x * CLAY_FREQUENCY, world_z * CLAY_FREQUENCY);
+}
+
+float TerrainNoise::gravel(float world_x, float world_z) const
+{
+    return gravel_noise.noise(world_x * GRAVEL_FREQUENCY, world_z * GRAVEL_FREQUENCY);
 }

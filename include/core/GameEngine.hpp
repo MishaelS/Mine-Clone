@@ -12,7 +12,9 @@
 #include "core/Settings.hpp"
 #include "player/Inventory.hpp"
 #include "player/DroppedItem.hpp"
+#include "player/PlayerController.hpp"
 #include "effects/ParticleSystem.hpp"
+#include "rendering/PlayerRenderer.hpp"
 #include "audio/AudioSystem.hpp"
 #include "ui/MainMenuScreen.hpp"
 #include "ui/WorldListScreen.hpp"
@@ -21,6 +23,15 @@
 #include "ui/PauseMenuScreen.hpp"
 #include "ui/InventoryHud.hpp"
 #include "world/World.hpp"
+
+// A leaf block found disconnected from every nearby log (see
+// GameEngine::check_leaf_decay_near) - not removed on the spot, just
+// queued with a random delay so a felled tree's canopy visibly thins out
+// over a few seconds instead of vanishing all at once in a single frame.
+struct PendingLeafDecay {
+    int x, y, z;
+    float remaining_seconds;
+};
 
 // Owns the window, the main loop, every GameObject in the game, and the
 // voxel World terrain (kept separate from the GameObject list since camera
@@ -72,6 +83,40 @@ private:
     // empty (take_one_item() on an already-empty slot returns one).
     void spawn_dropped_item(const ItemStack& stack);
 
+    // Called right after a Log block is removed (natural or creative
+    // break) - scans for leaves now out of reach of every remaining log and
+    // queues each one into pending_leaf_decay (see update_leaf_decay())
+    // rather than removing it immediately. Purely event-triggered off a log
+    // disappearing, not a per-tick scan, so it costs nothing on every other
+    // frame.
+    void check_leaf_decay_near(int log_x, int log_y, int log_z);
+
+    // Every-frame drain of pending_leaf_decay: counts each entry's own
+    // delay down by delta_time, and once it elapses, re-checks it's still a
+    // disconnected leaf (state may have changed since it was queued - a log
+    // placed back nearby, or it already came down another way) before
+    // actually removing it and rolling its drop, same as a natural break.
+    void update_leaf_decay(float delta_time);
+
+    // Called right after any block is removed - ShortGrass (and anything
+    // else non-solid that needs ground under it) can't stay floating in
+    // place the way real Minecraft's own tufts/flowers can't either: if
+    // ShortGrass is sitting directly above the now-empty cell, it pops
+    // immediately (not a delayed decay like leaves - support loss is
+    // instant in vanilla too), dropping through the same
+    // resolve_block_drops() table a manual break would (bare-handed).
+    void check_grass_support_above(int x, int y, int z);
+
+    // Called right after a Chest block is removed - spills whatever
+    // World::chest_inventory() had stored there as ordinary dropped items
+    // (same as a real Minecraft chest) instead of silently deleting its
+    // contents along with the block. No-op if the chest was empty/never
+    // opened (take_chest_inventory() just returns all-empty then).
+    void spill_chest_if_any(int x, int y, int z);
+
+    Camera3D make_render_camera() const;
+    void draw_player_model() const;
+
     void draw();
 
     // Draws/updates whichever menu screen `state` currently is (anything
@@ -115,6 +160,11 @@ private:
     SettingsScreen settings_screen;
     PauseMenuScreen pause_menu_screen;
 
+    // Frozen, downsampled and softly blurred copy of the last gameplay
+    // frame. The pause menu draws this instead of the dirt background.
+    Texture2D pause_snapshot{};
+    bool pause_snapshot_pending = false;
+
     // Where SettingsScreen's own "Назад" button returns to - MainMenu when
     // Settings was reached from there, Paused when reached via the in-game
     // Esc menu instead. Set right before every enter_state(Settings) call.
@@ -126,21 +176,21 @@ private:
     // when no world is loaded. Set by start_singleplayer_world(), read by
     // save_player_state().
     std::string current_world_folder;
+    GameMode current_game_mode = GameMode::Creative;
 
-    // Free-look camera (WASD + mouse), currently also representing the
-    // player viewpoint until a dedicated controller is introduced.
+    // The physical eye camera. Third-person cameras are derived only for
+    // rendering, so they never move the PlayerController hitbox.
     Camera3D camera;
+    PlayerController player_controller;
+    PlayerRenderer player_renderer;
+    enum class CameraView : uint8_t { FirstPerson, ThirdPersonBack, ThirdPersonFront };
+    CameraView camera_view = CameraView::FirstPerson;
     std::vector<std::unique_ptr<GameObject>> objects;
     std::unique_ptr<World> world;
     bool show_debug_overlay = false; // toggled by F3, Minecraft-style
     bool show_chunk_borders = false; // toggled by F4 - World::draw_chunk_borders()
-    bool show_wireframe = false;     // toggled by F5 - wireframe chunk meshes instead of textured, for inspecting mesh/culling
+    bool show_wireframe = false;     // toggled by F6; F5 cycles camera views
     float camera_move_speed;         // world units/second; mouse wheel adjusts this
-
-    // Vertical-only physics velocity (blocks/second) - gravity/jump, see
-    // update()'s own comment. Horizontal movement has no equivalent
-    // per-frame state of its own; WASD sets that directly every frame.
-    float player_vertical_velocity = 0.0f;
 
     // Survival-style stacks collected from broken-block drops. E toggles
     // the storage panel; number keys 1-9 select the active hotbar slot.
@@ -148,6 +198,7 @@ private:
     Inventory inventory = default_inventory();
     InventoryHud inventory_hud;
     std::vector<std::unique_ptr<DroppedItem>> dropped_items;
+    std::vector<PendingLeafDecay> pending_leaf_decay;
     ParticleSystem particles;
     float footstep_particle_distance = 0.0f;
 

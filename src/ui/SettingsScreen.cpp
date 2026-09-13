@@ -1,131 +1,121 @@
 #include "ui/SettingsScreen.hpp"
 #include "ui/Widgets.hpp"
+#include "ui/Localization.hpp"
 #include "core/Block.hpp"
 #include "world/Chunk.hpp"
 
-#include "raylib.h"
-
 #include <algorithm>
-
-namespace {
-    constexpr float ROW_HEIGHT = 34.0f;
-    constexpr float ROW_SPACING = 6.0f;
-    constexpr int TITLE_FONT_SIZE = 34;
-    constexpr float PANEL_WIDTH = 520.0f;
-    constexpr float BOTTOM_BUTTON_WIDTH = 200.0f;
-    constexpr float BOTTOM_BUTTON_HEIGHT = 48.0f;
-    constexpr int RENDER_DISTANCE_MIN = 4;
-    constexpr int RENDER_DISTANCE_MAX = 16;
-    constexpr int FOG_DISTANCE_MIN = 32;
-    constexpr int FPS_MIN = 30;
-    constexpr int FPS_MAX = 240;
-
-    void apply_texture_filter(TextureFilterMode mode)
-    {
-        SetTextureFilter(get_block_atlas_texture(),
-            mode == TextureFilterMode::Bilinear ? TEXTURE_FILTER_BILINEAR : TEXTURE_FILTER_POINT);
-    }
-}
 
 SettingsScreen::Action SettingsScreen::update(Settings& settings)
 {
+    const bool was_rebinding = rebinding_action.has_value();
     if (rebinding_action) {
-        if (IsKeyPressed(KEY_ESCAPE)) {
-            rebinding_action.reset();
-        } else if (auto captured = poll_any_binding_pressed()) {
-            settings.keybindings[static_cast<size_t>(*rebinding_action)] = *captured;
+        if (IsKeyPressed(KEY_ESCAPE)) rebinding_action.reset();
+        else if (auto binding = poll_any_binding_pressed()) {
+            settings.keybindings[static_cast<size_t>(*rebinding_action)] = *binding;
             SettingsIO::save(settings);
             rebinding_action.reset();
         }
     }
 
-    int screen_width = GetScreenWidth();
-    int screen_height = GetScreenHeight();
-    ui::label({0.0f, 22.0f, static_cast<float>(screen_width), 44.0f},
-              "Настройки", TITLE_FONT_SIZE, WHITE);
+    const float width = ui::scaled(ui::MENU_WIDTH);
+    const float height = ui::scaled(ui::BUTTON_HEIGHT);
+    const float gap = ui::scaled(ui::BUTTON_GAP);
+    const float half = (width - gap) * 0.5f;
+    const float x = (GetScreenWidth() - width) * 0.5f;
+    const float top = ui::scaled(108.0f);
+    const auto cell = [&](int column, int row) {
+        return Rectangle{x + column * (half + gap), top + row * (height + gap), half, height};
+    };
+    const char* title = section == Section::Controls ? "settings.controls"
+        : section == Section::Graphics ? "settings.graphics"
+        : section == Section::Sound ? "settings.sound"
+        : section == Section::Language ? "settings.language" : "settings.title";
+    ui::label({0, ui::scaled(28), static_cast<float>(GetScreenWidth()), height}, ui::tr(title));
 
-    constexpr float TAB_WIDTH = 180.0f;
-    constexpr float TAB_GAP = 10.0f;
-    float tabs_width = TAB_WIDTH * 3.0f + TAB_GAP * 2.0f;
-    float tab_x = (screen_width - tabs_width) * 0.5f;
-    float tab_y = 78.0f;
-    if (ui::button({tab_x, tab_y, TAB_WIDTH, 42.0f}, "Управление", section == Section::Controls)) {
-        section = Section::Controls;
-        rebinding_action.reset();
-    }
-    tab_x += TAB_WIDTH + TAB_GAP;
-    if (ui::button({tab_x, tab_y, TAB_WIDTH, 42.0f}, "Графика", section == Section::Graphics)) {
-        section = Section::Graphics;
-        rebinding_action.reset();
-    }
-    tab_x += TAB_WIDTH + TAB_GAP;
-    if (ui::button({tab_x, tab_y, TAB_WIDTH, 42.0f}, "Звуки", section == Section::Sound)) {
-        section = Section::Sound;
-        rebinding_action.reset();
-    }
-
-    float x = screen_width * 0.5f - PANEL_WIDTH * 0.5f;
-    float y = 158.0f;
-
-    if (section == Section::Controls) {
-        for (size_t i = 0; i < settings.keybindings.size(); ++i) {
-            GameAction action = static_cast<GameAction>(i);
-            Rectangle label_bounds = {x, y, PANEL_WIDTH * 0.55f, ROW_HEIGHT};
-            Rectangle bind_bounds = {x + PANEL_WIDTH * 0.55f + 10.0f, y,
-                                     PANEL_WIDTH * 0.45f - 10.0f, ROW_HEIGHT};
-            ui::label(label_bounds, game_action_display_name(action), 18, WHITE);
-            bool rebinding = rebinding_action && *rebinding_action == action;
-            std::string text = rebinding ? "..." : binding_display_name(settings.keybindings[i]);
-            if (ui::button(bind_bounds, text, rebinding) && !rebinding_action) rebinding_action = action;
-            y += ROW_HEIGHT + ROW_SPACING;
+    bool changed = false;
+    const auto scale_button = [&](Rectangle bounds) {
+        const std::string key = "settings.scale." + std::to_string(settings.ui_scale);
+        if (ui::button(bounds, ui::tr("settings.ui_scale") + ": " + ui::tr(key))) {
+            settings.ui_scale = settings.ui_scale % 4 + 1;
+            // Apply on the next frame, so geometry and font never use
+            // different scales within the frame handling this click.
+            changed = true;
         }
+    };
+
+    if (section == Section::Overview) {
+        changed |= ui::slider_int(cell(0, 0), ui::tr("settings.master"), settings.master_volume, 0, 100);
+        scale_button(cell(1, 0));
+        if (ui::button(cell(0, 2), ui::tr("settings.graphics") + "...")) enter(Section::Graphics);
+        if (ui::button(cell(1, 2), ui::tr("settings.sound") + "...")) enter(Section::Sound);
+        if (ui::button(cell(0, 3), ui::tr("settings.controls") + "...")) enter(Section::Controls);
+        if (ui::button(cell(1, 3), ui::tr("settings.language") + "...")) enter(Section::Language);
     } else if (section == Section::Graphics) {
-        if (ui::slider_int({x, y, PANEL_WIDTH, ROW_HEIGHT}, "Дальность рендера",
-                           settings.render_distance_chunks, RENDER_DISTANCE_MIN, RENDER_DISTANCE_MAX)) {
-            settings.fog_distance_blocks = std::min(settings.fog_distance_blocks,
-                                                     settings.render_distance_chunks * CHUNK_SIZE);
-            SettingsIO::save(settings);
-        }
-        y += ROW_HEIGHT + ROW_SPACING * 3.0f;
-        int fog_max = settings.render_distance_chunks * CHUNK_SIZE;
-        if (ui::slider_int({x, y, PANEL_WIDTH, ROW_HEIGHT}, "Дальность видимости",
-                           settings.fog_distance_blocks, FOG_DISTANCE_MIN, fog_max)) SettingsIO::save(settings);
-        y += ROW_HEIGHT + ROW_SPACING * 3.0f;
-        if (ui::slider_int({x, y, PANEL_WIDTH, ROW_HEIGHT}, "Ограничение FPS",
-                           settings.target_fps, FPS_MIN, FPS_MAX)) {
+        changed |= ui::slider_int(cell(0, 0), ui::tr("settings.render"), settings.render_distance_chunks, 4, 16);
+        settings.fog_distance_blocks = std::min(settings.fog_distance_blocks, settings.render_distance_chunks * CHUNK_SIZE);
+        changed |= ui::slider_int(cell(1, 0), ui::tr("settings.fog"), settings.fog_distance_blocks, 32,
+                                 settings.render_distance_chunks * CHUNK_SIZE);
+        if (ui::slider_int(cell(0, 1), ui::tr("settings.fps"), settings.target_fps, 30, 240)) {
             SetTargetFPS(settings.target_fps);
-            SettingsIO::save(settings);
+            changed = true;
         }
-        y += ROW_HEIGHT + ROW_SPACING * 3.0f;
-        ui::label({x, y - 24.0f, PANEL_WIDTH, 20.0f}, "Фильтрация текстур", 16, LIGHTGRAY);
-        if (ui::button({x, y, PANEL_WIDTH * 0.5f - 5.0f, ROW_HEIGHT + 6.0f},
-                       "Точная (пиксели)", settings.texture_filter == TextureFilterMode::Point)) {
-            settings.texture_filter = TextureFilterMode::Point;
-            apply_texture_filter(settings.texture_filter);
-            SettingsIO::save(settings);
+        scale_button(cell(1, 1));
+        std::string size = ui::tr("settings.window") + ": " + std::to_string(GetScreenWidth()) + "x" + std::to_string(GetScreenHeight());
+        if (ui::button(cell(0, 2), size)) {
+            constexpr int widths[] = {1280, 1600, 1920};
+            constexpr int heights[] = {720, 900, 1080};
+            int next = 0;
+            for (int i = 0; i < 3; ++i)
+                if (GetScreenWidth() == widths[i] && GetScreenHeight() == heights[i]) next = (i + 1) % 3;
+            SetWindowSize(widths[next], heights[next]);
+            settings.window_width = widths[next];
+            settings.window_height = heights[next];
+            changed = true;
         }
-        if (ui::button({x + PANEL_WIDTH * 0.5f + 5.0f, y,
-                        PANEL_WIDTH * 0.5f - 5.0f, ROW_HEIGHT + 6.0f},
-                       "Плавная", settings.texture_filter == TextureFilterMode::Bilinear)) {
-            settings.texture_filter = TextureFilterMode::Bilinear;
-            apply_texture_filter(settings.texture_filter);
-            SettingsIO::save(settings);
+        if (ui::button(cell(1, 2), ui::tr("settings.filter") + ": " +
+                       ui::tr(settings.texture_filter == TextureFilterMode::Point ? "settings.point" : "settings.smooth"))) {
+            settings.texture_filter = settings.texture_filter == TextureFilterMode::Point
+                ? TextureFilterMode::Bilinear : TextureFilterMode::Point;
+            SetTextureFilter(get_block_atlas_texture(), settings.texture_filter == TextureFilterMode::Bilinear
+                ? TEXTURE_FILTER_BILINEAR : TEXTURE_FILTER_POINT);
+            changed = true;
+        }
+    } else if (section == Section::Sound) {
+        changed |= ui::slider_int(cell(0, 0), ui::tr("settings.master"), settings.master_volume, 0, 100);
+        changed |= ui::slider_int(cell(1, 0), ui::tr("settings.music"), settings.music_volume, 0, 100);
+        changed |= ui::slider_int(cell(0, 1), ui::tr("settings.effects"), settings.effects_volume, 0, 100);
+        changed |= ui::slider_int(cell(1, 1), ui::tr("settings.ambient"), settings.ambient_volume, 0, 100);
+    } else if (section == Section::Language) {
+        if (ui::button(cell(0, 0), ui::tr("language.ru"), settings.language == "ru")) {
+            settings.language = "ru";
+            changed = true;
+        }
+        if (ui::button(cell(1, 0), ui::tr("language.en"), settings.language == "en")) {
+            settings.language = "en";
+            changed = true;
         }
     } else {
-        auto volume_slider = [&](const char* label, int& value) {
-            if (ui::slider_int({x, y, PANEL_WIDTH, ROW_HEIGHT}, label, value, 0, 100)) SettingsIO::save(settings);
-            y += ROW_HEIGHT + ROW_SPACING * 3.0f;
-        };
-        volume_slider("Общая громкость", settings.master_volume);
-        volume_slider("Блоки и шаги", settings.effects_volume);
-        volume_slider("Окружение", settings.ambient_volume);
-        volume_slider("Музыка", settings.music_volume);
+        for (size_t i = 0; i < settings.keybindings.size(); ++i) {
+            const GameAction action = static_cast<GameAction>(i);
+            const bool active = rebinding_action && *rebinding_action == action;
+            const bool english = settings.language == "en";
+            const std::string caption = std::string(game_action_display_name(action, english)) + ": " +
+                (active ? "..." : binding_display_name(settings.keybindings[i], english));
+            if (ui::button(cell(static_cast<int>(i % 2), static_cast<int>(i / 2)), caption, active,
+                           !rebinding_action || active) && !was_rebinding && !rebinding_action) {
+                rebinding_action = action;
+            }
+        }
     }
 
-    float back_x = screen_width * 0.5f - BOTTOM_BUTTON_WIDTH * 0.5f;
-    float back_y = screen_height - BOTTOM_BUTTON_HEIGHT - 30.0f;
-    if (ui::button({back_x, back_y, BOTTOM_BUTTON_WIDTH, BOTTOM_BUTTON_HEIGHT}, "Назад")) {
-        return {ActionType::Back};
+    if (changed) SettingsIO::save(settings);
+    Rectangle done = {(GetScreenWidth() - ui::scaled(400)) * 0.5f,
+                      GetScreenHeight() - ui::scaled(68), ui::scaled(400), height};
+    if (ui::button(done, ui::tr("common.done"), false, !rebinding_action) ||
+        (!was_rebinding && IsKeyPressed(KEY_ESCAPE))) {
+        if (section == Section::Overview) return {ActionType::Back};
+        enter();
     }
     return {};
 }

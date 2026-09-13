@@ -3,6 +3,7 @@
 #include "core/Biome.hpp"
 #include "core/Block.hpp"
 #include "ui/FontManager.hpp"
+#include "ui/Localization.hpp"
 
 #include "raymath.h"
 
@@ -57,7 +58,7 @@ void ui::draw_debug_overlay(const Camera3D& camera, const World& world, float ai
     char looking_at[64];
     if (auto hit = world.raycast(camera.position, forward, aim_reach)) {
         std::snprintf(looking_at, sizeof(looking_at), "%s (%d, %d, %d)",
-                      get_block_name(world.get_block(hit->x, hit->y, hit->z)).c_str(),
+                      ui::block_display_name(world.get_block(hit->x, hit->y, hit->z)).c_str(),
                       hit->x, hit->y, hit->z);
     } else {
         std::snprintf(looking_at, sizeof(looking_at), "None");

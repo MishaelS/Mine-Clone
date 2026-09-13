@@ -2,6 +2,7 @@
 #include "core/TerrainNoise.hpp"
 #include "rendering/Skybox.hpp"
 #include "rendering/BlockMesh.hpp"
+#include "rendering/EntityLighting.hpp"
 
 #include "raymath.h"
 #include "rlgl.h"
@@ -453,6 +454,42 @@ BlockType World::get_block(int x, int y, int z) const
     return chunk->get_block(x - chunk_x * CHUNK_SIZE, y - MIN_WORLD_Y, z - chunk_z * CHUNK_SIZE);
 }
 
+HorizontalDirection World::get_block_orientation(int x, int y, int z) const
+{
+    if (y < MIN_WORLD_Y || y >= MIN_WORLD_Y + CHUNK_HEIGHT) return HorizontalDirection::South;
+
+    int chunk_x = floor_div(x, CHUNK_SIZE);
+    int chunk_z = floor_div(z, CHUNK_SIZE);
+    const Chunk* chunk = chunk_at(chunk_x, chunk_z);
+    if (chunk == nullptr) return HorizontalDirection::South;
+
+    return chunk->get_orientation(x - chunk_x * CHUNK_SIZE, y - MIN_WORLD_Y, z - chunk_z * CHUNK_SIZE);
+}
+
+void World::set_block_orientation(int x, int y, int z, HorizontalDirection direction)
+{
+    if (y < MIN_WORLD_Y || y >= MIN_WORLD_Y + CHUNK_HEIGHT) return;
+
+    int chunk_x = floor_div(x, CHUNK_SIZE);
+    int chunk_z = floor_div(z, CHUNK_SIZE);
+    Chunk* chunk = chunk_at(chunk_x, chunk_z);
+    if (chunk == nullptr) return;
+
+    int local_x = x - chunk_x * CHUNK_SIZE;
+    int local_z = z - chunk_z * CHUNK_SIZE;
+    {
+        // Same locking discipline as set_block_and_rebuild() - a
+        // background mesh job could be reading this chunk's data right now.
+        std::unique_lock<std::shared_mutex> lock(chunk->data_mutex());
+        chunk->set_orientation(local_x, y - MIN_WORLD_Y, local_z, direction);
+        chunk->mark_modified();
+    }
+    // Only this one chunk's own mesh can show the change (a directional
+    // block's faces never cross a chunk border), so a neighborhood rebuild
+    // like set_block_and_rebuild()'s own isn't needed - just this chunk.
+    request_remesh(chunk_x, chunk_z);
+}
+
 int World::get_light(int x, int y, int z) const
 {
     if (y < MIN_WORLD_Y || y >= MIN_WORLD_Y + CHUNK_HEIGHT) return MAX_LIGHT; // above/below the world
@@ -473,6 +510,32 @@ World::ChunkCoordinates World::chunk_coordinates(int x, int z) const
 Biome World::get_biome(int x, int z) const
 {
     return terrain_noise->biome(static_cast<float>(x), static_cast<float>(z));
+}
+
+Color World::get_foliage_tint(int x, int z) const
+{
+    int chunk_x = floor_div(x, CHUNK_SIZE);
+    int chunk_z = floor_div(z, CHUNK_SIZE);
+    const Chunk* chunk = chunk_at(chunk_x, chunk_z);
+    if (chunk == nullptr) {
+        return get_block_properties(BlockType::Foliage)
+            .texture_tints[static_cast<int>(BlockFace::Top)];
+    }
+    return chunk->get_foliage_tint(
+        x - chunk_x * CHUNK_SIZE, z - chunk_z * CHUNK_SIZE);
+}
+
+Color World::get_grass_tint(int x, int z) const
+{
+    int chunk_x = floor_div(x, CHUNK_SIZE);
+    int chunk_z = floor_div(z, CHUNK_SIZE);
+    const Chunk* chunk = chunk_at(chunk_x, chunk_z);
+    if (chunk == nullptr) {
+        return get_block_properties(BlockType::ShortGrass)
+            .texture_tints[static_cast<int>(BlockFace::Top)];
+    }
+    return chunk->get_grass_tint(
+        x - chunk_x * CHUNK_SIZE, z - chunk_z * CHUNK_SIZE);
 }
 
 std::optional<World::RaycastHit> World::raycast(Vector3 origin, Vector3 direction, float max_distance) const
@@ -517,8 +580,8 @@ std::optional<World::RaycastHit> World::raycast(Vector3 origin, Vector3 directio
     float traveled = 0.0f;
 
     while (traveled <= max_distance) {
-        if (get_block_properties(get_block(x, y, z)).solid) {
-            return RaycastHit{x, y, z, normal};
+        if (get_block_properties(get_block(x, y, z)).selectable) {
+            return RaycastHit{x, y, z, normal, traveled};
         }
 
         if (t_max_x < t_max_y && t_max_x < t_max_z) {
@@ -545,7 +608,7 @@ std::optional<World::RaycastHit> World::raycast(Vector3 origin, Vector3 directio
 std::optional<BlockType> World::break_block(int x, int y, int z)
 {
     BlockType broken = get_block(x, y, z);
-    if (broken == BlockType::Bedrock || !get_block_properties(broken).solid) return std::nullopt;
+    if (broken == BlockType::Bedrock || !get_block_properties(broken).selectable) return std::nullopt;
     set_block_and_rebuild(x, y, z, BlockType::Air);
     schedule_fluid_neighbors(x, y, z);
     schedule_falling_check(x, y + 1, z);
@@ -556,7 +619,8 @@ bool World::place_block(int x, int y, int z, BlockType type)
 {
     if (y < MIN_WORLD_Y || y >= MIN_WORLD_Y + CHUNK_HEIGHT) return false;
     if (chunk_at(floor_div(x, CHUNK_SIZE), floor_div(z, CHUNK_SIZE)) == nullptr) return false;
-    if (type == BlockType::Air || get_block_properties(get_block(x, y, z)).solid) return false;
+    if (type == BlockType::Air || !get_block_properties(get_block(x, y, z)).replaceable) return false;
+    if (type == BlockType::ShortGrass && get_block(x, y - 1, z) != BlockType::Grass) return false;
     set_block_and_rebuild(x, y, z, type);
     schedule_fluid_neighbors(x, y, z);
     schedule_falling_check(x, y, z);
@@ -877,9 +941,34 @@ void World::draw_falling_blocks(float tick_alpha) const
         Vector3 position = entity.motion.interpolated(tick_alpha);
         rlPushMatrix();
         rlTranslatef(position.x, position.y, position.z);
-        draw_block_cube(entity.type);
+        draw_block_cube(entity.type, 255, std::nullopt,
+                        entity_environment_tint(*this, position));
         rlPopMatrix();
     }
+}
+
+std::array<ItemStack, INVENTORY_STORAGE_SIZE>& World::chest_inventory(int x, int y, int z)
+{
+    return chest_storage[ChestPosKey{x, y, z}]; // operator[] default-constructs (all-empty) an absent entry
+}
+
+std::vector<World::ChestSnapshot> World::all_chest_inventories() const
+{
+    std::vector<ChestSnapshot> result;
+    result.reserve(chest_storage.size());
+    for (const auto& [key, slots] : chest_storage) {
+        result.push_back({key.x, key.y, key.z, slots});
+    }
+    return result;
+}
+
+std::array<ItemStack, INVENTORY_STORAGE_SIZE> World::take_chest_inventory(int x, int y, int z)
+{
+    auto it = chest_storage.find(ChestPosKey{x, y, z});
+    if (it == chest_storage.end()) return {};
+    std::array<ItemStack, INVENTORY_STORAGE_SIZE> result = it->second;
+    chest_storage.erase(it);
+    return result;
 }
 
 std::optional<int> World::water_depth_at(Vector3 position) const

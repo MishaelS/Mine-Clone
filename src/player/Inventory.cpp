@@ -16,6 +16,27 @@ Inventory default_inventory()
     return inventory;
 }
 
+std::vector<BlockType> all_placeable_blocks()
+{
+    std::vector<BlockType> result;
+    for (uint8_t id = 1; id < static_cast<uint8_t>(BlockType::Count); ++id) {
+        BlockType type = static_cast<BlockType>(id);
+        if (type != BlockType::Water) result.push_back(type);
+    }
+    return result;
+}
+
+Inventory creative_inventory()
+{
+    Inventory inventory;
+    std::vector<BlockType> blocks = all_placeable_blocks();
+    for (size_t i = 0; i < inventory.hotbar.size() && i < blocks.size(); ++i) {
+        inventory.hotbar[i].block = blocks[i];
+        inventory.hotbar[i].count = MAX_ITEM_STACK;
+    }
+    return inventory;
+}
+
 int Inventory::add(BlockType type, int count)
 {
     if (type == BlockType::Air || count <= 0) return count;
@@ -31,6 +52,37 @@ int Inventory::add(BlockType type, int count)
             if (slot.empty()) {
                 slot.block = type;
                 slot.tool = ItemType::None;
+                slot.count = 0;
+            }
+            int moved = std::min(count, MAX_ITEM_STACK - slot.count);
+            slot.count += moved;
+            count -= moved;
+            if (count == 0) return;
+        }
+    };
+
+    fill(hotbar, true);
+    fill(storage, true);
+    fill(hotbar, false);
+    fill(storage, false);
+    return count;
+}
+
+int Inventory::add_item(ItemType type, int count)
+{
+    if (type == ItemType::None || count <= 0) return count;
+
+    auto fill = [&](auto& slots, bool matching_only) {
+        for (ItemStack& slot : slots) {
+            if (matching_only) {
+                if (slot.empty() || slot.tool != type || slot.count >= MAX_ITEM_STACK) continue;
+            } else if (!slot.empty()) {
+                continue;
+            }
+
+            if (slot.empty()) {
+                slot.block = BlockType::Air;
+                slot.tool = type;
                 slot.count = 0;
             }
             int moved = std::min(count, MAX_ITEM_STACK - slot.count);
@@ -69,6 +121,8 @@ bool Inventory::add_tool(ItemType type)
 bool Inventory::put_back(const ItemStack& stack)
 {
     if (stack.empty()) return false;
+    if (stack.is_material()) return add_item(stack.tool, stack.count) == 0;
+    if (!stack.is_tool()) return add(stack.block, stack.count) == 0;
 
     auto try_fill = [&](auto& slots) {
         for (ItemStack& slot : slots) {
@@ -93,7 +147,11 @@ ItemStack take_one_item(ItemStack& slot)
     }
 
     ItemStack taken;
-    taken.block = slot.block;
+    if (slot.is_material()) {
+        taken.tool = slot.tool;
+    } else {
+        taken.block = slot.block;
+    }
     taken.count = 1;
     if (--slot.count <= 0) slot.clear();
     return taken;

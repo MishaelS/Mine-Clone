@@ -1,12 +1,18 @@
 #include "ui/InventoryHud.hpp"
 #include "ui/Widgets.hpp"
+#include "ui/Localization.hpp"
 #include "ui/FontManager.hpp"
 #include "core/TextureManager.hpp"
 #include "player/Item.hpp"
+#include "player/Recipe.hpp"
+#include "core/WorldSave.hpp"
+#include "rendering/PlayerRenderer.hpp"
+#include "world/World.hpp"
 
 #include "raylib.h"
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace {
@@ -19,7 +25,9 @@ namespace {
             case InventoryHud::ContainerKind::Workbench: return "sprites/gui/container/container1.png";
             case InventoryHud::ContainerKind::Furnace:   return "sprites/gui/container/container2.png";
             case InventoryHud::ContainerKind::Chest:     return "sprites/gui/container/container3.png";
-            case InventoryHud::ContainerKind::Inventory: default: return "sprites/gui/container/container0.png";
+            case InventoryHud::ContainerKind::Inventory:
+            default:
+                return "sprites/gui/container/container0.png";
         }
     }
 
@@ -30,57 +38,128 @@ namespace {
     // arrow fully across (an in-progress smelt) - "100%", same static
     // sub-images real Minecraft itself draws and would only ever clip
     // shorter as fuel burns down or smelting progresses.
-    const char* FUEL_PROGRESS_TEXTURE_PATH = "sprites/gui/container/fuelProgress.png";
+    const char* FUEL_PROGRESS_TEXTURE_PATH     = "sprites/gui/container/fuelProgress.png";
     const char* SMELTING_PROGRESS_TEXTURE_PATH = "sprites/gui/container/smeltingProgress.png";
     // Positions in container2.png's own texture-pixel space, measured
     // directly off the art (the panel already has the arrow and a smoke-
     // squiggle placeholder baked into its background right where these
     // two icons belong).
-    constexpr Vector2 FUEL_PROGRESS_ORIGIN = {57.0f, 36.0f};
+    constexpr Vector2 FUEL_PROGRESS_ORIGIN     = {57.0f, 36.0f};
     constexpr Vector2 SMELTING_PROGRESS_ORIGIN = {79.0f, 34.0f};
 
-    constexpr float HOTBAR_SCALE = 3.0f;
+    constexpr float HOTBAR_SCALE    = 2.5f;
     constexpr float INVENTORY_SCALE = 2.0f;
 
-    constexpr float ITEM_SIZE_PX = 16.0f;
-    constexpr float ITEM_OFFSET_PX = -0.5f;
-    constexpr float CONTAINER_SLOT_SIZE_PX = 18.0f;
-    constexpr float ICON_MARGIN_PX = 1.0f;
+    constexpr float ITEM_SIZE_PX           = 16.0f;
+    constexpr float CONTAINER_SLOT_STRIDE_PX = 18.0f;
 
-    // Slot grid origins within the texture, in texture pixels - see the
-    // Minecraft Wiki's own documented layout for this exact asset (verified
-    // against the actual file: 9 columns starting at x=8, each row/column
-    // stride exactly CONTAINER_SLOT_SIZE_PX with no gap between slots). Only the main
-    // storage grid and hotbar row are ever drawn on top of; the crafting
-    // grid/output slot and armor column near the top of the texture are
-    // left as pure background decoration - this project has no crafting or
-    // armor system yet; those cells are deliberately left as background.
+    // These origins are the gray INTERIOR of each cell, not its bevel.
+    // Interiors are 16x16 with an 18px pitch; confusing size with pitch
+    // makes icons and hover overlays spill onto the next cell's border.
     constexpr Vector2 MAIN_GRID_ORIGIN = {8.0f, 84.0f};
     constexpr int MAIN_GRID_COLUMNS = 9;
     constexpr Vector2 INVENTORY_HOTBAR_ORIGIN = {8.0f, 142.0f};
 
+    // Crafting grid/output slot positions - measured directly off each
+    // container texture's own baked-in art (flood-filled the slot-grey
+    // (139,139,139) regions), same CONTAINER_SLOT_STRIDE_PX stride as every
+    // other slot. The output slot itself isn't part of either grid array -
+    // it's not a real backing ItemStack, just whatever match_recipe()
+    // currently reports for that grid, drawn/handled separately below.
+    constexpr Vector2 INVENTORY_CRAFT_ORIGIN = {98.0f, 18.0f};
+    constexpr Vector2 INVENTORY_CRAFT_OUTPUT_ORIGIN = {154.0f, 28.0f};
+    constexpr float INVENTORY_CRAFT_OUTPUT_SIZE_PX = 16.0f;
+    constexpr Vector2 WORKBENCH_CRAFT_ORIGIN = {30.0f, 17.0f};
+    constexpr Vector2 WORKBENCH_CRAFT_OUTPUT_ORIGIN = {120.0f, 31.0f};
+    constexpr float WORKBENCH_CRAFT_OUTPUT_SIZE_PX = 24.0f;
+
+    // Chest's own 27-slot grid (9x3, same column count/stride as
+    // MAIN_GRID_ORIGIN below) - measured the same flood-fill way as every
+    // other slot grid in this file.
+    constexpr Vector2 CHEST_GRID_ORIGIN = {8.0f, 18.0f};
+
+    // The player-model preview box - container0.png's own art leaves this
+    // rectangle solid black (flood-filled to find these exact bounds),
+    // Inventory-only (real Minecraft has no equivalent in the Workbench/
+    // Furnace/Chest screens either).
+    constexpr Rectangle INVENTORY_PREVIEW_BOX = {26.0f, 8.0f, 49.0f, 70.0f};
+
+    // Fixed resolution for the render-to-texture preview - a little denser
+    // than the box's own native pixel size so the 3D model reads smoothly
+    // rather than blocky, while staying cheap (a few hundred pixels).
+    constexpr int PREVIEW_RENDER_WIDTH = 140;
+    constexpr int PREVIEW_RENDER_HEIGHT = 200;
+
+    constexpr float PREVIEW_MOUSE_SENSITIVITY = 0.4f; // screen pixels of mouse offset -> degrees of rotation
+    constexpr float PREVIEW_MAX_YAW = 70.0f;
+    constexpr float PREVIEW_MAX_PITCH = 25.0f;
+
+    // Renders the player model into a small off-screen texture, rotated to
+    // follow the mouse (same idea as real Minecraft's own inventory
+    // character - the model turns toward wherever the cursor is, not just
+    // while hovering the little preview box itself), then blits that
+    // texture into `destination`. The render texture is created once and
+    // reused every call - LoadRenderTexture()/UnloadRenderTexture() every
+    // frame would be wasteful for something drawn every frame the
+    // inventory screen is open.
+    void draw_player_preview(Rectangle destination, Vector2 mouse)
+    {
+        static RenderTexture2D target = LoadRenderTexture(PREVIEW_RENDER_WIDTH, PREVIEW_RENDER_HEIGHT);
+
+        Vector2 box_center = {destination.x + destination.width / 2.0f, destination.y + destination.height / 2.0f};
+        float yaw = std::clamp((mouse.x - box_center.x) * PREVIEW_MOUSE_SENSITIVITY, -PREVIEW_MAX_YAW, PREVIEW_MAX_YAW);
+        float pitch = std::clamp((mouse.y - box_center.y) * PREVIEW_MOUSE_SENSITIVITY, -PREVIEW_MAX_PITCH, PREVIEW_MAX_PITCH);
+
+        Camera3D camera{};
+        camera.position = {0.0f, 1.6f, 4.3f};
+        camera.target = {0.0f, 0.9f, 0.0f};
+        camera.up = {0.0f, 1.0f, 0.0f};
+        camera.fovy = 25.0f;
+        camera.projection = CAMERA_PERSPECTIVE;
+
+        BeginTextureMode(target);
+        ClearBackground(BLANK);
+        BeginMode3D(camera);
+        PlayerRenderer{}.draw_flat({0.0f, 0.0f, 0.0f}, yaw, pitch, WHITE);
+        EndMode3D();
+        EndTextureMode();
+
+        // RenderTexture2D content is stored bottom-up - a negative source
+        // height flips it back to normal screen orientation.
+        Rectangle source = {0.0f, 0.0f, static_cast<float>(target.texture.width), -static_cast<float>(target.texture.height)};
+        DrawTexturePro(target.texture, source, destination, {0.0f, 0.0f}, 0.0f, WHITE);
+    }
+
     // hotbar.png uses the vanilla HUD layout: nine 20px cells inside a
     // 182x22 texture. Item artwork starts 3px from the texture's top-left.
     constexpr float HOTBAR_SLOT_STRIDE_PX = 20.0f;
-    constexpr Vector2 HOTBAR_ICON_ORIGIN = {3.0f, 3.0f};
+    constexpr Vector2 HOTBAR_ICON_ORIGIN     = {3.0f, 3.0f};
     constexpr Vector2 HOTBAR_SELECTOR_ORIGIN = {-1.0f, -1.0f};
 
     constexpr float HOTBAR_BOTTOM_MARGIN = 18.0f;
 
-    constexpr Color SELECTION_HIGHLIGHT_COLOR = {255, 255, 255, 235};
+    constexpr Color SELECTION_HIGHLIGHT_COLOR = {255, 255, 255, 80};
     constexpr int STACK_COUNT_FONT_SIZE = 13;
 
     constexpr float DURABILITY_BAR_HEIGHT_PX = 1.0f;
     constexpr float DURABILITY_BAR_MARGIN_PX = 1.0f;
     constexpr Color DURABILITY_BAR_BACKGROUND = {0, 0, 0, 180};
 
-    void draw_item_stack(Vector2 icon_origin, const ItemStack& stack, float scale)
-    {
+    Rectangle slot_bounds(Vector2 content_origin, float scale, float size_px = ITEM_SIZE_PX) {
+        // Align both edges to the same framebuffer pixels as the atlas.
+        const float left = std::round(content_origin.x);
+        const float top = std::round(content_origin.y);
+        return {left, top, std::round(content_origin.x + size_px * scale) - left,
+                           std::round(content_origin.y + size_px * scale) - top};
+    }
+
+    void draw_item_stack(Rectangle cell, const ItemStack& stack, float scale) {
         if (stack.empty()) return;
 
-        float icon_size = ITEM_SIZE_PX * scale;
-        float offset = ITEM_OFFSET_PX * scale;
-        Rectangle bounds = {icon_origin.x + offset, icon_origin.y + offset, icon_size, icon_size};
+        const float icon_size = std::min({std::round(ITEM_SIZE_PX * scale), cell.width, cell.height});
+        Rectangle bounds = {std::round(cell.x + (cell.width - icon_size) * 0.5f),
+                            std::round(cell.y + (cell.height - icon_size) * 0.5f),
+                            icon_size, icon_size};
 
         if (stack.is_tool()) {
             ui::item_icon(bounds, stack.tool);
@@ -111,22 +190,29 @@ namespace {
             return;
         }
 
-        ui::block_icon(bounds, stack.block);
+        if (stack.is_material()) {
+            ui::item_icon(bounds, stack.tool);
+        } else {
+            ui::block_icon(bounds, stack.block);
+        }
 
         if (stack.count > 1) {
             std::string count = std::to_string(stack.count);
             const Font& font = FontManager::get();
-            Vector2 size = MeasureTextEx(font, count.c_str(), STACK_COUNT_FONT_SIZE, 1.0f);
+            const float count_font_size = static_cast<float>(ui::scaled_font(STACK_COUNT_FONT_SIZE));
+            Vector2 size = MeasureTextEx(font, count.c_str(), count_font_size, 1.0f);
             Vector2 pos = {bounds.x + bounds.width - size.x, bounds.y + bounds.height - size.y};
-            DrawTextEx(font, count.c_str(), {pos.x + 1.0f, pos.y + 1.0f}, STACK_COUNT_FONT_SIZE, 1.0f, BLACK);
-            DrawTextEx(font, count.c_str(), pos, STACK_COUNT_FONT_SIZE, 1.0f, WHITE);
+            DrawTextEx(font, count.c_str(), {pos.x + 1.0f, pos.y + 1.0f}, count_font_size, 1.0f, BLACK);
+            DrawTextEx(font, count.c_str(), pos, count_font_size, 1.0f, WHITE);
         }
     }
 
-    void draw_slot_highlight(Vector2 slot_origin, float scale)
-    {
-        float size = CONTAINER_SLOT_SIZE_PX * scale;
-        DrawRectangleLinesEx({slot_origin.x, slot_origin.y, size, size}, scale * 0.5f, SELECTION_HIGHLIGHT_COLOR);
+    void draw_slot_highlight(Rectangle bounds) {
+        DrawRectangleRec(bounds, SELECTION_HIGHLIGHT_COLOR);
+    }
+
+    std::string stack_name(const ItemStack& stack) {
+        return stack.holds_item() ? ui::item_display_name(stack.tool) : ui::block_display_name(stack.block);
     }
 
 }
@@ -140,23 +226,22 @@ void InventoryHud::toggle(Inventory& inventory)
     }
 }
 
-void InventoryHud::open_container(ContainerKind new_kind)
+void InventoryHud::open_container(ContainerKind new_kind, int x, int y, int z)
 {
     kind = new_kind;
+    chest_x = x;
+    chest_y = y;
+    chest_z = z;
     open = true;
 }
 
 void InventoryHud::close(Inventory& inventory)
 {
     if (!carried_stack.empty()) {
-        if (drag_source && drag_source->empty()) {
-            *drag_source = carried_stack;
-        } else {
-            inventory.put_back(carried_stack);
-        }
+        inventory.put_back(carried_stack);
         carried_stack.clear();
     }
-    drag_source = nullptr;
+    last_clicked_slot = nullptr;
     open = false;
 }
 
@@ -165,27 +250,28 @@ void InventoryHud::draw_hotbar(const Inventory& inventory) const
     const Texture2D& texture = TextureManager::get(HOTBAR_TEXTURE_PATH);
     const Texture2D& selector = TextureManager::get(HOTBAR_SELECTOR_TEXTURE_PATH);
 
-    float hotbar_w = static_cast<float>(texture.width) * HOTBAR_SCALE;
-    float hotbar_h = static_cast<float>(texture.height) * HOTBAR_SCALE;
-    float hotbar_x = (GetScreenWidth() - hotbar_w) / 2.0f;
-    float hotbar_y = GetScreenHeight() - HOTBAR_BOTTOM_MARGIN - hotbar_h;
+    const float hotbar_scale = HOTBAR_SCALE * ui::scale_factor();
+    float hotbar_w = static_cast<float>(texture.width) * hotbar_scale;
+    float hotbar_h = static_cast<float>(texture.height) * hotbar_scale;
+    float hotbar_x = std::round((GetScreenWidth() - hotbar_w) / 2.0f);
+    float hotbar_y = std::round(GetScreenHeight() - ui::scaled(HOTBAR_BOTTOM_MARGIN) - hotbar_h);
 
     Rectangle source = {0.0f, 0.0f, static_cast<float>(texture.width), static_cast<float>(texture.height)};
     DrawTexturePro(texture, source, {hotbar_x, hotbar_y, hotbar_w, hotbar_h}, {0.0f, 0.0f}, 0.0f, WHITE);
 
     for (int i = 0; i < HOTBAR_SIZE; ++i) {
         Vector2 icon_origin = {
-            hotbar_x + (HOTBAR_ICON_ORIGIN.x + i * HOTBAR_SLOT_STRIDE_PX) * HOTBAR_SCALE,
-            hotbar_y + HOTBAR_ICON_ORIGIN.y * HOTBAR_SCALE,
+            hotbar_x + (HOTBAR_ICON_ORIGIN.x + i * HOTBAR_SLOT_STRIDE_PX) * hotbar_scale,
+            hotbar_y + HOTBAR_ICON_ORIGIN.y * hotbar_scale,
         };
-        draw_item_stack(icon_origin, inventory.hotbar[i], HOTBAR_SCALE);
+        draw_item_stack(slot_bounds(icon_origin, hotbar_scale), inventory.hotbar[i], hotbar_scale);
     }
 
     if (inventory.selected_slot >= 0 && inventory.selected_slot < HOTBAR_SIZE) {
-        float selector_size = static_cast<float>(selector.width) * HOTBAR_SCALE;
+        float selector_size = static_cast<float>(selector.width) * hotbar_scale;
         float selector_x = hotbar_x +
-            (HOTBAR_SELECTOR_ORIGIN.x + inventory.selected_slot * HOTBAR_SLOT_STRIDE_PX) * HOTBAR_SCALE;
-        float selector_y = hotbar_y + HOTBAR_SELECTOR_ORIGIN.y * HOTBAR_SCALE;
+            (HOTBAR_SELECTOR_ORIGIN.x + inventory.selected_slot * HOTBAR_SLOT_STRIDE_PX) * hotbar_scale;
+        float selector_y = hotbar_y + HOTBAR_SELECTOR_ORIGIN.y * hotbar_scale;
         Rectangle selector_source = {
             0.0f, 0.0f, static_cast<float>(selector.width), static_cast<float>(selector.height)
         };
@@ -195,19 +281,83 @@ void InventoryHud::draw_hotbar(const Inventory& inventory) const
     }
 }
 
-std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory)
+std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory, GameMode game_mode, World* world)
 {
     tooltip.clear();
 
-    const Texture2D& texture = TextureManager::get(container_texture_path(kind));
+    if (kind == ContainerKind::Inventory && game_mode == GameMode::Creative) {
+        constexpr int columns = 9;
+        constexpr int rows = 5;
+        const float cell = ui::scaled(42.0f);
+        const float padding = ui::scaled(18.0f);
+        const float header = ui::scaled(42.0f);
+        std::vector<BlockType> blocks = all_placeable_blocks();
+        int page_size = columns * rows;
+        int page_count = std::max(1, static_cast<int>((blocks.size() + page_size - 1) / page_size));
+        creative_page = std::clamp(creative_page, 0, page_count - 1);
+        float wheel = GetMouseWheelMove();
+        if (wheel != 0.0f) creative_page = std::clamp(creative_page - static_cast<int>(wheel), 0, page_count - 1);
 
-    float panel_w = static_cast<float>(texture.width) * INVENTORY_SCALE;
-    float panel_h = static_cast<float>(texture.height) * INVENTORY_SCALE;
-    float panel_x = (GetScreenWidth() - panel_w) / 2.0f;
-    float panel_y = (GetScreenHeight() - panel_h) / 2.0f;
+        float panel_w = columns * cell + padding * 2.0f;
+        float panel_h = rows * cell + padding * 2.0f + header;
+        float panel_x = (GetScreenWidth() - panel_w) * 0.5f;
+        float panel_y = (GetScreenHeight() - panel_h) * 0.5f;
+        ui::panel({panel_x, panel_y, panel_w, panel_h}, Color{198, 198, 198, 255});
+        ui::label({panel_x, panel_y + ui::scaled(8.0f), panel_w, ui::scaled(24.0f)}, ui::tr("inventory.creative"), Color{45,45,45,255});
+
+        Vector2 mouse = GetMousePosition();
+        int begin = creative_page * page_size;
+        int end = std::min(begin + page_size, static_cast<int>(blocks.size()));
+        for (int i = begin; i < end; ++i) {
+            int local = i - begin;
+            int col = local % columns;
+            int row = local / columns;
+            Rectangle slot = {panel_x + padding + col * cell,
+                              panel_y + header + padding + row * cell, cell - ui::scaled(4.0f), cell - ui::scaled(4.0f)};
+            bool hovered = CheckCollisionPointRec(mouse, slot);
+            DrawRectangleRec(slot, Color{139,139,139,255});
+            draw_item_stack(slot,
+                ItemStack{blocks[static_cast<size_t>(i)], ItemType::None, MAX_ITEM_STACK, 0}, ui::scaled(2.0f));
+            if (hovered) {
+                draw_slot_highlight(slot);
+                tooltip.show(ui::block_display_name(blocks[static_cast<size_t>(i)]), mouse);
+                if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                    ItemStack& selected = inventory.hotbar[inventory.selected_slot];
+                    selected = {blocks[static_cast<size_t>(i)], ItemType::None, MAX_ITEM_STACK, 0};
+                }
+            }
+        }
+        ui::label({panel_x, panel_y + panel_h - ui::scaled(22.0f), panel_w, ui::scaled(18.0f)},
+                  ui::tr("inventory.pages") + "  " + std::to_string(creative_page + 1) + "/" + std::to_string(page_count),
+                  Color{45,45,45,255});
+        tooltip.draw();
+        return std::nullopt;
+    }
+
+    const Texture2D& texture = TextureManager::get(container_texture_path(kind));
+    const float inventory_scale = INVENTORY_SCALE * ui::scale_factor();
+
+    float panel_w = static_cast<float>(texture.width) * inventory_scale;
+    float panel_h = static_cast<float>(texture.height) * inventory_scale;
+    float panel_x = std::round((GetScreenWidth() - panel_w) / 2.0f);
+    float panel_y = std::round((GetScreenHeight() - panel_h) / 2.0f);
 
     Rectangle full_source = {0.0f, 0.0f, static_cast<float>(texture.width), static_cast<float>(texture.height)};
     DrawTexturePro(texture, full_source, {panel_x, panel_y, panel_w, panel_h}, {0.0f, 0.0f}, 0.0f, WHITE);
+
+    // Null whenever kind isn't Chest (or, defensively, if world somehow
+    // isn't loaded) - every chest-specific block below checks this instead
+    // of re-deriving the same condition.
+    std::array<ItemStack, INVENTORY_STORAGE_SIZE>* chest =
+        (kind == ContainerKind::Chest && world) ? &world->chest_inventory(chest_x, chest_y, chest_z) : nullptr;
+
+    if (kind == ContainerKind::Inventory) {
+        Rectangle preview_destination = {
+            panel_x + INVENTORY_PREVIEW_BOX.x * inventory_scale, panel_y + INVENTORY_PREVIEW_BOX.y * inventory_scale,
+            INVENTORY_PREVIEW_BOX.width * inventory_scale, INVENTORY_PREVIEW_BOX.height * inventory_scale,
+        };
+        draw_player_preview(preview_destination, GetMousePosition());
+    }
 
     if (kind == ContainerKind::Furnace) {
         const Texture2D& fuel = TextureManager::get(FUEL_PROGRESS_TEXTURE_PATH);
@@ -215,8 +365,8 @@ std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory)
         auto draw_icon = [&](const Texture2D& icon, Vector2 origin) {
             Rectangle icon_source = {0.0f, 0.0f, static_cast<float>(icon.width), static_cast<float>(icon.height)};
             Rectangle icon_destination = {
-                panel_x + origin.x * INVENTORY_SCALE, panel_y + origin.y * INVENTORY_SCALE,
-                static_cast<float>(icon.width) * INVENTORY_SCALE, static_cast<float>(icon.height) * INVENTORY_SCALE,
+                panel_x + origin.x * inventory_scale, panel_y + origin.y * inventory_scale,
+                static_cast<float>(icon.width) * inventory_scale, static_cast<float>(icon.height) * inventory_scale,
             };
             DrawTexturePro(icon, icon_source, icon_destination, {0.0f, 0.0f}, 0.0f, WHITE);
         };
@@ -225,83 +375,283 @@ std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory)
     }
 
     Vector2 mouse = GetMousePosition();
-    bool pressed = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
-    bool released = IsMouseButtonReleased(MOUSE_BUTTON_LEFT);
     ItemStack* hovered_slot = nullptr;
+    bool hovered_hotbar = false;
+    bool hovered_chest = false;
 
-    auto process_slot = [&](ItemStack& stack, Vector2 slot_origin) {
-        float size = CONTAINER_SLOT_SIZE_PX * INVENTORY_SCALE;
-        float inset = ICON_MARGIN_PX * INVENTORY_SCALE;
-        draw_item_stack({slot_origin.x + inset, slot_origin.y + inset}, stack, INVENTORY_SCALE);
+    auto process_slot = [&](ItemStack& stack, Vector2 slot_origin, bool is_hotbar, bool is_chest = false) {
+        const Rectangle bounds = slot_bounds(slot_origin, inventory_scale);
+        draw_item_stack(bounds, stack, inventory_scale);
 
-        if (CheckCollisionPointRec(mouse, {slot_origin.x, slot_origin.y, size, size})) {
+        if (CheckCollisionPointRec(mouse, bounds)) {
             hovered_slot = &stack;
-            draw_slot_highlight(slot_origin, INVENTORY_SCALE);
+            hovered_hotbar = is_hotbar;
+            hovered_chest = is_chest;
+            draw_slot_highlight(bounds);
             if (!stack.empty()) {
-                tooltip.show(stack.is_tool() ? get_item_properties(stack.tool).display_name : get_block_name(stack.block), mouse);
-            }
-            if (pressed && carried_stack.empty() && !stack.empty()) {
-                carried_stack = stack;
-                stack.clear();
-                drag_source = &stack;
+                tooltip.show(stack_name(stack), mouse);
             }
         }
     };
+
+    if (chest) {
+        for (int i = 0; i < INVENTORY_STORAGE_SIZE; ++i) {
+            int col = i % MAIN_GRID_COLUMNS;
+            int row = i / MAIN_GRID_COLUMNS;
+            Vector2 slot_origin = {
+                panel_x + (CHEST_GRID_ORIGIN.x + col * CONTAINER_SLOT_STRIDE_PX) * inventory_scale,
+                panel_y + (CHEST_GRID_ORIGIN.y + row * CONTAINER_SLOT_STRIDE_PX) * inventory_scale,
+            };
+            process_slot((*chest)[i], slot_origin, false, true);
+        }
+    }
 
     for (int i = 0; i < INVENTORY_STORAGE_SIZE; ++i) {
         int col = i % MAIN_GRID_COLUMNS;
         int row = i / MAIN_GRID_COLUMNS;
         Vector2 slot_origin = {
-            panel_x + (MAIN_GRID_ORIGIN.x + col * CONTAINER_SLOT_SIZE_PX) * INVENTORY_SCALE,
-            panel_y + (MAIN_GRID_ORIGIN.y + row * CONTAINER_SLOT_SIZE_PX) * INVENTORY_SCALE,
+            panel_x + (MAIN_GRID_ORIGIN.x + col * CONTAINER_SLOT_STRIDE_PX) * inventory_scale,
+            panel_y + (MAIN_GRID_ORIGIN.y + row * CONTAINER_SLOT_STRIDE_PX) * inventory_scale,
         };
-        process_slot(inventory.storage[i], slot_origin);
+        process_slot(inventory.storage[i], slot_origin, false);
     }
 
     // This is the same data as the always-visible hotbar, not a copy.
     for (int i = 0; i < HOTBAR_SIZE; ++i) {
         Vector2 slot_origin = {
-            panel_x + (INVENTORY_HOTBAR_ORIGIN.x + i * CONTAINER_SLOT_SIZE_PX) * INVENTORY_SCALE,
-            panel_y + INVENTORY_HOTBAR_ORIGIN.y * INVENTORY_SCALE,
+            panel_x + (INVENTORY_HOTBAR_ORIGIN.x + i * CONTAINER_SLOT_STRIDE_PX) * inventory_scale,
+            panel_y + INVENTORY_HOTBAR_ORIGIN.y * inventory_scale,
         };
-        process_slot(inventory.hotbar[i], slot_origin);
+        process_slot(inventory.hotbar[i], slot_origin, true);
     }
 
-    if (released && !carried_stack.empty()) {
-        if (!hovered_slot || hovered_slot == drag_source) {
-            *drag_source = carried_stack;
+    // Real crafting grid cells - plain ItemStack slots exactly like storage
+    // above, so they fall through process_slot() into the very same
+    // hovered_slot/carried_stack drag-and-drop handling below for free (a
+    // player can place/take/swap/split ingredients in them exactly like any
+    // other slot). Only the output slot below needs its own special
+    // handling - it has no backing ItemStack of its own to drag.
+    const int craft_cols = kind == ContainerKind::Workbench ? 3 : 2;
+    if (kind == ContainerKind::Workbench) {
+        for (int i = 0; i < static_cast<int>(workbench_craft_grid.size()); ++i) {
+            int col = i % craft_cols, row = i / craft_cols;
+            Vector2 slot_origin = {
+                panel_x + (WORKBENCH_CRAFT_ORIGIN.x + col * CONTAINER_SLOT_STRIDE_PX) * inventory_scale,
+                panel_y + (WORKBENCH_CRAFT_ORIGIN.y + row * CONTAINER_SLOT_STRIDE_PX) * inventory_scale,
+            };
+            process_slot(workbench_craft_grid[i], slot_origin, false);
+        }
+    } else if (kind == ContainerKind::Inventory) {
+        for (int i = 0; i < static_cast<int>(inventory_craft_grid.size()); ++i) {
+            int col = i % craft_cols, row = i / craft_cols;
+            Vector2 slot_origin = {
+                panel_x + (INVENTORY_CRAFT_ORIGIN.x + col * CONTAINER_SLOT_STRIDE_PX) * inventory_scale,
+                panel_y + (INVENTORY_CRAFT_ORIGIN.y + row * CONTAINER_SLOT_STRIDE_PX) * inventory_scale,
+            };
+            process_slot(inventory_craft_grid[i], slot_origin, false);
+        }
+    }
+
+    auto same_stack = [](const ItemStack& a, const ItemStack& b) {
+        if (a.empty() || b.empty() || a.is_tool() || b.is_tool()) return false;
+        // A material's `block` field is unused (stays Air) same as another
+        // material's - comparing blocks alone would read any two different
+        // materials as "the same stack". Compare by item type instead
+        // whenever either side actually holds one.
+        if (a.holds_item() || b.holds_item()) return a.tool == b.tool;
+        return a.block == b.block;
+    };
+    auto quick_move = [&](ItemStack& source, bool from_hotbar, bool from_chest) {
+        if (source.empty()) return;
+        auto transfer_to = [&](auto& destination) {
+            if (source.is_tool()) {
+                for (ItemStack& slot : destination) {
+                    if (slot.empty()) { slot = source; source.clear(); return; }
+                }
+                return;
+            }
+            for (ItemStack& slot : destination) {
+                if (!same_stack(slot, source) || slot.count >= MAX_ITEM_STACK) continue;
+                int moved = std::min(source.count, MAX_ITEM_STACK - slot.count);
+                slot.count += moved;
+                source.count -= moved;
+                if (source.count <= 0) { source.clear(); return; }
+            }
+            for (ItemStack& slot : destination) {
+                if (!slot.empty()) continue;
+                slot = source;
+                source.clear();
+                return;
+            }
+        };
+        if (from_chest) {
+            // Out of the chest and into whichever of the player's own two
+            // areas has room - storage first, hotbar as overflow.
+            transfer_to(inventory.storage);
+            if (!source.empty()) transfer_to(inventory.hotbar);
+        } else if (chest) {
+            // A chest is open and this shift-click came from the player's
+            // own side (storage/hotbar/craft grid) - send it into the
+            // chest instead of just shuffling storage<->hotbar.
+            transfer_to(*chest);
+        } else if (from_hotbar) {
+            transfer_to(inventory.storage);
+        } else {
+            transfer_to(inventory.hotbar);
+        }
+    };
+
+    std::optional<ItemStack> dropped;
+    if (hovered_slot && carried_stack.empty() && IsKeyDown(KEY_LEFT_SHIFT) &&
+        IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        quick_move(*hovered_slot, hovered_hotbar, hovered_chest);
+    } else if (hovered_slot && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        double now = GetTime();
+        bool double_click = last_clicked_slot == hovered_slot && now - last_click_time <= 0.25;
+        last_click_time = now;
+        last_clicked_slot = hovered_slot;
+        if (carried_stack.empty()) {
+            carried_stack = *hovered_slot;
+            hovered_slot->clear();
+        } else if (double_click && !carried_stack.is_tool()) {
+            auto gather = [&](auto& slots) {
+                for (ItemStack& slot : slots) {
+                    if (!same_stack(slot, carried_stack)) continue;
+                    int moved = std::min(slot.count, MAX_ITEM_STACK - carried_stack.count);
+                    carried_stack.count += moved;
+                    slot.count -= moved;
+                    if (slot.count <= 0) slot.clear();
+                    if (carried_stack.count >= MAX_ITEM_STACK) return;
+                }
+            };
+            gather(inventory.storage);
+            if (carried_stack.count < MAX_ITEM_STACK) gather(inventory.hotbar);
+            if (chest && carried_stack.count < MAX_ITEM_STACK) gather(*chest);
         } else if (hovered_slot->empty()) {
             *hovered_slot = carried_stack;
-        } else if (!hovered_slot->is_tool() && !carried_stack.is_tool() && hovered_slot->block == carried_stack.block) {
+            carried_stack.clear();
+        } else if (same_stack(*hovered_slot, carried_stack)) {
             int moved = std::min(carried_stack.count, MAX_ITEM_STACK - hovered_slot->count);
             hovered_slot->count += moved;
             carried_stack.count -= moved;
-            if (carried_stack.count > 0) *drag_source = carried_stack;
+            if (carried_stack.count <= 0) carried_stack.clear();
         } else {
-            *drag_source = *hovered_slot;
-            *hovered_slot = carried_stack;
+            std::swap(*hovered_slot, carried_stack);
         }
-        carried_stack.clear();
-        drag_source = nullptr;
+    } else if (hovered_slot && IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
+        if (carried_stack.empty() && !hovered_slot->empty()) {
+            if (hovered_slot->is_tool()) {
+                carried_stack = *hovered_slot;
+                hovered_slot->clear();
+            } else {
+                int amount = (hovered_slot->count + 1) / 2;
+                carried_stack = *hovered_slot;
+                carried_stack.count = amount;
+                hovered_slot->count -= amount;
+                if (hovered_slot->count <= 0) hovered_slot->clear();
+            }
+        } else if (!carried_stack.empty() && hovered_slot->empty()) {
+            *hovered_slot = carried_stack;
+            if (!carried_stack.is_tool()) hovered_slot->count = 1;
+            if (carried_stack.is_tool() || --carried_stack.count <= 0) carried_stack.clear();
+        } else if (same_stack(*hovered_slot, carried_stack) && hovered_slot->count < MAX_ITEM_STACK) {
+            ++hovered_slot->count;
+            if (--carried_stack.count <= 0) carried_stack.clear();
+        }
+    }
+
+    if (hovered_slot && carried_stack.empty()) {
+        for (int i = 0; i < HOTBAR_SIZE; ++i) {
+            if (IsKeyPressed(KEY_ONE + i)) std::swap(*hovered_slot, inventory.hotbar[i]);
+        }
+    }
+
+    // Output slot - not a real backing ItemStack (see the crafting grid
+    // loops above), just whatever match_recipe() currently reports for the
+    // active grid. Plain left-click takes one craft into an empty cursor;
+    // Shift+click instead crafts repeatedly (consuming ingredients each
+    // time, re-matching after every craft so it naturally stops the moment
+    // the grid can no longer supply one) and sends every result straight
+    // into the inventory via put_back() rather than the cursor - it
+    // already dispatches correctly whether the output is a stacking
+    // block/material or a non-stacking tool (each tool lands in its own
+    // slot instead of trying to pile up).
+    // Set true the instant a click on the output slot is actually handled
+    // below - without this, the exact same still-"pressed" click would
+    // also satisfy the "clicked outside any slot while carrying something"
+    // throw case further down (the output slot deliberately isn't a real
+    // hovered_slot, so from that check's point of view a click here looks
+    // just like a click on bare panel background), immediately throwing
+    // away the item this same click had just crafted into the cursor.
+    bool clicked_output_slot = false;
+    if (kind == ContainerKind::Inventory || kind == ContainerKind::Workbench) {
+        bool is_workbench = kind == ContainerKind::Workbench;
+        Vector2 output_origin = is_workbench ? WORKBENCH_CRAFT_OUTPUT_ORIGIN : INVENTORY_CRAFT_OUTPUT_ORIGIN;
+        const Rectangle output_bounds = slot_bounds(
+            {panel_x + output_origin.x * inventory_scale, panel_y + output_origin.y * inventory_scale},
+            inventory_scale, is_workbench ? WORKBENCH_CRAFT_OUTPUT_SIZE_PX : INVENTORY_CRAFT_OUTPUT_SIZE_PX);
+        const bool hovered_output = CheckCollisionPointRec(mouse, output_bounds);
+
+        int grid_dim = is_workbench ? 3 : 2;
+        std::vector<ItemStack> grid_snapshot = is_workbench
+            ? std::vector<ItemStack>(workbench_craft_grid.begin(), workbench_craft_grid.end())
+            : std::vector<ItemStack>(inventory_craft_grid.begin(), inventory_craft_grid.end());
+        std::optional<ItemStack> result = match_recipe(grid_snapshot, grid_dim, grid_dim);
+
+        if (result) {
+            draw_item_stack(output_bounds, *result, inventory_scale);
+            if (hovered_output) {
+                tooltip.show(stack_name(*result), mouse);
+                if (carried_stack.empty() && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                    clicked_output_slot = true;
+                    if (IsKeyDown(KEY_LEFT_SHIFT)) {
+                        for (int crafted = 0; crafted < MAX_ITEM_STACK; ++crafted) {
+                            std::optional<ItemStack> next = match_recipe(grid_snapshot, grid_dim, grid_dim);
+                            if (!next || !inventory.put_back(*next)) break;
+                            consume_recipe_ingredients(grid_snapshot, grid_dim, grid_dim);
+                        }
+                    } else {
+                        carried_stack = *result;
+                        consume_recipe_ingredients(grid_snapshot, grid_dim, grid_dim);
+                    }
+                    if (is_workbench) {
+                        std::copy(grid_snapshot.begin(), grid_snapshot.end(), workbench_craft_grid.begin());
+                    } else {
+                        std::copy(grid_snapshot.begin(), grid_snapshot.end(), inventory_craft_grid.begin());
+                    }
+                }
+            }
+        }
+        if (hovered_output) draw_slot_highlight(output_bounds);
     }
 
     if (!carried_stack.empty()) {
-        float size = ITEM_SIZE_PX * INVENTORY_SCALE;
-        draw_item_stack({mouse.x - size / 2.0f, mouse.y - size / 2.0f}, carried_stack, INVENTORY_SCALE);
+        float size = ITEM_SIZE_PX * inventory_scale;
+        tooltip.clear();
+        draw_item_stack({mouse.x - size / 2.0f, mouse.y - size / 2.0f, size, size}, carried_stack, inventory_scale);
     }
 
     // Draw as the final inventory layer so later block slots cannot cover it.
     tooltip.draw();
 
-    // Q drops one item out of whatever's hovered - only while nothing's
-    // actively being dragged (carried_stack empty), same as real
-    // Minecraft's own inventory screen gates it. GameEngine turns the
-    // returned stack into an actual DroppedItem thrown out in front of the
-    // player; this class has no notion of world position to spawn one
-    // itself.
-    std::optional<ItemStack> dropped;
+    // Q drops one item out of whatever's hovered, Shift+Q the whole stack -
+    // only while nothing's actively being dragged (carried_stack empty),
+    // same as real Minecraft's own inventory screen gates it. GameEngine
+    // turns the returned stack into an actual DroppedItem thrown out in
+    // front of the player; this class has no notion of world position to
+    // spawn one itself.
     if (hovered_slot && carried_stack.empty() && !hovered_slot->empty() && IsKeyPressed(KEY_Q)) {
-        dropped = take_one_item(*hovered_slot);
+        if (IsKeyDown(KEY_LEFT_SHIFT)) {
+            dropped = *hovered_slot;
+            hovered_slot->clear();
+        } else {
+            dropped = take_one_item(*hovered_slot);
+        }
+    } else if (!hovered_slot && !clicked_output_slot && !carried_stack.empty() &&
+               !CheckCollisionPointRec(mouse, {panel_x, panel_y, panel_w, panel_h}) &&
+               IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        dropped = carried_stack;
+        carried_stack.clear();
     }
 
     // No separate close button - same as real Minecraft's own inventory

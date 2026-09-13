@@ -8,12 +8,11 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <utility>
 
 namespace {
     constexpr float TEXT_SPACING = 1.0f;
-    constexpr int BUTTON_FONT_SIZE = 20;
-    constexpr int FIELD_FONT_SIZE = 20;
-    constexpr int SLIDER_FONT_SIZE = 18;
+    constexpr int BASE_TEXT_SIZE = 16;
     constexpr float BORDER_THICKNESS = 2.0f;
 
     const char* BUTTON_TEXTURE_PATH = "sprites/gui/widgets/widget1.png";
@@ -28,9 +27,8 @@ namespace {
     const char* SLIDER_HANDLE_TEXTURE_PATH = "sprites/gui/widgets/widget3.png";
     const char* SLIDER_HANDLE_ACTIVE_TEXTURE_PATH = "sprites/gui/widgets/widget4.png";
 
-    const char* TITLE_BLUR_TEXTURE_PATH = "sprites/gui/titleBlur.png";
     const char* OPTIONS_BACKGROUND_TEXTURE_PATH = "sprites/gui/optionsBackground.png";
-    constexpr float OPTIONS_BACKGROUND_TILE_SCALE = 2.0f; // on-screen size of each 16px source tile
+    constexpr float OPTIONS_BACKGROUND_TILE_SCALE = 4.0f; // on-screen size of each 16px source tile
 
     // block_button()'s own flat chrome - unrelated to the widget0-4
     // textures above, kept as-is (no texture asset covers this slot look).
@@ -40,12 +38,6 @@ namespace {
     constexpr Color BUTTON_BORDER = {20, 20, 24, 255};
     constexpr Color TEXT_DISABLED = {140, 140, 140, 255};
 
-    constexpr Color FIELD_BORDER_FOCUSED = {120, 170, 255, 255};
-
-    constexpr Color TRACK_FILL = {40, 40, 46, 255};
-    constexpr Color TRACK_BORDER = {80, 80, 88, 255};
-
-    constexpr int TOOLTIP_FONT_SIZE = 16;
     constexpr float TOOLTIP_PADDING = 6.0f;
     constexpr float TOOLTIP_CURSOR_OFFSET = 14.0f;
     constexpr float TOOLTIP_SCREEN_MARGIN = 4.0f;
@@ -88,7 +80,7 @@ namespace {
     // menu uses several different widths for each. Draw them as a
     // nine-patch so their pixel-art corners keep the correct proportions
     // and only the center stretches.
-    void draw_nine_patch_texture(Rectangle bounds, const char* texture_path)
+    void draw_nine_patch_texture(Rectangle bounds, const char* texture_path, Color tint = WHITE)
     {
         const Texture2D& texture = TextureManager::get(texture_path);
         float source_border = NINE_PATCH_BORDER;
@@ -134,7 +126,7 @@ namespace {
                     texture,
                     {source_x[column], source_y[row], source_w[column], source_h[row]},
                     {destination_x[column], destination_y[row], destination_w[column], destination_h[row]},
-                    {0.0f, 0.0f}, 0.0f, WHITE);
+                    {0.0f, 0.0f}, 0.0f, tint);
             }
         }
     }
@@ -160,9 +152,59 @@ namespace {
         }
         return count;
     }
+
+    int current_scale_level = 1;
+    ui::SoundCallback sound_callback;
+    std::string hovered_button_id;
+    bool hovered_last_frame = false;
+    std::string active_slider_id;
+
+    float level_factor(int level)
+    {
+        // Level 1 is "Стандарт" - the UI's original, unscaled pixel size -
+        // per spec ("1 - стандартный размер в оригинальном размере"), so it
+        // must map to exactly 1.0, not shrink everything by default.
+        constexpr float FACTORS[4] = {1.00f, 1.20f, 1.40f, 1.60f};
+        return FACTORS[std::clamp(level, 1, 4) - 1];
+    }
+
+    std::string elide(const Font& font, std::string text, float width)
+    {
+        const float size = static_cast<float>(ui::text_size());
+        if (MeasureTextEx(font, text.c_str(), size, ui::scaled(TEXT_SPACING)).x <= width) return text;
+        while (!text.empty() &&
+               MeasureTextEx(font, (text + "...").c_str(), size, ui::scaled(TEXT_SPACING)).x > width) {
+            utf8_pop_back(text);
+        }
+        return text.empty() ? "" : text + "...";
+    }
 }
 
 namespace ui {
+
+void set_scale_level(int level)
+{
+    current_scale_level = std::clamp(level, 1, 4);
+}
+
+int scale_level() { return current_scale_level; }
+float scale_factor()
+{
+    // Clamp the entire UI together when a resized window cannot fit the
+    // reference layout. Individual controls never choose their own scale.
+    const float fit = std::min(GetScreenWidth() / 800.0f, GetScreenHeight() / 600.0f);
+    return std::max(0.5f, std::min(level_factor(current_scale_level), fit));
+}
+float scaled(float value) { return value * scale_factor(); }
+int scaled_font(int value) { return std::max(1, static_cast<int>(std::lround(value * scale_factor()))); }
+int text_size() { return scaled_font(BASE_TEXT_SIZE); }
+void begin_frame()
+{
+    if (!hovered_last_frame) hovered_button_id.clear();
+    hovered_last_frame = false;
+    if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) active_slider_id.clear();
+}
+void set_sound_callback(SoundCallback callback) { sound_callback = std::move(callback); }
 
 void Tooltip::clear()
 {
@@ -182,12 +224,14 @@ void Tooltip::draw() const
     if (!visible) return;
 
     const Font& font = FontManager::get();
-    Vector2 text_size = MeasureTextEx(font, text.c_str(), static_cast<float>(TOOLTIP_FONT_SIZE), TEXT_SPACING);
+    const float font_size = static_cast<float>(ui::text_size());
+    const float padding = scaled(TOOLTIP_PADDING);
+    Vector2 text_size = MeasureTextEx(font, text.c_str(), font_size, scaled(TEXT_SPACING));
     Rectangle bounds = {
-        anchor.x + TOOLTIP_CURSOR_OFFSET,
-        anchor.y + TOOLTIP_CURSOR_OFFSET,
-        text_size.x + TOOLTIP_PADDING * 2.0f,
-        text_size.y + TOOLTIP_PADDING * 2.0f,
+        anchor.x + scaled(TOOLTIP_CURSOR_OFFSET),
+        anchor.y + scaled(TOOLTIP_CURSOR_OFFSET),
+        text_size.x + padding * 2.0f,
+        text_size.y + padding * 2.0f,
     };
     bounds.x = std::clamp(bounds.x, TOOLTIP_SCREEN_MARGIN,
         std::max(TOOLTIP_SCREEN_MARGIN, GetScreenWidth() - bounds.width - TOOLTIP_SCREEN_MARGIN));
@@ -195,20 +239,12 @@ void Tooltip::draw() const
         std::max(TOOLTIP_SCREEN_MARGIN, GetScreenHeight() - bounds.height - TOOLTIP_SCREEN_MARGIN));
 
     panel(bounds, TOOLTIP_BACKGROUND);
-    label(bounds, text, TOOLTIP_FONT_SIZE, WHITE);
+    label(bounds, text);
 }
 
 void panel(Rectangle bounds, Color color)
 {
     DrawRectangleRec(bounds, color);
-}
-
-void title_background()
-{
-    const Texture2D& texture = TextureManager::get(TITLE_BLUR_TEXTURE_PATH);
-    Rectangle source = {0.0f, 0.0f, static_cast<float>(texture.width), static_cast<float>(texture.height)};
-    Rectangle destination = {0.0f, 0.0f, static_cast<float>(GetScreenWidth()), static_cast<float>(GetScreenHeight())};
-    DrawTexturePro(texture, source, destination, {0.0f, 0.0f}, 0.0f, WHITE);
 }
 
 void menu_background()
@@ -226,9 +262,24 @@ void menu_background()
     // A source rectangle bigger than the 16x16 texture samples past its
     // edge, which wrap mode above turns into repeats instead of clamping -
     // one draw call tiles the whole screen.
-    Rectangle source = {0.0f, 0.0f, screen_w / OPTIONS_BACKGROUND_TILE_SCALE, screen_h / OPTIONS_BACKGROUND_TILE_SCALE};
+    Rectangle source = {0.0f, 0.0f, screen_w / scaled(OPTIONS_BACKGROUND_TILE_SCALE), screen_h / scaled(OPTIONS_BACKGROUND_TILE_SCALE)};
     Rectangle destination = {0.0f, 0.0f, screen_w, screen_h};
-    DrawTexturePro(texture, source, destination, {0.0f, 0.0f}, 0.0f, WHITE);
+    DrawTexturePro(texture, source, destination, {0.0f, 0.0f}, 0.0f, Color{65, 65, 65, 255});
+}
+
+Texture2D capture_blurred_background()
+{
+    // Read the back buffer before EndDrawing swaps it. Reading after the
+    // swap is undefined on some window systems and can capture an old menu.
+    rlDrawRenderBatchActive();
+    Image frame = LoadImageFromScreen();
+    if (!IsImageValid(frame)) return {};
+    ImageResize(&frame, std::max(1, frame.width / 2), std::max(1, frame.height / 2));
+    ImageBlurGaussian(&frame, 1);
+    Texture2D result = LoadTextureFromImage(frame);
+    UnloadImage(frame);
+    if (IsTextureValid(result)) SetTextureFilter(result, TEXTURE_FILTER_BILINEAR);
+    return result;
 }
 
 void crosshair()
@@ -239,14 +290,12 @@ void crosshair()
 
     rlSetBlendFactors(RL_ONE_MINUS_DST_COLOR, RL_ONE_MINUS_SRC_COLOR, RL_FUNC_ADD);
     BeginBlendMode(BLEND_CUSTOM);
-    DrawRectangle(static_cast<int>(center_x - CROSSHAIR_ARM_LENGTH),
-                  static_cast<int>(center_y - CROSSHAIR_THICKNESS / 2.0f),
-                  static_cast<int>(CROSSHAIR_ARM_LENGTH * 2.0f),
-                  static_cast<int>(CROSSHAIR_THICKNESS), color);
-    DrawRectangle(static_cast<int>(center_x - CROSSHAIR_THICKNESS / 2.0f),
-                  static_cast<int>(center_y - CROSSHAIR_ARM_LENGTH),
-                  static_cast<int>(CROSSHAIR_THICKNESS),
-                  static_cast<int>(CROSSHAIR_ARM_LENGTH * 2.0f), color);
+    const float arm = scaled(CROSSHAIR_ARM_LENGTH);
+    const float thickness = std::max(1.0f, scaled(CROSSHAIR_THICKNESS));
+    DrawRectangle(static_cast<int>(center_x - arm), static_cast<int>(center_y - thickness / 2.0f),
+                  static_cast<int>(arm * 2.0f), static_cast<int>(thickness), color);
+    DrawRectangle(static_cast<int>(center_x - thickness / 2.0f), static_cast<int>(center_y - arm),
+                  static_cast<int>(thickness), static_cast<int>(arm * 2.0f), color);
     EndBlendMode();
 }
 
@@ -261,6 +310,10 @@ void block_breaking_overlay(int block_x, int block_y, int block_z, float progres
 {
     constexpr int STAGE_COUNT = 10; // terrain.png row 15, columns 0-9
     constexpr int STAGE_ROW = 15;
+    // Half-transparent: alpha-blended over the block already drawn beneath
+    // it, so the crack pattern reads as tinted by the block's own color
+    // instead of a flat gray/white overlay stamped on top of it.
+    constexpr unsigned char OVERLAY_ALPHA = 128;
     int stage = std::clamp(static_cast<int>(progress * STAGE_COUNT), 0, STAGE_COUNT - 1);
     Rectangle uv = get_sample_safe_block_uv(block_atlas_tile_uv(stage, STAGE_ROW));
 
@@ -268,45 +321,56 @@ void block_breaking_overlay(int block_x, int block_y, int block_z, float progres
     rlPushMatrix();
     rlTranslatef(center.x, center.y, center.z);
     rlScalef(TARGET_OUTLINE_SIZE, TARGET_OUTLINE_SIZE, TARGET_OUTLINE_SIZE);
-    draw_textured_cube(get_block_atlas_texture(), uv, WHITE);
+    draw_textured_cube(get_block_atlas_texture(), uv, {255, 255, 255, OVERLAY_ALPHA});
     rlPopMatrix();
 }
 
-void label(Rectangle bounds, const std::string& text, int font_size, Color color)
+void label(Rectangle bounds, const std::string& text, Color color, TextAlign align)
 {
     const Font& font = FontManager::get();
-    Vector2 size = MeasureTextEx(font, text.c_str(), static_cast<float>(font_size), TEXT_SPACING);
+    const float size = static_cast<float>(text_size());
+    const float padding = scaled(6.0f);
+    const std::string visible = elide(font, text, std::max(0.0f, bounds.width - padding * 2.0f));
+    Vector2 measured = MeasureTextEx(font, visible.c_str(), size, scaled(TEXT_SPACING));
     Vector2 pos = {
-        bounds.x + (bounds.width - size.x) / 2.0f,
-        bounds.y + (bounds.height - size.y) / 2.0f,
+        std::round(align == TextAlign::Left ? bounds.x + padding : bounds.x + (bounds.width - measured.x) * 0.5f),
+        std::round(bounds.y + (bounds.height - measured.y) * 0.5f),
     };
-    DrawTextEx(font, text.c_str(), pos, static_cast<float>(font_size), TEXT_SPACING, color);
+    // The string already fits horizontally, so no nested scissor state is
+    // needed here (world lists may have an outer clipping rectangle).
+    const float shadow = std::max(1.0f, scaled(2.0f));
+    DrawTextEx(font, visible.c_str(), {pos.x + shadow, pos.y + shadow}, size,
+               scaled(TEXT_SPACING), Color{0, 0, 0, color.a});
+    DrawTextEx(font, visible.c_str(), pos, size, scaled(TEXT_SPACING), color);
 }
 
 bool button(Rectangle bounds, const std::string& text, bool selected, bool enabled)
 {
     Vector2 mouse = GetMousePosition();
     bool hovered = enabled && CheckCollisionPointRec(mouse, bounds);
+    char identity[256];
+    std::snprintf(identity, sizeof(identity), "%s@%.0f,%.0f", text.c_str(), bounds.x, bounds.y);
+    if (hovered) hovered_last_frame = true;
+    if (hovered && hovered_button_id != identity) {
+        hovered_button_id = identity;
+        if (sound_callback) sound_callback(SoundEvent::Hover);
+    }
 
-    // No dedicated disabled-button texture in this asset set (widget0 is
-    // the text field, not a third button state) - a disabled button keeps
-    // the plain unhovered look and relies on TEXT_DISABLED's dimmer label
-    // to read as inert.
-    const char* texture_path = (enabled && (selected || hovered)) ? BUTTON_HOVER_TEXTURE_PATH : BUTTON_TEXTURE_PATH;
-    draw_nine_patch_texture(bounds, texture_path);
-    label(bounds, text, BUTTON_FONT_SIZE, enabled ? WHITE : TEXT_DISABLED);
+    const char* texture_path = !enabled ? TEXTFIELD_TEXTURE_PATH
+        : selected || hovered ? BUTTON_HOVER_TEXTURE_PATH : BUTTON_TEXTURE_PATH;
+    draw_nine_patch_texture(bounds, texture_path, hovered ? Color{185, 195, 255, 255} : WHITE);
+    label(bounds, text, !enabled ? TEXT_DISABLED : hovered ? Color{255, 255, 160, 255} : WHITE);
 
-    return hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+    bool clicked = hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+    if (clicked && sound_callback) sound_callback(SoundEvent::Click);
+    return clicked;
 }
 
 bool text_input(Rectangle bounds, TextInputState& state, bool focused)
 {
-    draw_nine_patch_texture(bounds, TEXTFIELD_TEXTURE_PATH);
-    // The texture's own border reads as "unfocused" - focus gets an extra
-    // highlighted outline on top rather than a second texture asset.
-    if (focused) {
-        DrawRectangleLinesEx(bounds, BORDER_THICKNESS, FIELD_BORDER_FOCUSED);
-    }
+    DrawRectangleRec(bounds, BLACK);
+    DrawRectangleLinesEx(bounds, std::max(1.0f, scaled(2.0f)),
+                         focused ? WHITE : Color{160, 160, 160, 255});
 
     if (focused) {
         int codepoint = GetCharPressed();
@@ -324,60 +388,60 @@ bool text_input(Rectangle bounds, TextInputState& state, bool focused)
     }
 
     const Font& font = FontManager::get();
-    Vector2 text_pos = {bounds.x + 8.0f, bounds.y + (bounds.height - FIELD_FONT_SIZE) / 2.0f};
-    DrawTextEx(font, state.text.c_str(), text_pos, static_cast<float>(FIELD_FONT_SIZE), TEXT_SPACING, WHITE);
+    const float font_size = static_cast<float>(text_size());
+    const float padding = scaled(8.0f);
+    const float text_width = MeasureTextEx(font, state.text.c_str(), font_size, TEXT_SPACING).x;
+    const float visible_width = std::max(1.0f, bounds.width - padding * 2.0f);
+    const float scroll = std::max(0.0f, text_width - visible_width);
+    Vector2 text_pos = {bounds.x + padding - scroll, bounds.y + (bounds.height - font_size) / 2.0f};
+    BeginScissorMode(static_cast<int>(bounds.x + padding), static_cast<int>(bounds.y + 2.0f),
+                     std::max(0, static_cast<int>(visible_width)),
+                     std::max(0, static_cast<int>(bounds.height - 4.0f)));
+    DrawTextEx(font, state.text.c_str(), text_pos, font_size, TEXT_SPACING, WHITE);
 
     if (focused && std::fmod(static_cast<float>(GetTime()), 1.0f) < 0.5f) {
-        float text_width = MeasureTextEx(font, state.text.c_str(), static_cast<float>(FIELD_FONT_SIZE), TEXT_SPACING).x;
-        DrawRectangle(static_cast<int>(text_pos.x + text_width + 2.0f), static_cast<int>(bounds.y + 4.0f),
-                      2, static_cast<int>(bounds.height - 8.0f), WHITE);
+        DrawRectangle(static_cast<int>(text_pos.x + text_width + scaled(1)), static_cast<int>(text_pos.y),
+                      std::max(1, static_cast<int>(scaled(1))), static_cast<int>(font_size), WHITE);
     }
+    EndScissorMode();
 
     return CheckCollisionPointRec(GetMousePosition(), bounds) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
 }
 
 bool slider_int(Rectangle bounds, const std::string& label_text, int& value, int min_value, int max_value)
 {
-    float track_x = bounds.x + bounds.width * 0.45f;
-    float track_width = bounds.width * 0.55f;
-    Rectangle track = {track_x, bounds.y + bounds.height * 0.4f, track_width, bounds.height * 0.2f};
-
-    char full_label[160];
-    std::snprintf(full_label, sizeof(full_label), "%s: %d", label_text.c_str(), value);
-    Rectangle label_bounds = {bounds.x, bounds.y, track_x - bounds.x - 10.0f, bounds.height};
-    const Font& font = FontManager::get();
-    Vector2 label_size = MeasureTextEx(font, full_label, static_cast<float>(SLIDER_FONT_SIZE), TEXT_SPACING);
-    DrawTextEx(font, full_label,
-               {label_bounds.x, label_bounds.y + (label_bounds.height - label_size.y) / 2.0f},
-               static_cast<float>(SLIDER_FONT_SIZE), TEXT_SPACING, WHITE);
-
-    DrawRectangleRec(track, TRACK_FILL);
-    DrawRectangleLinesEx(track, 1.5f, TRACK_BORDER);
-
-    float t = (max_value > min_value) ? static_cast<float>(value - min_value) / static_cast<float>(max_value - min_value) : 0.0f;
-    t = std::clamp(t, 0.0f, 1.0f);
-    Rectangle handle = {track.x + t * track.width - 5.0f, track.y - 4.0f, 10.0f, track.height + 8.0f};
-
-    Vector2 mouse = GetMousePosition();
-    // "Held" covers the whole bounds, not just the handle rect, matching
-    // the drag-anywhere-in-bounds behavior below.
-    bool handle_active = CheckCollisionPointRec(mouse, handle) ||
-                          (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, bounds));
-    const Texture2D& handle_texture = TextureManager::get(
-        handle_active ? SLIDER_HANDLE_ACTIVE_TEXTURE_PATH : SLIDER_HANDLE_TEXTURE_PATH);
-    Rectangle handle_source = {0.0f, 0.0f, static_cast<float>(handle_texture.width), static_cast<float>(handle_texture.height)};
-    DrawTexturePro(handle_texture, handle_source, handle, {0.0f, 0.0f}, 0.0f, WHITE);
-
+    const Vector2 mouse = GetMousePosition();
+    const bool hovered = CheckCollisionPointRec(mouse, bounds);
+    const std::string id = label_text + "@" + std::to_string(bounds.x) + "," + std::to_string(bounds.y);
+    if (hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        active_slider_id = id;
+        if (sound_callback) sound_callback(SoundEvent::Click);
+    }
+    const bool dragging = active_slider_id == id && IsMouseButtonDown(MOUSE_BUTTON_LEFT);
+    const float border = scaled(2.0f);
+    const float handle_width = scaled(14.0f);
+    const float travel = std::max(1.0f, bounds.width - border * 2.0f - handle_width);
     bool changed = false;
-    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, bounds)) {
-        float new_t = std::clamp((mouse.x - track.x) / track.width, 0.0f, 1.0f);
-        int new_value = min_value + static_cast<int>(std::lround(new_t * static_cast<float>(max_value - min_value)));
-        if (new_value != value) {
-            value = new_value;
-            changed = true;
-        }
+    if (dragging && max_value > min_value) {
+        const float t = std::clamp((mouse.x - bounds.x - border - handle_width * 0.5f) / travel, 0.0f, 1.0f);
+        const int next = min_value + static_cast<int>(std::lround(t * (max_value - min_value)));
+        changed = next != value;
+        value = next;
     }
 
+    // Minecraft slider: recessed full-height strip, full-height thumb,
+    // centered caption above both. The thumb never leaves the frame.
+    draw_nine_patch_texture(bounds, TEXTFIELD_TEXTURE_PATH);
+    const float t = max_value > min_value
+        ? std::clamp(static_cast<float>(value - min_value) / (max_value - min_value), 0.0f, 1.0f) : 0.0f;
+    Rectangle handle = {bounds.x + border + t * travel, bounds.y + border,
+                        handle_width, bounds.height - border * 2.0f};
+    const Texture2D& texture = TextureManager::get(
+        hovered || dragging ? SLIDER_HANDLE_ACTIVE_TEXTURE_PATH : SLIDER_HANDLE_TEXTURE_PATH);
+    DrawTexturePro(texture, {0, 0, static_cast<float>(texture.width), static_cast<float>(texture.height)},
+                   handle, {0, 0}, 0, WHITE);
+    label(bounds, label_text + ": " + std::to_string(value),
+          hovered || dragging ? Color{255, 255, 160, 255} : WHITE);
     return changed;
 }
 
@@ -387,6 +451,24 @@ void block_icon(Rectangle bounds, BlockType type)
 
     const Texture2D& atlas = get_block_atlas_texture();
     const BlockProperties& properties = get_block_properties(type);
+
+    if (properties.render_shape == BlockRenderShape::Cross) {
+        float inset_x = bounds.width * 0.16f;
+        float inset_y = bounds.height * 0.04f;
+        Vector2 icon[4] = {
+            {bounds.x + inset_x, bounds.y + inset_y},
+            {bounds.x + bounds.width - inset_x, bounds.y + inset_y},
+            {bounds.x + bounds.width - inset_x, bounds.y + bounds.height - inset_y},
+            {bounds.x + inset_x, bounds.y + bounds.height - inset_y},
+        };
+        int face = static_cast<int>(BlockFace::North);
+        rlSetTexture(atlas.id);
+        rlBegin(RL_QUADS);
+        draw_atlas_quad(properties.texture_uvs[face], icon, properties.texture_tints[face]);
+        rlEnd();
+        rlSetTexture(0);
+        return;
+    }
 
     // Orthographic isometric cube fitted inside the requested icon bounds.
     // The proportions mirror Minecraft's inventory block-item rendering:

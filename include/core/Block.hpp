@@ -86,6 +86,7 @@ enum class BlockType : uint8_t {
     OrangeWool,
     LightGrayWool,
     Lava,
+    ShortGrass,
     Count, // not a real block; sentinel for table/array sizing
 };
 
@@ -114,6 +115,20 @@ enum class BlockFace : uint8_t {
     West,
 };
 
+// Which way a placed directional block (Furnace/Workbench/Dispenser/
+// Pumpkin/JackOLantern - anything blocks.json gives a distinct "south"
+// front-face texture) is facing, i.e. which world-facing mesh face shows
+// that front texture instead of the plain "side" one - see Chunk::
+// get_orientation()/set_orientation(). Values match BlockFace's own
+// North/South/East/West ordering (offset by 2) so a cast between them is a
+// simple, obviously-correct subtraction rather than a lookup table.
+enum class HorizontalDirection : uint8_t {
+    North,
+    South,
+    East,
+    West,
+};
+
 // Minecraft's own fixed per-face directional shading: a flat multiplier per
 // cube face direction, independent of any actual light source or AO - it's
 // what makes a uniformly-lit cube still read as three-dimensional (see
@@ -131,13 +146,20 @@ constexpr float FACE_DIRECTION_SHADE[6] = {1.0f, 0.5f, 0.8f, 0.8f, 0.6f, 0.6f};
 // reuses this same enum for "what kind of tool this item is".
 enum class ToolKind : uint8_t { None, Sword, Pickaxe, Shovel, Axe, Hoe };
 
+// Physical cubes use the normal six-face mesh. Cross blocks (grass and
+// future flowers) are two intersecting, double-sided vertical quads.
+enum class BlockRenderShape : uint8_t { Cube, Cross };
+
 // Everything Mesh Generation needs to know about a BlockType, looked up once
 // per face while building a chunk's mesh (not stored per-block). Loaded from
 // assets/blocks.json by Load_block_definitions().
 struct BlockProperties {
     bool solid;        // occludes neighbor faces, blocks movement
     bool transparent;  // doesn't block light or occlude neighbors (air, later: glass/water)
+    bool selectable;   // raycasts can target/break it even when it has no collision
+    bool replaceable;  // placing a block may replace this cell directly
     int  luminance;    // 0-15, block light emitted by this block (0 = none)
+    BlockRenderShape render_shape;
 
     // Drawn in its own pass, after every opaque block in the whole world,
     // with alpha blending on and depth *write* off (still depth *tested*,
@@ -201,6 +223,14 @@ void Load_block_definitions();
 
 const BlockProperties& get_block_properties(BlockType type);
 
+// True for a block whose blocks.json entry gives it a distinct "south"
+// front-face texture (Chest/Furnace/LitFurnace/Workbench/Dispenser/Pumpkin/
+// JackOLantern) - the only ones a per-instance HorizontalDirection actually
+// changes anything for. Used by both Chunk::build_mesh_data() (which face
+// shows that front texture) and block-placement code (whether it's worth
+// calling World::set_block_orientation() at all).
+bool block_is_directional(BlockType type);
+
 // The blocks.json "name" a BlockType was loaded from (e.g. "oak_planks"),
 // for display purposes (the debug overlay's "Looking at" line). "air" for
 // BlockType::Air, which has no blocks.json entry of its own.
@@ -217,10 +247,9 @@ std::optional<BlockType> block_type_from_name(const std::string& name);
 // texture_uvs rectangle indexes into. Valid only after Load_block_definitions().
 const Texture2D& get_block_atlas_texture();
 
-// Moves a tile rectangle half a texel inward on every edge. Mesh UVs that
-// end exactly on an atlas-tile boundary can sample the neighboring tile,
-// most visibly as wrong-colored seams on biome-tinted grass with bilinear
-// filtering. Particle extraction still uses the original, full tile.
+// Moves a tile rectangle a tiny sub-texel distance inward. This excludes
+// the neighboring atlas tile without distorting the first/last pixels under
+// point filtering. Particle extraction still uses the original full tile.
 Rectangle get_sample_safe_block_uv(Rectangle uv);
 
 // The raw (0..1) UV rectangle for terrain.png's (column, row) tile - the
