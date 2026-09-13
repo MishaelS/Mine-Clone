@@ -43,11 +43,11 @@ BiomeWeights compute_biome_weights(float temperature, float humidity, float cont
     // land). Without this second term, deep Ocean could only ever appear
     // behind a Sea buffer, and a "wild gravel beach" directly against
     // Ocean (as opposed to a sandy Sea beach) could never occur.
-    float deep_ocean = 1.0f - smoothstep(-0.35f, -0.05f, continentalness);
-    float wild_coast = smoothstep(-0.1f, 0.15f, coast_roughness);
+    float deep_ocean     = 1.0f - smoothstep(-0.35f, -0.05f, continentalness);
+    float wild_coast     = smoothstep(-0.1f, 0.15f, coast_roughness);
     float ocean_fraction = std::max(deep_ocean, wild_coast);
-    float ocean = total_water * ocean_fraction;
-    float sea = total_water - ocean;
+    float ocean          = total_water * ocean_fraction;
+    float sea            = total_water - ocean;
 
     // The 4 land biomes - same regions as the old hard thresholds, each
     // now a smooth ramp across a band instead of a single cutoff point.
@@ -61,7 +61,7 @@ BiomeWeights compute_biome_weights(float temperature, float humidity, float cont
     // plains soaking up whatever the others didn't claim.
     plains = std::max(0.0f, plains - hills - desert - forest);
     float land_total = plains + hills + desert + forest;
-    float land = 1.0f - total_water;
+    float land       = 1.0f - total_water;
     float land_scale = (land_total > 0.0f) ? land / land_total : 0.0f;
 
     return {
@@ -80,9 +80,9 @@ Biome dominant_biome(const BiomeWeights& weights)
     float best_weight = weights.plains;
     if (weights.forest > best_weight) { best = Biome::Forest; best_weight = weights.forest; }
     if (weights.desert > best_weight) { best = Biome::Desert; best_weight = weights.desert; }
-    if (weights.hills  > best_weight) { best = Biome::Hills;  best_weight = weights.hills; }
-    if (weights.ocean  > best_weight) { best = Biome::Ocean;  best_weight = weights.ocean; }
-    if (weights.sea    > best_weight) { best = Biome::Sea;    best_weight = weights.sea; }
+    if (weights.hills  > best_weight) { best = Biome::Hills;  best_weight = weights.hills;  }
+    if (weights.ocean  > best_weight) { best = Biome::Ocean;  best_weight = weights.ocean;  }
+    if (weights.sea    > best_weight) { best = Biome::Sea;    best_weight = weights.sea;    }
     return best;
 }
 

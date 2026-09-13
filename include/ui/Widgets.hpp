@@ -2,6 +2,7 @@
 
 #include "raylib.h"
 #include "core/Block.hpp"
+#include "player/Item.hpp"
 
 #include <cstddef>
 #include <string>
@@ -15,14 +16,53 @@
 // that needs focus (text_input) tracks which field is focused itself and
 // passes it in.
 namespace ui {
+    // Deferred overlay kept in the widget module because it is reusable UI
+    // chrome, not a standalone screen. Draw after the hovered content so it
+    // always remains on top.
+    class Tooltip {
+    public:
+        void clear();
+        void show(const std::string& text, Vector2 anchor);
+        void draw() const;
+
+    private:
+        std::string text;
+        Vector2 anchor = {0.0f, 0.0f};
+        bool visible = false;
+    };
+
     void panel(Rectangle bounds, Color color);
+
+    // Full-window backdrop for the main menu (titleBlur.png, stretched to
+    // the current window size - it's already a 1920x1080 blurred panorama,
+    // no tiling needed).
+    void title_background();
+
+    // Full-window tiled dirt-pattern backdrop (optionsBackground.png) for
+    // every other menu screen (world list/create, settings, the pause
+    // menu) - Minecraft's own "options background".
+    void menu_background();
+
+    // Minecraft-style inverted crosshair, centered in the current window.
+    void crosshair();
+
+    // World-space selection chrome for the currently targeted voxel.
+    void block_outline(int block_x, int block_y, int block_z);
+
+    // Alpha-blended crack overlay on the block currently being broken -
+    // terrain.png's own "block breaking" strip (row 15, 10 stages), picked
+    // by `progress` (0..1, GameEngine's own breaking_progress) the same
+    // way real Minecraft steps through its crack stages as a hold-to-break
+    // approaches completion.
+    void block_breaking_overlay(int block_x, int block_y, int block_z, float progress);
 
     // Centered text within `bounds` - doesn't draw a background of its own.
     void label(Rectangle bounds, const std::string& text, int font_size = 22, Color color = WHITE);
 
-    // Filled rect + centered text. `selected` highlights one of a pair
-    // (e.g. Creative/Survival, Point/Bilinear) drawn as two adjacent
-    // button() calls rather than a separate segmented-control widget.
+    // Minecraft-textured button with centered text. `selected` uses the
+    // highlighted texture for one of a pair (e.g. Creative/Survival,
+    // Point/Bilinear) drawn as two adjacent button() calls rather than a
+    // separate segmented-control widget.
     // `enabled = false` grays it out and never returns true, however the
     // mouse moves - used for the still-unimplemented "Сетевая игра".
     // Returns true on the exact frame it's clicked.
@@ -50,14 +90,18 @@ namespace ui {
     // a frame `value` actually changed.
     bool slider_int(Rectangle bounds, const std::string& label_text, int& value, int min_value, int max_value);
 
-    // Draws `type`'s Top-face texture (BlockProperties::texture_uvs[0],
-    // tinted by texture_tints[0]) stretched to fill `bounds` - a flat 2D
-    // icon, not the 3-face isometric render Minecraft's own inventory
-    // uses, in keeping with this whole toolkit staying simple.
+    // Draws `type` as a three-face isometric block item using its top and
+    // side atlas textures. The visible sides receive different brightness
+    // levels to reproduce Minecraft's inventory-item depth.
     void block_icon(Rectangle bounds, BlockType type);
 
     // block_icon() plus button()'s own hover/selected/bordered chrome -
     // used by both InventoryHud's hotbar slots and its picker grid so they
     // share one look. Returns true on the frame it's clicked.
     bool block_button(Rectangle bounds, BlockType type, bool selected = false);
+
+    // A tool's flat 2D icon, sampled straight from items.png - unlike
+    // block_icon()'s isometric cube render, items are plain flat sprites in
+    // Minecraft's own inventory too.
+    void item_icon(Rectangle bounds, ItemType type);
 }

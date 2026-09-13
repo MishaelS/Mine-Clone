@@ -53,12 +53,19 @@ void main()
         // loops seamlessly forever instead of eventually sampling into a
         // neighboring tile.
         vec2 tileOrigin = floor(uv / TILE_UV_SIZE) * TILE_UV_SIZE;
+        vec2 halfTexel = 0.5 / vec2(textureSize(texture0, 0));
+        vec2 tileInset = halfTexel / TILE_UV_SIZE;
         vec2 localUV = (uv - tileOrigin) / TILE_UV_SIZE;
+        localUV = clamp((localUV - tileInset) / (1.0 - 2.0 * tileInset), 0.0, 1.0);
         localUV = fract(localUV + vec2(waterTime * 0.02, waterTime * 0.015));
-        uv = tileOrigin + localUV * TILE_UV_SIZE;
+        uv = tileOrigin + halfTexel + localUV * (TILE_UV_SIZE - 2.0 * halfTexel);
     }
 
     vec4 texelColor = texture(texture0, uv);
+    // Pixel-art cutouts (currently foliage) need real holes, not black or
+    // order-dependent translucent quads. Fully/mostly transparent texels
+    // are harmlessly absent for every other block texture too.
+    if (texelColor.a < 0.1) discard;
     finalColor = texelColor*colDiffuse*fragColor;
 
     float distance = length(fragWorldPosition - cameraPosition);

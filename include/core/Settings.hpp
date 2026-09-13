@@ -18,6 +18,10 @@ struct Settings {
     int fog_distance_blocks = 102;     // today's derived default (8 chunks * 16 blocks * 0.8)
     TextureFilterMode texture_filter = TextureFilterMode::Point;
     int target_fps = 60;
+    int master_volume = 100;
+    int effects_volume = 100;
+    int ambient_volume = 70;
+    int music_volume = 60;
 };
 
 namespace SettingsIO {

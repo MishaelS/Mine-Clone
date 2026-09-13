@@ -22,6 +22,9 @@ public:
     Action update(Settings& settings);
 
 private:
+    enum class Section { Controls, Graphics, Sound };
+    Section section = Section::Graphics;
+
     // Which action (if any) is currently waiting for its next key/mouse
     // press to become its new binding - see the .cpp for why update() must
     // check this *before* any row's own button() call can newly set it.

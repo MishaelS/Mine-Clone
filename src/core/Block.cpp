@@ -2,6 +2,7 @@
 #include "core/Json.hpp"
 #include "core/TextureManager.hpp"
 
+#include <algorithm>
 #include <array>
 #include <stdexcept>
 #include <unordered_map>
@@ -40,6 +41,43 @@ namespace {
         };
     }
 
+    // Sound group already sorts every block into a rough material family -
+    // reused here as the *default* physical properties (hardness/tool/
+    // density) for a block whose blocks.json entry doesn't override them,
+    // instead of a second, separate classification. Values are deliberately
+    // approximate ("wood floats, stone sinks, stone needs a pickaxe") -
+    // this project isn't chasing exact vanilla hardness numbers, just
+    // plausible relative ones; blocks.json's own optional "hardness"/
+    // "tool"/"density" fields (see below) still win for anything worth
+    // tuning individually.
+    struct PhysicalDefaults { float hardness; ToolKind tool; float density; };
+
+    PhysicalDefaults physical_defaults_for(BlockSoundGroup group) {
+        switch (group) {
+            case BlockSoundGroup::Stone:   return {1.5f, ToolKind::Pickaxe, 2.7f};
+            case BlockSoundGroup::Metal:   return {3.0f, ToolKind::Pickaxe, 5.0f};
+            case BlockSoundGroup::Wood:    return {1.0f, ToolKind::Axe,     0.6f};
+            case BlockSoundGroup::Grass:   return {0.5f, ToolKind::Shovel,  1.4f};
+            case BlockSoundGroup::Dirt:    return {0.5f, ToolKind::Shovel,  1.4f};
+            case BlockSoundGroup::Sand:    return {0.5f, ToolKind::Shovel,  1.5f};
+            case BlockSoundGroup::Gravel:  return {0.5f, ToolKind::Shovel,  1.8f};
+            case BlockSoundGroup::Snow:    return {0.5f, ToolKind::Shovel,  0.3f};
+            case BlockSoundGroup::Glass:   return {0.3f, ToolKind::None,    2.4f};
+            case BlockSoundGroup::Cloth:   return {0.3f, ToolKind::None,    0.4f};
+            case BlockSoundGroup::Foliage: return {0.3f, ToolKind::None,    0.3f};
+            default:                       return {0.3f, ToolKind::None,    1.0f};
+        }
+    }
+
+    ToolKind tool_kind_from_name(const std::string& name) {
+        if (name == "pickaxe") return ToolKind::Pickaxe;
+        if (name == "shovel")  return ToolKind::Shovel;
+        if (name == "axe")     return ToolKind::Axe;
+        if (name == "sword")   return ToolKind::Sword;
+        if (name == "hoe")     return ToolKind::Hoe;
+        return ToolKind::None;
+    }
+
     // One face's texture: which terrain.png tile, and the tint to multiply
     // into it (WHITE - i.e. no change - unless blocks.json gives a "color").
     // tint.a is this face's opacity for translucent blocks (see
@@ -54,6 +92,9 @@ namespace {
     FaceTexture load_face_texture(const Json& face) {
         int col = static_cast<int>(face["x"].as_number(0.0));
         int row = static_cast<int>(face["y"].as_number(0.0));
+        if (col < 0 || col >= GRID_TILES || row < 0 || row >= GRID_TILES) {
+            throw std::runtime_error("blocks.json: terrain tile coordinates must be in range 0..15");
+        }
 
         Color tint = WHITE;
         const Json& color = face["color"];
@@ -73,32 +114,112 @@ namespace {
     }
 
     const std::unordered_map<std::string, BlockType> NAME_TO_TYPE = {
-        {"grass"       , BlockType::Grass      },
-        {"dirt"        , BlockType::Dirt       },
-        {"foliage"     , BlockType::Foliage    },
-        {"oak_log"     , BlockType::OakLog     },
-        {"oak_planks"  , BlockType::OakPlanks  },
-        {"sand"        , BlockType::Sand       },
-        {"gravel"      , BlockType::Gravel     },
-        {"clay"        , BlockType::Clay       },
-        {"stone"       , BlockType::Stone      },
-        {"cobblestone" , BlockType::Cobblestone},
-        {"iron_ore"    , BlockType::IronOre    },
-        {"coal_ore"    , BlockType::CoalOre    },
-        {"gold_ore"    , BlockType::GoldOre    },
-        {"diamond_ore" , BlockType::DiamondOre },
-        {"redstone_ore", BlockType::RedstoneOre},
-        {"bedrock"     , BlockType::Bedrock    },
-        {"water"       , BlockType::Water      },
-        {"workbench"   , BlockType::Workbench  },
-        {"glass"       , BlockType::Glass      },
+        {"grass"            , BlockType::Grass           },
+        {"dirt"             , BlockType::Dirt            },
+        {"foliage"          , BlockType::Foliage         },
+        {"oak_log"          , BlockType::OakLog          },
+        {"oak_planks"       , BlockType::OakPlanks       },
+        {"sand"             , BlockType::Sand            },
+        {"gravel"           , BlockType::Gravel          },
+        {"clay"             , BlockType::Clay            },
+        {"stone"            , BlockType::Stone           },
+        {"cobblestone"      , BlockType::Cobblestone     },
+        {"iron_ore"         , BlockType::IronOre         },
+        {"coal_ore"         , BlockType::CoalOre         },
+        {"gold_ore"         , BlockType::GoldOre         },
+        {"diamond_ore"      , BlockType::DiamondOre      },
+        {"redstone_ore"     , BlockType::RedstoneOre     },
+        {"bedrock"          , BlockType::Bedrock         },
+        {"water"            , BlockType::Water           },
+        {"workbench"        , BlockType::Workbench       },
+        {"glass"            , BlockType::Glass           },
+        {"ice"              , BlockType::Ice             },
+        {"double_stone_slab", BlockType::DoubleStoneSlab },
+        {"bricks"           , BlockType::Bricks          },
+        {"tnt"              , BlockType::Tnt             },
+        {"iron_block"       , BlockType::IronBlock       },
+        {"gold_block"       , BlockType::GoldBlock       },
+        {"diamond_block"    , BlockType::DiamondBlock    },
+        {"chest"            , BlockType::Chest           },
+        {"bookshelf"        , BlockType::Bookshelf       },
+        {"mossy_cobblestone", BlockType::MossyCobblestone},
+        {"obsidian"         , BlockType::Obsidian        },
+        {"sponge"           , BlockType::Sponge          },
+        {"white_wool"       , BlockType::WhiteWool       },
+        {"mob_spawner"      , BlockType::MobSpawner      },
+        {"snow_block"       , BlockType::SnowBlock       },
+        {"snowy_grass"      , BlockType::SnowyGrass      },
+        {"cactus"           , BlockType::Cactus          },
+        {"note_block"       , BlockType::NoteBlock       },
+        {"jukebox"          , BlockType::Jukebox         },
+        {"furnace"          , BlockType::Furnace         },
+        {"lit_furnace"      , BlockType::LitFurnace      },
+        {"dispenser"        , BlockType::Dispenser       },
+        {"netherrack"       , BlockType::Netherrack      },
+        {"soul_sand"        , BlockType::SoulSand        },
+        {"glowstone"        , BlockType::Glowstone       },
+        {"piston"           , BlockType::Piston          },
+        {"sticky_piston"    , BlockType::StickyPiston    },
+        {"spruce_log"       , BlockType::SpruceLog       },
+        {"birch_log"        , BlockType::BirchLog        },
+        {"pumpkin"          , BlockType::Pumpkin         },
+        {"jack_o_lantern"   , BlockType::JackOLantern    },
+        {"spruce_foliage"   , BlockType::SpruceFoliage   },
+        {"birch_foliage"    , BlockType::BirchFoliage    },
+        {"lapis_block"      , BlockType::LapisBlock      },
+        {"lapis_ore"        , BlockType::LapisOre        },
+        {"sandstone"        , BlockType::Sandstone       },
+        {"black_wool"       , BlockType::BlackWool       },
+        {"gray_wool"        , BlockType::GrayWool        },
+        {"red_wool"         , BlockType::RedWool         },
+        {"pink_wool"        , BlockType::PinkWool        },
+        {"green_wool"       , BlockType::GreenWool       },
+        {"lime_wool"        , BlockType::LimeWool        },
+        {"brown_wool"       , BlockType::BrownWool       },
+        {"yellow_wool"      , BlockType::YellowWool      },
+        {"blue_wool"        , BlockType::BlueWool        },
+        {"light_blue_wool"  , BlockType::LightBlueWool   },
+        {"purple_wool"      , BlockType::PurpleWool      },
+        {"magenta_wool"     , BlockType::MagentaWool     },
+        {"cyan_wool"        , BlockType::CyanWool        },
+        {"orange_wool"      , BlockType::OrangeWool      },
+        {"light_gray_wool"  , BlockType::LightGrayWool   },
+        {"lava"             , BlockType::Lava            },
     };
+
+    BlockSoundGroup sound_group_from_name(const std::string& name) {
+        if (name == "grass"  ) return BlockSoundGroup::Grass;
+        if (name == "dirt"   ) return BlockSoundGroup::Dirt;
+        if (name == "gravel" ) return BlockSoundGroup::Gravel;
+        if (name == "wood"   ) return BlockSoundGroup::Wood;
+        if (name == "sand"   ) return BlockSoundGroup::Sand;
+        if (name == "snow"   ) return BlockSoundGroup::Snow;
+        if (name == "glass"  ) return BlockSoundGroup::Glass;
+        if (name == "cloth"  ) return BlockSoundGroup::Cloth;
+        if (name == "foliage") return BlockSoundGroup::Foliage;
+        if (name == "metal"  ) return BlockSoundGroup::Metal;
+        return
+            name == "stone" ? BlockSoundGroup::Stone : BlockSoundGroup::None;
+    }
 }
 
 void Load_block_definitions()
 {
-    // Air: never drawn, so its texture slots are left unused.
-    block_table[static_cast<uint8_t>(BlockType::Air)] = {false, true, 0, false, {}, {}};
+    // Air: never drawn, so its texture slots are left unused. Named-field
+    // assignment (not a positional aggregate-init brace list) so adding a
+    // BlockProperties member later can't silently shift which literal
+    // lands in which field.
+    {
+        BlockProperties& air = block_table[static_cast<uint8_t>(BlockType::Air)];
+        air = BlockProperties{};
+        air.solid = false;
+        air.transparent = true;
+        air.cull_same_faces = true;
+        air.sound_group = BlockSoundGroup::None;
+        air.hardness = 0.0f;
+        air.effective_tool = ToolKind::None;
+        air.density = 0.0f; // never dropped/simulated - air has no falling/buoyancy meaning
+    }
     block_names[static_cast<uint8_t>(BlockType::Air)] = "air";
 
     block_atlas_texture = &TextureManager::get(TERRAIN_TEXTURE_PATH);
@@ -116,32 +237,59 @@ void Load_block_definitions()
         if (it == NAME_TO_TYPE.end()) {
             throw std::runtime_error("blocks.json: unknown block name '" + name + "'");
         }
+        size_t block_index = static_cast<size_t>(it->second);
+        if (!block_names[block_index].empty()) {
+            throw std::runtime_error("blocks.json: duplicate block name '" + name + "'");
+        }
 
         FaceTexture top    = load_face_texture(entry["top"]);
         FaceTexture bottom = load_face_texture(entry["bottom"]);
         FaceTexture side   = load_face_texture(entry["side"]);
+        auto optional_face = [&entry, &side](const char* key) {
+            const Json& value = entry[key];
+            return value.get_type() == Json::Type::Object ? load_face_texture(value) : side;
+        };
+        FaceTexture north = optional_face("north");
+        FaceTexture south = optional_face("south");
+        FaceTexture east = optional_face("east");
+        FaceTexture west = optional_face("west");
 
         BlockProperties properties;
         properties.solid = entry["solid"].as_bool(true);
         properties.transparent = entry["transparent"].as_bool(false);
         properties.translucent = entry["translucent"].as_bool(false);
+        properties.cutout = entry["cutout"].as_bool(false);
+        properties.cull_same_faces = entry["cull_same_faces"].as_bool(true);
+        properties.sound_group = sound_group_from_name(entry["sound"].as_string("stone"));
         properties.luminance = static_cast<int>(entry["luminance"].as_number(0.0));
+
+        PhysicalDefaults physical_defaults = physical_defaults_for(properties.sound_group);
+        properties.hardness = static_cast<float>(entry["hardness"].as_number(physical_defaults.hardness));
+        properties.effective_tool = entry["tool"].get_type() == Json::Type::String
+            ? tool_kind_from_name(entry["tool"].as_string()) : physical_defaults.tool;
+        properties.density = static_cast<float>(entry["density"].as_number(physical_defaults.density));
         // Order: Top, Bottom, North, South, East, West.
         properties.texture_uvs[0] = top.uv;
         properties.texture_uvs[1] = bottom.uv;
-        properties.texture_uvs[2] = side.uv;
-        properties.texture_uvs[3] = side.uv;
-        properties.texture_uvs[4] = side.uv;
-        properties.texture_uvs[5] = side.uv;
+        properties.texture_uvs[2] = north.uv;
+        properties.texture_uvs[3] = south.uv;
+        properties.texture_uvs[4] = east.uv;
+        properties.texture_uvs[5] = west.uv;
         properties.texture_tints[0] = top.tint;
         properties.texture_tints[1] = bottom.tint;
-        properties.texture_tints[2] = side.tint;
-        properties.texture_tints[3] = side.tint;
-        properties.texture_tints[4] = side.tint;
-        properties.texture_tints[5] = side.tint;
+        properties.texture_tints[2] = north.tint;
+        properties.texture_tints[3] = south.tint;
+        properties.texture_tints[4] = east.tint;
+        properties.texture_tints[5] = west.tint;
 
-        block_table[static_cast<uint8_t>(it->second)] = properties;
-        block_names[static_cast<uint8_t>(it->second)] = name;
+        block_table[block_index] = properties;
+        block_names[block_index] = name;
+    }
+
+    for (size_t i = 1; i < block_names.size(); ++i) {
+        if (block_names[i].empty()) {
+            throw std::runtime_error("blocks.json: definition missing for BlockType id " + std::to_string(i));
+        }
     }
 }
 
@@ -165,4 +313,19 @@ std::optional<BlockType> block_type_from_name(const std::string& name)
 const Texture2D& get_block_atlas_texture()
 {
     return *block_atlas_texture;
+}
+
+Rectangle get_sample_safe_block_uv(Rectangle uv)
+{
+    const Texture2D& atlas = get_block_atlas_texture();
+    float half_u = 0.5f / static_cast<float>(atlas.width);
+    float half_v = 0.5f / static_cast<float>(atlas.height);
+    return {uv.x + half_u, uv.y + half_v,
+            std::max(0.0f, uv.width - half_u * 2.0f),
+            std::max(0.0f, uv.height - half_v * 2.0f)};
+}
+
+Rectangle block_atlas_tile_uv(int column, int row)
+{
+    return tile_uv(column, row);
 }

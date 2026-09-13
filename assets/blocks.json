@@ -1,157 +1,75 @@
 {
-    "blocks": [
-        {
-            "name"       : "grass",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : { "x": 0, "y": 0, "color": [124, 189, 107] },
-            "bottom"     : { "x": 2, "y": 0 },
-            "side"       : { "x": 3, "y": 0 }
-        },
-        {
-            "name"       : "dirt",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : { "x": 2, "y": 0 },
-            "bottom"     : { "x": 2, "y": 0 },
-            "side"       : { "x": 2, "y": 0 }
-        },
-        {
-            "name"       : "sand",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : { "x": 2, "y": 1 },
-            "bottom"     : { "x": 2, "y": 1 },
-            "side"       : { "x": 2, "y": 1 }
-        },
-        {
-            "name"       : "gravel",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : { "x": 3, "y": 1 },
-            "bottom"     : { "x": 3, "y": 1 },
-            "side"       : { "x": 3, "y": 1 }
-        },
-        {
-            "name"       : "clay",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : { "x": 8, "y": 4 },
-            "bottom"     : { "x": 8, "y": 4 },
-            "side"       : { "x": 8, "y": 4 }
-        },
-        {
-            "name"       : "oak_log",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : { "x": 5, "y": 1 },
-            "bottom"     : { "x": 5, "y": 1 },
-            "side"       : { "x": 4, "y": 1 }
-        },
-        {
-            "name"       : "oak_planks",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : { "x": 4, "y": 0 },
-            "bottom"     : { "x": 4, "y": 0 },
-            "side"       : { "x": 4, "y": 0 }
-        },
-        {
-            "name"       : "stone",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : { "x": 1, "y": 0 },
-            "bottom"     : { "x": 1, "y": 0 },
-            "side"       : { "x": 1, "y": 0 }
-        },
-        {
-            "name"       : "cobblestone",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : { "x": 0, "y": 1 },
-            "bottom"     : { "x": 0, "y": 1 },
-            "side"       : { "x": 0, "y": 1 }
-        },
-        {
-            "name"       : "coal_ore",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : { "x": 3, "y": 3 },
-            "bottom"     : { "x": 3, "y": 3 },
-            "side"       : { "x": 3, "y": 3 }
-        },
-        {
-            "name"       : "iron_ore",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : { "x": 2, "y": 3 },
-            "bottom"     : { "x": 2, "y": 3 },
-            "side"       : { "x": 2, "y": 3 }
-        },
-        {
-            "name"       : "gold_ore",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : { "x": 0, "y": 3 },
-            "bottom"     : { "x": 0, "y": 3 },
-            "side"       : { "x": 0, "y": 3 }
-        },
-        {
-            "name"       : "diamond_ore",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : { "x": 3, "y": 4 },
-            "bottom"     : { "x": 3, "y": 4 },
-            "side"       : { "x": 3, "y": 4 }
-        },
-        {
-            "name"       : "redstone_ore",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : { "x": 4, "y": 4 },
-            "bottom"     : { "x": 4, "y": 4 },
-            "side"       : { "x": 4, "y": 4 }
-        },
-        {
-            "name"       : "bedrock",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : { "x": 1, "y": 1 },
-            "bottom"     : { "x": 1, "y": 1 },
-            "side"       : { "x": 1, "y": 1 }
-        },
-        {
-            "name"       : "workbench",
-            "solid"      : true,
-            "transparent": false,
-            "top"        : { "x": 11, "y": 2 },
-            "bottom"     : { "x":  4, "y": 0 },
-            "side"       : { "x": 11, "y": 3 }
-        },
-        {
-            "name"       : "water",
-            "solid"      : false,
-            "transparent": true,
-            "translucent": true,
-            "top"        : { "x": 13, "y": 12, "color": [255, 255, 255, 200] },
-            "bottom"     : { "x": 13, "y": 12, "color": [255, 255, 255, 200] },
-            "side"       : { "x": 13, "y": 12, "color": [255, 255, 255, 200] }
-        },
-        {
-            "name"       : "foliage",
-            "solid"      : true,
-            "transparent": true,
-            "top"        : { "x": 4, "y": 3 },
-            "bottom"     : { "x": 4, "y": 3 },
-            "side"       : { "x": 4, "y": 3 }
-        },
-        {
-            "name"       : "glass",
-            "solid"      : true,
-            "transparent": true,
-            "top"        : { "x": 1, "y": 3 },
-            "bottom"     : { "x": 1, "y": 3 },
-            "side"       : { "x": 1, "y": 3 }
-        }
-    ]
+  "blocks": [
+    { "name":"grass"            , "sound":"grass"   , "top":{"x": 0, "y": 0,"color":[124,189,107]}, "bottom":{"x": 2, "y": 0}, "side":{"x": 3, "y": 0} },
+    { "name":"dirt"             , "sound":"dirt"    , "top":{"x": 2, "y": 0}, "bottom":{"x": 2, "y": 0}, "side":{"x": 2,"y": 0} },
+    { "name":"foliage"          , "sound":"foliage" , "transparent":true, "cutout":true, "cull_same_faces":false, "top":{"x": 4, "y": 3}, "bottom":{"x": 4, "y": 3}, "side":{"x": 4, "y": 3} },
+    { "name":"oak_log"          , "sound":"wood"    , "top":{"x": 5, "y": 1}, "bottom":{"x": 5, "y": 1}, "side":{"x": 4, "y": 1} },
+    { "name":"oak_planks"       , "sound":"wood"    , "top":{"x": 4, "y": 0}, "bottom":{"x": 4, "y": 0}, "side":{"x": 4, "y": 0} },
+    { "name":"sand"             , "sound":"sand"    , "top":{"x": 2, "y": 1}, "bottom":{"x": 2, "y": 1}, "side":{"x": 2, "y": 1} },
+    { "name":"gravel"           , "sound":"gravel"  , "top":{"x": 3, "y": 1}, "bottom":{"x": 3, "y": 1}, "side":{"x": 3, "y": 1} },
+    { "name":"clay"             , "sound":"gravel"  , "top":{"x": 8, "y": 4}, "bottom":{"x": 8, "y": 4}, "side":{"x": 8, "y": 4} },
+    { "name":"stone"            , "sound":"stone"   , "top":{"x": 1, "y": 0}, "bottom":{"x": 1, "y": 0}, "side":{"x": 1, "y": 0} },
+    { "name":"cobblestone"      , "sound":"stone"   , "top":{"x": 0, "y": 1}, "bottom":{"x": 0, "y": 1}, "side":{"x": 0, "y": 1} },
+    { "name":"coal_ore"         , "sound":"stone"   , "top":{"x": 2, "y": 2}, "bottom":{"x": 2, "y": 2}, "side":{"x": 2, "y": 2} },
+    { "name":"iron_ore"         , "sound":"stone"   , "top":{"x": 1, "y": 2}, "bottom":{"x": 1, "y": 2}, "side":{"x": 1, "y": 2} },
+    { "name":"gold_ore"         , "sound":"stone"   , "top":{"x": 0, "y": 2}, "bottom":{"x": 0, "y": 2}, "side":{"x": 0, "y": 2} },
+    { "name":"diamond_ore"      , "sound":"stone"   , "top":{"x": 2, "y": 3}, "bottom":{"x": 2, "y": 3}, "side":{"x": 2, "y": 3} },
+    { "name":"redstone_ore"     , "sound":"stone"   , "top":{"x": 3, "y": 3}, "bottom":{"x": 3, "y": 3}, "side":{"x": 3, "y": 3} },
+    { "name":"bedrock"          , "sound":"stone"   , "top":{"x": 1, "y": 1}, "bottom":{"x": 1, "y": 1}, "side":{"x": 1, "y": 1} },
+    { "name":"water"            , "sound":"none"    , "solid":false, "transparent":true, "translucent":true, "top":{"x":13,"y":12,"color":[255,255,255,200]}, "bottom":{"x":13,"y":12,"color":[255,255,255,200]}, "side":{"x":13,"y":12,"color":[255,255,255,200]} },
+    { "name":"workbench"        , "sound":"wood"    , "top":{"x":11,"y":2}, "bottom":{"x":4,"y":0}, "side":{"x":12,"y":3}, "north":{"x":11,"y":3}, "south":{"x":11,"y":3} },
+    { "name":"glass"            , "sound":"glass"   , "transparent":true, "top":{"x":1,"y":3}, "bottom":{"x":1,"y":3}, "side":{"x":1,"y":3} },
+    { "name":"ice"              , "sound":"glass"   , "transparent":true, "translucent":true, "top":{"x":3,"y":4,"color":[255,255,255,210]}, "bottom":{"x":3,"y":4,"color":[255,255,255,210]}, "side":{"x":3,"y":4,"color":[255,255,255,210]} },
+    { "name":"double_stone_slab", "sound":"stone"   , "top":{"x": 6, "y": 0}, "bottom":{"x": 6, "y": 0}, "side":{"x": 5, "y": 0} },
+    { "name":"bricks"           , "sound":"stone"   , "top":{"x": 7, "y": 0}, "bottom":{"x": 7, "y": 0}, "side":{"x": 7, "y": 0} },
+    { "name":"tnt"              , "sound":"grass"   , "top":{"x": 9, "y": 0}, "bottom":{"x":10, "y": 0}, "side":{"x": 8, "y": 0} },
+    { "name":"iron_block"       , "sound":"metal"   , "top":{"x": 6, "y": 1}, "bottom":{"x": 6, "y": 1}, "side":{"x": 6, "y": 1} },
+    { "name":"gold_block"       , "sound":"metal"   , "top":{"x": 7, "y": 1}, "bottom":{"x": 7, "y": 1}, "side":{"x": 7, "y": 1} },
+    { "name":"diamond_block"    , "sound":"metal"   , "top":{"x": 8, "y": 1}, "bottom":{"x": 8, "y": 1}, "side":{"x": 8, "y": 1} },
+    { "name":"chest"            , "sound":"wood"    , "top":{"x": 9, "y": 1}, "bottom":{"x": 9, "y": 1}, "side":{"x":10, "y": 1}, "south":{"x":11,"y":1} },
+    { "name":"bookshelf"        , "sound":"wood"    , "top":{"x": 4, "y": 0}, "bottom":{"x": 4, "y": 0}, "side":{"x": 3, "y": 2} },
+    { "name":"mossy_cobblestone", "sound":"stone"   , "top":{"x": 4, "y": 2}, "bottom":{"x": 4, "y": 2}, "side":{"x": 4, "y": 2} },
+    { "name":"obsidian"         , "sound":"stone"   , "top":{"x": 5, "y": 2}, "bottom":{"x": 5, "y": 2}, "side":{"x": 5, "y": 2} },
+    { "name":"sponge"           , "sound":"grass"   , "top":{"x": 0, "y": 3}, "bottom":{"x": 0, "y": 3}, "side":{"x": 0, "y": 3} },
+    { "name":"white_wool"       , "sound":"cloth"   , "top":{"x": 0, "y": 4}, "bottom":{"x": 0, "y": 4}, "side":{"x": 0, "y": 4} },
+    { "name":"mob_spawner"      , "sound":"metal"   , "transparent":true, "cutout":true, "top":{"x":1,"y":4}, "bottom":{"x":1,"y":4}, "side":{"x":1,"y":4} },
+    { "name":"snow_block"       , "sound":"snow"    , "top":{"x": 2, "y": 4}, "bottom":{"x": 2, "y": 4}, "side":{"x": 2, "y": 4} },
+    { "name":"snowy_grass"      , "sound":"snow"    , "top":{"x": 2, "y": 4}, "bottom":{"x": 2, "y": 0}, "side":{"x": 4, "y": 4} },
+    { "name":"cactus"           , "sound":"cloth"   , "top":{"x": 5, "y": 4}, "bottom":{"x": 7, "y": 4}, "side":{"x": 6, "y": 4} },
+    { "name":"note_block"       , "sound":"wood"    , "top":{"x":10, "y": 4}, "bottom":{"x":10, "y": 4}, "side":{"x":10, "y": 4} },
+    { "name":"jukebox"          , "sound":"wood"    , "top":{"x":11, "y": 4}, "bottom":{"x":10, "y": 4}, "side":{"x":10, "y": 4} },
+    { "name":"furnace"          , "sound":"stone"   , "top":{"x":14, "y": 3}, "bottom":{"x":14, "y": 3}, "side":{"x":13, "y": 2}, "south":{"x":12,"y":2} },
+    { "name":"lit_furnace"      , "sound":"stone"   , "luminance":13, "top":{"x":14,"y":3}, "bottom":{"x":14,"y":3}, "side":{"x":13,"y":2}, "south":{"x":13,"y":3} },
+    { "name":"dispenser"        , "sound":"stone"   , "top":{"x":14, "y": 3}, "bottom":{"x":14,"y":3}, "side":{"x":13,"y":2}, "south":{"x":14,"y":2} },
+    { "name":"netherrack"       , "sound":"stone"   , "top":{"x": 7, "y": 6}, "bottom":{"x":7,"y":6}, "side":{"x":7,"y":6} },
+    { "name":"soul_sand"        , "sound":"sand"    , "top":{"x": 8, "y": 6}, "bottom":{"x":8,"y":6}, "side":{"x":8,"y":6} },
+    { "name":"glowstone"        , "sound":"glass"   , "luminance":15, "top":{"x":9,"y":6}, "bottom":{"x":9,"y":6}, "side":{"x":9,"y":6} },
+    { "name":"piston"           , "sound":"wood"    , "top":{"x":11, "y": 6}, "bottom":{"x":13,"y":6}, "side":{"x":12,"y":6}, "south":{"x":11,"y":6} },
+    { "name":"sticky_piston"    , "sound":"wood"    , "top":{"x":10, "y": 6}, "bottom":{"x":13,"y":6}, "side":{"x":12,"y":6}, "south":{"x":10,"y":6} },
+    { "name":"spruce_log"       , "sound":"wood"    , "top":{"x": 5, "y": 1}, "bottom":{"x":5,"y":1}, "side":{"x":4,"y":7} },
+    { "name":"birch_log"        , "sound":"wood"    , "top":{"x": 5, "y": 1}, "bottom":{"x":5,"y":1}, "side":{"x":5,"y":7} },
+    { "name":"pumpkin"          , "sound":"wood"    , "top":{"x": 6, "y": 6}, "bottom":{"x":6,"y":6}, "side":{"x":6,"y":7}, "south":{"x":7,"y":7} },
+    { "name":"jack_o_lantern"   , "sound":"wood"    , "luminance":15, "top":{"x":6,"y":6}, "bottom":{"x":6,"y":6}, "side":{"x":6,"y":7}, "south":{"x":8,"y":7} },
+    { "name":"spruce_foliage"   , "sound":"foliage" , "transparent":true, "cutout":true, "cull_same_faces":false, "top":{"x":4,"y":8,"color":[97,153,97]}, "bottom":{"x":4,"y":8,"color":[97,153,97]}, "side":{"x":4,"y":8,"color":[97,153,97]} },
+    { "name":"birch_foliage"    , "sound":"foliage" , "transparent":true, "cutout":true, "cull_same_faces":false, "top":{"x":4,"y":3,"color":[128,167,85]}, "bottom":{"x":4,"y":3,"color":[128,167,85]}, "side":{"x":4,"y":3,"color":[128,167,85]} },
+    { "name":"lapis_block"      , "sound":"metal"   , "top":{"x": 0, "y": 9}, "bottom":{"x": 0, "y": 9}, "side":{"x": 0, "y": 9} },
+    { "name":"lapis_ore"        , "sound":"stone"   , "top":{"x": 0, "y":10}, "bottom":{"x": 0, "y":10}, "side":{"x": 0, "y":10} },
+    { "name":"sandstone"        , "sound":"stone"   , "top":{"x": 0, "y":11}, "bottom":{"x": 0, "y":13}, "side":{"x": 0, "y":12} },
+    { "name":"black_wool"       , "sound":"cloth"   , "top":{"x": 1, "y": 7}, "bottom":{"x": 1, "y": 7}, "side":{"x": 1, "y": 7} },
+    { "name":"gray_wool"        , "sound":"cloth"   , "top":{"x": 2, "y": 7}, "bottom":{"x": 2, "y": 7}, "side":{"x": 2, "y": 7} },
+    { "name":"red_wool"         , "sound":"cloth"   , "top":{"x": 1, "y": 8}, "bottom":{"x": 1, "y": 8}, "side":{"x": 1, "y": 8} },
+    { "name":"pink_wool"        , "sound":"cloth"   , "top":{"x": 2, "y": 8}, "bottom":{"x": 2, "y": 8}, "side":{"x": 2, "y": 8} },
+    { "name":"green_wool"       , "sound":"cloth"   , "top":{"x": 1, "y": 9}, "bottom":{"x": 1, "y": 9}, "side":{"x": 1, "y": 9} },
+    { "name":"lime_wool"        , "sound":"cloth"   , "top":{"x": 2, "y": 9}, "bottom":{"x": 2, "y": 9}, "side":{"x": 2, "y": 9} },
+    { "name":"brown_wool"       , "sound":"cloth"   , "top":{"x": 1, "y":10}, "bottom":{"x": 1, "y":10}, "side":{"x": 1, "y":10} },
+    { "name":"yellow_wool"      , "sound":"cloth"   , "top":{"x": 2, "y":10}, "bottom":{"x": 2, "y":10}, "side":{"x": 2, "y":10} },
+    { "name":"blue_wool"        , "sound":"cloth"   , "top":{"x": 1, "y":11}, "bottom":{"x": 1, "y":11}, "side":{"x": 1, "y":11} },
+    { "name":"light_blue_wool"  , "sound":"cloth"   , "top":{"x": 2, "y":11}, "bottom":{"x": 2, "y":11}, "side":{"x": 2, "y":11} },
+    { "name":"purple_wool"      , "sound":"cloth"   , "top":{"x": 1, "y":12}, "bottom":{"x": 1, "y":12}, "side":{"x": 1, "y":12} },
+    { "name":"magenta_wool"     , "sound":"cloth"   , "top":{"x": 2, "y":12}, "bottom":{"x": 2, "y":12}, "side":{"x": 2, "y":12} },
+    { "name":"cyan_wool"        , "sound":"cloth"   , "top":{"x": 1, "y":13}, "bottom":{"x": 1, "y":13}, "side":{"x": 1, "y":13} },
+    { "name":"orange_wool"      , "sound":"cloth"   , "top":{"x": 2, "y":13}, "bottom":{"x": 2, "y":13}, "side":{"x": 2, "y":13} },
+    { "name":"light_gray_wool"  , "sound":"cloth"   , "top":{"x": 1, "y":14}, "bottom":{"x": 1, "y":14}, "side":{"x": 1, "y":14} },
+    { "name":"lava"             , "sound":"none"    , "solid":false, "luminance":15, "top":{"x":13,"y":14}, "bottom":{"x":13,"y":14}, "side":{"x":13,"y":14} }
+  ]
 }

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/Inventory.hpp"
+#include "player/Inventory.hpp"
 
 #include "raylib.h"
 

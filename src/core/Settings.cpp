@@ -7,28 +7,23 @@
 namespace {
     constexpr const char* SETTINGS_PATH = SAVE_DATA_PATH "settings.json";
 
-    const char* filter_json_value(TextureFilterMode mode)
-    {
+    const char* filter_json_value(TextureFilterMode mode) {
         return mode == TextureFilterMode::Bilinear ? "bilinear" : "point";
     }
 
-    TextureFilterMode filter_from_json_value(const std::string& value)
-    {
+    TextureFilterMode filter_from_json_value(const std::string& value) {
         return value == "bilinear" ? TextureFilterMode::Bilinear : TextureFilterMode::Point;
     }
 
-    const char* binding_kind_json_value(BindingKind kind)
-    {
+    const char* binding_kind_json_value(BindingKind kind) {
         return kind == BindingKind::MouseButton ? "mouse" : "key";
     }
 
-    BindingKind binding_kind_from_json_value(const std::string& value)
-    {
+    BindingKind binding_kind_from_json_value(const std::string& value) {
         return value == "mouse" ? BindingKind::MouseButton : BindingKind::Key;
     }
 
-    std::string read_whole_file(const std::string& path)
-    {
+    std::string read_whole_file(const std::string& path) {
         std::ifstream in(path, std::ios::binary);
         if (!in) return {};
         std::ostringstream buffer;
@@ -39,8 +34,7 @@ namespace {
 
 namespace SettingsIO {
 
-Settings load()
-{
+Settings load() {
     Settings settings; // defaults (including default_keybindings()) if anything below fails
 
     std::string text = read_whole_file(SETTINGS_PATH);
@@ -52,6 +46,10 @@ Settings load()
         settings.fog_distance_blocks = static_cast<int>(root["fog_distance_blocks"].as_number(settings.fog_distance_blocks));
         settings.texture_filter = filter_from_json_value(root["texture_filter"].as_string(filter_json_value(settings.texture_filter)));
         settings.target_fps = static_cast<int>(root["target_fps"].as_number(settings.target_fps));
+        settings.master_volume = static_cast<int>(root["master_volume"].as_number(settings.master_volume));
+        settings.effects_volume = static_cast<int>(root["effects_volume"].as_number(settings.effects_volume));
+        settings.ambient_volume = static_cast<int>(root["ambient_volume"].as_number(settings.ambient_volume));
+        settings.music_volume = static_cast<int>(root["music_volume"].as_number(settings.music_volume));
 
         const Json& keybindings_json = root["keybindings"];
         for (size_t i = 0; i < settings.keybindings.size(); ++i) {
@@ -78,6 +76,10 @@ bool save(const Settings& settings)
     out << "  \"fog_distance_blocks\": " << settings.fog_distance_blocks << ",\n";
     out << "  \"texture_filter\": \"" << filter_json_value(settings.texture_filter) << "\",\n";
     out << "  \"target_fps\": " << settings.target_fps << ",\n";
+    out << "  \"master_volume\": " << settings.master_volume << ",\n";
+    out << "  \"effects_volume\": " << settings.effects_volume << ",\n";
+    out << "  \"ambient_volume\": " << settings.ambient_volume << ",\n";
+    out << "  \"music_volume\": " << settings.music_volume << ",\n";
     out << "  \"keybindings\": {\n";
     for (size_t i = 0; i < settings.keybindings.size(); ++i) {
         const Binding& binding = settings.keybindings[i];

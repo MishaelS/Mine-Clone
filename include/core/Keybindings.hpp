@@ -15,8 +15,7 @@ enum class GameAction : uint8_t {
     MoveBackward,
     MoveLeft,
     MoveRight,
-    FlyUp,
-    FlyDown,
+    Jump,
     BreakBlock,
     PlaceBlock,
     Count, // not a real action; sentinel for array sizing
@@ -53,7 +52,7 @@ const char* game_action_json_key(GameAction action);
 const char* game_action_display_name(GameAction action);
 
 // Today's exact hardcoded scheme (GameEngine::update(), before keybindings
-// existed): W/S/A/D + Space/LeftShift for movement, mouse Left/Right for
-// break/place. MoveLeft/MoveRight keep driving `movement.y` (not `.x`) via
+// existed): W/S/A/D + Space to jump, mouse Left/Right for break/place.
+// MoveLeft/MoveRight keep driving `movement.y` (not `.x`) via
 // UpdateCameraPro - unchanged behavior, just named.
 std::array<Binding, static_cast<size_t>(GameAction::Count)> default_keybindings();

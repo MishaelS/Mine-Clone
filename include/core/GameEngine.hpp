@@ -9,15 +9,18 @@
 #include "raylib.h"
 #include "core/GameObject.hpp"
 #include "core/GameState.hpp"
-#include "core/Inventory.hpp"
 #include "core/Settings.hpp"
+#include "player/Inventory.hpp"
+#include "player/DroppedItem.hpp"
+#include "effects/ParticleSystem.hpp"
+#include "audio/AudioSystem.hpp"
 #include "ui/MainMenuScreen.hpp"
 #include "ui/WorldListScreen.hpp"
 #include "ui/WorldCreateScreen.hpp"
 #include "ui/SettingsScreen.hpp"
 #include "ui/PauseMenuScreen.hpp"
 #include "ui/InventoryHud.hpp"
-#include "World.hpp"
+#include "world/World.hpp"
 
 // Owns the window, the main loop, every GameObject in the game, and the
 // voxel World terrain (kept separate from the GameObject list since camera
@@ -45,6 +48,30 @@ private:
     void tick();
 
     void update(float delta_time);
+
+    // One tick's worth of physics (gravity/drag/water buoyancy/ground
+    // collision - DroppedItem::tick_physics()) for every dropped item,
+    // then one pass merging any that ended up close enough together (see
+    // DroppedItem::try_merge()) - called from tick(), not every frame, so
+    // falling items move at Minecraft's own fixed rate.
+    void tick_dropped_items();
+
+    // Every-frame (not tick-locked) part of dropped-item handling: pulls
+    // anything within magnet range toward the player (DroppedItem::
+    // update_magnet_pull(), continuous so the pull tracks smooth camera
+    // motion instead of visibly stepping at 20Hz) and actually collects
+    // whatever's now close enough. Called from update().
+    void update_dropped_items(float delta_time);
+
+    // Q - throws `stack` (already split off the slot it came from, by
+    // take_one_item()) out in front of the player, same forward-and-up
+    // toss real Minecraft gives a manually dropped item. Shared by both Q
+    // paths: the selected hotbar slot while playing normally, and
+    // whatever InventoryHud::update_grid() reports was Q'd while the
+    // inventory screen is open. No-op if there's no world or `stack` is
+    // empty (take_one_item() on an already-empty slot returns one).
+    void spawn_dropped_item(const ItemStack& stack);
+
     void draw();
 
     // Draws/updates whichever menu screen `state` currently is (anything
@@ -81,6 +108,7 @@ private:
 
     GameState state = GameState::MainMenu;
     Settings settings;
+    AudioSystem audio;
     MainMenuScreen main_menu_screen;
     WorldListScreen world_list_screen;
     WorldCreateScreen world_create_screen;
@@ -99,8 +127,8 @@ private:
     // save_player_state().
     std::string current_world_folder;
 
-    // Free-look test camera (WASD + mouse). Swap back to IsoCamera once
-    // testing doesn't need to fly around and inspect the world freely.
+    // Free-look camera (WASD + mouse), currently also representing the
+    // player viewpoint until a dedicated controller is introduced.
     Camera3D camera;
     std::vector<std::unique_ptr<GameObject>> objects;
     std::unique_ptr<World> world;
@@ -109,13 +137,19 @@ private:
     bool show_wireframe = false;     // toggled by F5 - wireframe chunk meshes instead of textured, for inspecting mesh/culling
     float camera_move_speed;         // world units/second; mouse wheel adjusts this
 
-    // Creative-style: unlimited access to every block, no stacks/collecting
-    // - see core/Inventory. Not persisted; reset to default_inventory()
-    // each session. E toggles inventory_hud's picker grid open/closed
-    // (hardcoded, like F3/F4/F5 - not part of the rebindable Keybindings
-    // set); number keys 1-9 set inventory.selected_slot directly.
+    // Vertical-only physics velocity (blocks/second) - gravity/jump, see
+    // update()'s own comment. Horizontal movement has no equivalent
+    // per-frame state of its own; WASD sets that directly every frame.
+    float player_vertical_velocity = 0.0f;
+
+    // Survival-style stacks collected from broken-block drops. E toggles
+    // the storage panel; number keys 1-9 select the active hotbar slot.
+    // WorldSave persists both the hotbar and storage grids.
     Inventory inventory = default_inventory();
     InventoryHud inventory_hud;
+    std::vector<std::unique_ptr<DroppedItem>> dropped_items;
+    ParticleSystem particles;
+    float footstep_particle_distance = 0.0f;
 
     // Counts down to 0 over the first few update() calls right after
     // set_world() places the camera at its spawn orientation (facing
@@ -146,4 +180,15 @@ private:
     // outline it, and independent of the click handlers' own raycasts
     // (which use break/place's own, different, reach distances).
     std::optional<World::RaycastHit> targeted_block;
+
+    // Hold-to-break progress (see break_seconds_required() in the .cpp):
+    // accumulates while BreakBlock is held down and the aimed-at block
+    // hasn't changed since the hold started, resets to 0 whenever it does
+    // (or the button is released) - draw() reads it to show a small
+    // progress indicator. is_breaking is separate from
+    // breaking_progress > 0 so "just started this frame, 0 progress so
+    // far" still counts as actively breaking rather than reading as idle.
+    bool is_breaking = false;
+    int breaking_x = 0, breaking_y = 0, breaking_z = 0;
+    float breaking_progress = 0.0f; // 0..1
 };
