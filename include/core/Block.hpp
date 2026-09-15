@@ -87,6 +87,24 @@ enum class BlockType : uint8_t {
     LightGrayWool,
     Lava,
     ShortGrass,
+    // Matches drops.json's own pre-existing (until now unused) "oak_sapling"
+    // self-drop rule and spruce_sapling/birch_sapling's, kept alongside it
+    // for whenever those get an actual tree shape/block of their own -
+    // only this one is placeable/grows yet. Plantable on Grass/Dirt only
+    // (World::place_block) - see GameEngine's pending_sapling_growth for
+    // the grow-into-a-tree timer.
+    OakSapling,
+
+    // Light sources - matches drops.json's own pre-existing (until now
+    // unused) "torch"/"redstone_torch"/"lit_redstone_torch" entries.
+    // RedstoneTorch is the unlit state (see World::place_block - only
+    // Torch/LitRedstoneTorch are directly placeable; nothing here ever
+    // flips one to the other yet, since there's no redstone-signal system
+    // to drive it - RedstoneTorch exists so breaking a lit one has
+    // somewhere well-defined to return to, same as Furnace/LitFurnace).
+    Torch,
+    RedstoneTorch,
+    LitRedstoneTorch,
     Count, // not a real block; sentinel for table/array sizing
 };
 

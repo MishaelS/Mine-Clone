@@ -895,8 +895,8 @@
       "min_tool_tier": null,
       "drops": [
         {
-          "type": "item",
-          "name": "sapling",
+          "type": "block",
+          "name": "oak_sapling",
           "count_min": 1,
           "count_max": 1,
           "chance": 0.05
@@ -1343,7 +1343,7 @@
       "min_tool_tier": null,
       "drops": [
         {
-          "type": "item",
+          "type": "block",
           "name": "redstone_torch",
           "count_min": 1,
           "count_max": 1,
@@ -1358,11 +1358,12 @@
       "min_tool_tier": null,
       "drops": [
         {
-          "type": "item",
+          "type": "block",
           "name": "redstone_torch",
           "count_min": 1,
           "count_max": 1,
-          "chance": 1.0
+          "chance": 1.0,
+          "note": "Breaking a LIT redstone torch yields the unlit block item, same as Furnace/LitFurnace."
         }
       ]
     },

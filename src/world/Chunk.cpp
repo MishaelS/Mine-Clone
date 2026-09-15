@@ -1051,7 +1051,7 @@ namespace {
         // to touch (ordinary grass/dirt land, or a Hills column below its
         // own stone line) and is a no-op, same as any other vein attempt
         // with nothing to land in.
-        {BlockType::CoalOre,     159, 182, 162, 176, 6, 6},
+        {BlockType::CoalOre,     159, 1882, 162, 176, 6, 6},
         {BlockType::IronOre,     159, 182, 162, 176, 4, 5},
     };
 

@@ -172,6 +172,17 @@ public:
     // True only when the block was actually placed.
     bool place_block(int x, int y, int z, BlockType type);
 
+    // One block of a Structure being grown at runtime (see GameEngine::
+    // update_sapling_growth) - world-space, arbitrary position, unlike
+    // Chunk::set_block()'s chunk-local one StructureGenerator::place()
+    // uses at world-generation time. Same replace rule as that function:
+    // an Air target always accepts it, a Foliage target only when
+    // `allow_foliage_overwrite` is set (StructureReplaceRule::
+    // AirOrFoliage) - anything else silently does nothing, so the caller
+    // doesn't need its own pre-check. No fluid/falling scheduling (unlike
+    // place_block()) - a tree's own blocks never need either.
+    void place_structure_block(int x, int y, int z, BlockType type, bool allow_foliage_overwrite);
+
     // Brings every chunk within config.loaded_radius_chunks/active_radius_chunks chunks of
     // `observer_position` (see the .cpp) up to its correct ChunkState.
     // Async: anything newly in range that isn't generated yet is only

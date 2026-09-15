@@ -34,6 +34,14 @@ struct PendingLeafDecay {
     float remaining_seconds;
 };
 
+// A planted Sapling block (see GameEngine::queue_sapling_growth) waiting
+// to become a tree - one entry per placement, counted down the same way
+// PendingLeafDecay is.
+struct PendingSaplingGrowth {
+    int x, y, z;
+    float remaining_seconds;
+};
+
 // Owns the window, the main loop, every GameObject in the game, and the
 // voxel World terrain (kept separate from the GameObject list since camera
 // interaction with it - aiming, breaking blocks - needs to reach across
@@ -99,6 +107,26 @@ private:
     // actually removing it and rolling its drop, same as a natural break.
     void update_leaf_decay(float delta_time);
 
+    // Called right after a Sapling is successfully placed (World::
+    // place_block already restricts that to Grass/Dirt) - queues it into
+    // pending_sapling_growth with a randomized delay (see
+    // update_sapling_growth()) rather than growing it on the spot.
+    void queue_sapling_growth(int x, int y, int z);
+
+    // Every-frame drain of pending_sapling_growth: counts each entry's own
+    // delay down by delta_time, and once it elapses, re-checks the block
+    // there is still a Sapling (it may have been broken, or something else
+    // placed over it, since queued) before growing an oak tree from it -
+    // make_oak_tree()'s own template (see StructureGenerator, which places
+    // the exact same shape at world-generation time), placed here through
+    // World::set_block_and_rebuild() instead of Chunk::set_block() since
+    // this runs at an arbitrary world position at runtime, not bounded to
+    // one already-open Chunk. If the trunk's column isn't clear (something
+    // built overhead since it was planted), the attempt is deferred and
+    // retried shortly instead of discarded, same as vanilla re-rolling a
+    // blocked sapling on its next random tick.
+    void update_sapling_growth(float delta_time);
+
     // Called right after any block is removed - ShortGrass (and anything
     // else non-solid that needs ground under it) can't stay floating in
     // place the way real Minecraft's own tufts/flowers can't either: if
@@ -113,8 +141,8 @@ private:
     // against PlayerController's own freshly-computed contact flags (see
     // its is_in_lava()/is_touching_cactus()/is_head_submerged()/
     // is_suffocating()) plus the void-Y check against camera.position
-    // itself. Also advances player_health's own invulnerability/regen
-    // clock and, once dead, counts down to respawn_player(). No-op outside
+    // itself. Also advances player_health's own invulnerability clock
+    // and, once dead, counts down to respawn_player(). No-op outside
     // Survival - Creative is invulnerable, same as real Minecraft, and
     // player_health simply never leaves full health there.
     void update_player_damage(float delta_time);
@@ -267,6 +295,7 @@ private:
     InventoryHud inventory_hud;
     std::vector<std::unique_ptr<DroppedItem>> dropped_items;
     std::vector<PendingLeafDecay> pending_leaf_decay;
+    std::vector<PendingSaplingGrowth> pending_sapling_growth;
     ParticleSystem particles;
     float footstep_particle_distance = 0.0f;
 

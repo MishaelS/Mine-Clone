@@ -186,6 +186,10 @@ namespace {
         {"light_gray_wool"  , BlockType::LightGrayWool   },
         {"lava"             , BlockType::Lava            },
         {"short_grass"      , BlockType::ShortGrass      },
+        {"oak_sapling"      , BlockType::OakSapling      },
+        {"torch"            , BlockType::Torch           },
+        {"redstone_torch"   , BlockType::RedstoneTorch   },
+        {"lit_redstone_torch", BlockType::LitRedstoneTorch},
     };
 
     BlockSoundGroup sound_group_from_name(const std::string& name) {

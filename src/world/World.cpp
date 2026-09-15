@@ -633,10 +633,28 @@ bool World::place_block(int x, int y, int z, BlockType type)
     if (chunk_at(floor_div(x, CHUNK_SIZE), floor_div(z, CHUNK_SIZE)) == nullptr) return false;
     if (type == BlockType::Air || !get_block_properties(get_block(x, y, z)).replaceable) return false;
     if (type == BlockType::ShortGrass && get_block(x, y - 1, z) != BlockType::Grass) return false;
+    if (type == BlockType::OakSapling) {
+        BlockType below = get_block(x, y - 1, z);
+        if (below != BlockType::Grass && below != BlockType::Dirt) return false;
+    }
+    // Floor-mounted only (no wall-mounted torches yet) - needs a solid
+    // block directly underneath, any kind, unlike OakSapling's narrower
+    // Grass/Dirt requirement above.
+    if ((type == BlockType::Torch || type == BlockType::RedstoneTorch || type == BlockType::LitRedstoneTorch) &&
+        !get_block_properties(get_block(x, y - 1, z)).solid) {
+        return false;
+    }
     set_block_and_rebuild(x, y, z, type);
     schedule_fluid_neighbors(x, y, z);
     schedule_falling_check(x, y, z);
     return true;
+}
+
+void World::place_structure_block(int x, int y, int z, BlockType type, bool allow_foliage_overwrite)
+{
+    BlockType existing = get_block(x, y, z);
+    bool can_replace = existing == BlockType::Air || (allow_foliage_overwrite && existing == BlockType::Foliage);
+    if (can_replace) set_block_and_rebuild(x, y, z, type);
 }
 
 void World::set_block_and_rebuild(int x, int y, int z, BlockType type)

@@ -494,6 +494,26 @@ void block_icon(Rectangle bounds, BlockType type)
 {
     if (type == BlockType::Air) return;
 
+    // A torch's in-world (terrain.png) cross sprite is mostly transparent
+    // flame/pole at icon scale - same as real Minecraft, these three get a
+    // dedicated flat items.png icon instead (drawn the same way
+    // item_icon() draws a real ItemType) rather than the Cross-shape
+    // render below. Tile coordinates given directly, not read off the
+    // atlas image.
+    constexpr int ICON_TILE_PIXELS = 16;
+    Rectangle items_png_source{};
+    bool use_items_png_icon = true;
+    switch (type) {
+        case BlockType::Torch:            items_png_source = {13 * ICON_TILE_PIXELS, 3 * ICON_TILE_PIXELS, ICON_TILE_PIXELS, ICON_TILE_PIXELS}; break;
+        case BlockType::RedstoneTorch:     items_png_source = { 6 * ICON_TILE_PIXELS, 6 * ICON_TILE_PIXELS, ICON_TILE_PIXELS, ICON_TILE_PIXELS}; break;
+        case BlockType::LitRedstoneTorch:  items_png_source = { 6 * ICON_TILE_PIXELS, 7 * ICON_TILE_PIXELS, ICON_TILE_PIXELS, ICON_TILE_PIXELS}; break;
+        default: use_items_png_icon = false; break;
+    }
+    if (use_items_png_icon) {
+        DrawTexturePro(get_item_atlas_texture(), items_png_source, bounds, {0.0f, 0.0f}, 0.0f, WHITE);
+        return;
+    }
+
     const Texture2D& atlas = get_block_atlas_texture();
     const BlockProperties& properties = get_block_properties(type);
 

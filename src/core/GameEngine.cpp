@@ -13,6 +13,7 @@
 #include "core/WorldSave.hpp"
 #include "rendering/Skybox.hpp"
 #include "ui/DebugOverlay.hpp"
+#include "worldgen/Structure.hpp"
 
 #include "raymath.h"
 #include "rlgl.h"
@@ -460,6 +461,75 @@ void GameEngine::update_leaf_decay(float delta_time)
     }
 }
 
+namespace {
+    constexpr float SAPLING_GROW_MIN_SECONDS = 30.0f;
+    constexpr float SAPLING_GROW_MAX_SECONDS = 90.0f;
+    // How long a blocked attempt (something built over the trunk's own
+    // column since it was planted) waits before trying again - much
+    // shorter than the grow delay itself, same "keep polling, cheaply"
+    // idea as a blocked vanilla sapling re-rolling every random tick
+    // instead of just giving up.
+    constexpr float SAPLING_RETRY_SECONDS = 5.0f;
+    constexpr int SAPLING_TRUNK_HEIGHT_MIN = 4;
+    constexpr int SAPLING_TRUNK_HEIGHT_MAX = 6;
+}
+
+void GameEngine::queue_sapling_growth(int x, int y, int z)
+{
+    float delay = static_cast<float>(GetRandomValue(
+        static_cast<int>(SAPLING_GROW_MIN_SECONDS), static_cast<int>(SAPLING_GROW_MAX_SECONDS)));
+    pending_sapling_growth.push_back({x, y, z, delay});
+}
+
+void GameEngine::update_sapling_growth(float delta_time)
+{
+    if (!world) { pending_sapling_growth.clear(); return; }
+
+    for (size_t i = 0; i < pending_sapling_growth.size();) {
+        pending_sapling_growth[i].remaining_seconds -= delta_time;
+        if (pending_sapling_growth[i].remaining_seconds > 0.0f) { ++i; continue; }
+
+        PendingSaplingGrowth entry = pending_sapling_growth[i];
+        pending_sapling_growth[i] = pending_sapling_growth.back();
+        pending_sapling_growth.pop_back();
+
+        // Re-validate - it could have been broken, or something else
+        // placed over it, since it was queued.
+        if (world->get_block(entry.x, entry.y, entry.z) != BlockType::OakSapling) continue;
+
+        int trunk_height = GetRandomValue(SAPLING_TRUNK_HEIGHT_MIN, SAPLING_TRUNK_HEIGHT_MAX);
+        bool trunk_clear = true;
+        for (int y = 1; y <= trunk_height; ++y) {
+            BlockType existing = world->get_block(entry.x, entry.y + y, entry.z);
+            if (existing != BlockType::Air && existing != BlockType::Foliage) { trunk_clear = false; break; }
+        }
+        if (!trunk_clear) {
+            pending_sapling_growth.push_back({entry.x, entry.y, entry.z, SAPLING_RETRY_SECONDS});
+            continue;
+        }
+
+        // Clear the sapling itself first (no drop/particles - it's turning
+        // into the tree, not being destroyed) so the origin block (the
+        // bottom trunk log, landing exactly on the sapling's own position)
+        // finds Air like every other block placed below, instead of
+        // World::place_structure_block() needing its own OakSapling
+        // special case.
+        world->break_block(entry.x, entry.y, entry.z);
+
+        // Same template make_oak_tree()/StructureGenerator place at
+        // world-generation time, just placed here one world-space block at
+        // a time via World::place_structure_block() instead of
+        // Chunk::set_block() - this runs at an arbitrary runtime position,
+        // not bounded to one already-open Chunk the way generation is.
+        Structure tree = make_oak_tree(trunk_height);
+        for (const StructureBlock& block : tree.get_blocks()) {
+            world->place_structure_block(entry.x + block.x, entry.y + block.y, entry.z + block.z,
+                block.type, block.replace_rule == StructureReplaceRule::AirOrFoliage);
+        }
+        // Not ++i - pop_back() just moved a different element into slot i.
+    }
+}
+
 void GameEngine::spill_chest_if_any(int x, int y, int z)
 {
     if (!world) return;
@@ -735,6 +805,7 @@ void GameEngine::update(float delta_time)
 
     update_dropped_items(delta_time);
     update_leaf_decay(delta_time);
+    update_sapling_growth(delta_time);
     particles.update(delta_time, world.get());
 
     // While the inventory grid is open, it owns input instead of the
@@ -1018,6 +1089,7 @@ void GameEngine::update(float delta_time)
                     if (block_is_directional(selected.block)) {
                         world->set_block_orientation(place_x, place_y, place_z, direction_facing_player(aim));
                     }
+                    if (selected.block == BlockType::OakSapling) queue_sapling_growth(place_x, place_y, place_z);
                     if (current_game_mode == GameMode::Survival && --selected.count <= 0) selected.clear();
                 }
             }

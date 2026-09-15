@@ -2,6 +2,10 @@
   "blocks": [
     { "name":"grass"            , "sound":"grass"   , "top":{"x": 0, "y": 0,"color":[124,189,107]}, "bottom":{"x": 2, "y": 0}, "side":{"x": 3, "y": 0} },
     { "name":"short_grass"      , "sound":"grass"   , "solid":false, "transparent":true, "cutout":true, "replaceable":true, "render_shape":"cross", "hardness":0.1, "density":0.1, "top":{"x":7,"y":2,"color":[124,189,107]}, "bottom":{"x":7,"y":2,"color":[124,189,107]}, "side":{"x":7,"y":2,"color":[124,189,107]} },
+    { "name":"oak_sapling"      , "sound":"grass"   , "solid":false, "transparent":true, "cutout":true, "replaceable":true, "render_shape":"cross", "hardness":0.0, "density":0.1, "top":{"x":15,"y":0}, "bottom":{"x":15,"y":0}, "side":{"x":15,"y":0} },
+    { "name":"torch"            , "sound":"wood"    , "solid":false, "transparent":true, "cutout":true, "render_shape":"cross", "hardness":0.0, "density":0.1, "luminance":14, "top":{"x":0,"y":5}, "bottom":{"x":0,"y":5}, "side":{"x":0,"y":5} },
+    { "name":"redstone_torch"   , "sound":"wood"    , "solid":false, "transparent":true, "cutout":true, "render_shape":"cross", "hardness":0.0, "density":0.1, "top":{"x":3,"y":7}, "bottom":{"x":3,"y":7}, "side":{"x":3,"y":7} },
+    { "name":"lit_redstone_torch", "sound":"wood"  , "solid":false, "transparent":true, "cutout":true, "render_shape":"cross", "hardness":0.0, "density":0.1, "luminance":7, "top":{"x":3,"y":6}, "bottom":{"x":3,"y":6}, "side":{"x":3,"y":6} },
     { "name":"dirt"             , "sound":"dirt", "hardness":0.5    , "top":{"x": 2, "y": 0}, "bottom":{"x": 2, "y": 0}, "side":{"x": 2,"y": 0} },
     { "name":"foliage"          , "sound":"foliage" , "transparent":true, "cutout":true, "cull_same_faces":false, "top":{"x": 4, "y": 3,"color":[82,180,82]}, "bottom":{"x": 4, "y": 3,"color":[82,180,82]}, "side":{"x": 4, "y": 3,"color":[82,180,82]} },
     { "name":"oak_log"          , "sound":"wood", "hardness":2.0    , "top":{"x": 5, "y": 1}, "bottom":{"x": 5, "y": 1}, "side":{"x": 4, "y": 1} },
