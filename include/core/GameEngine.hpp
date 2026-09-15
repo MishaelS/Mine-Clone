@@ -29,9 +29,18 @@
 // GameEngine::check_leaf_decay_near) - not removed on the spot, just
 // queued with a random delay so a felled tree's canopy visibly thins out
 // over a few seconds instead of vanishing all at once in a single frame.
+// Counted down in ticks (see update_leaf_decay()), not real time, same as
+// every other world-simulation timer here - so it (like the chunk/fluid/
+// falling-block/dropped-item simulation tick() already drives) keeps
+// advancing at Minecraft's own steady 20/second regardless of the render
+// frame rate, and keeps running even while the inventory screen owns
+// input (see update()'s own early-return once the grid is open - it
+// happens after tick()'s own dispatch in run(), not inside it, so nothing
+// here is gated on the grid being closed the way player movement/camera
+// control is).
 struct PendingLeafDecay {
     int x, y, z;
-    float remaining_seconds;
+    int remaining_ticks;
 };
 
 // A planted Sapling block (see GameEngine::queue_sapling_growth) waiting
@@ -39,7 +48,7 @@ struct PendingLeafDecay {
 // PendingLeafDecay is.
 struct PendingSaplingGrowth {
     int x, y, z;
-    float remaining_seconds;
+    int remaining_ticks;
 };
 
 // Owns the window, the main loop, every GameObject in the game, and the
@@ -62,9 +71,16 @@ public:
 private:
     // Fixed-rate game-logic step, called exactly 20 times per second of real
     // time regardless of the render frame rate (see run()) - Minecraft's own
-    // tick rate. Nothing hooks into it yet; it's the clock future world
-    // simulation (day/night, scheduled block updates, random ticks) will run
-    // on, same role Minecraft's tick serves.
+    // tick rate. Every piece of world simulation that isn't purely visual
+    // hangs off this clock: chunk streaming, fluids, falling blocks,
+    // dropped-item physics, leaf decay, and sapling growth. Called
+    // unconditionally from run() whenever state == GameState::Playing,
+    // independent of update()'s own early-return while the inventory
+    // screen is open - so the world keeps existing (chunks load, water
+    // flows, a planted sapling keeps counting down) even while the player
+    // is just browsing their inventory, not merely while they're actively
+    // playing. Day/night and scheduled block updates/random ticks are
+    // still future work, but would hook in here the same way.
     void tick();
 
     void update(float delta_time);
@@ -100,12 +116,13 @@ private:
     // frame.
     void check_leaf_decay_near(int log_x, int log_y, int log_z);
 
-    // Every-frame drain of pending_leaf_decay: counts each entry's own
-    // delay down by delta_time, and once it elapses, re-checks it's still a
-    // disconnected leaf (state may have changed since it was queued - a log
-    // placed back nearby, or it already came down another way) before
-    // actually removing it and rolling its drop, same as a natural break.
-    void update_leaf_decay(float delta_time);
+    // Every-tick (see tick()) drain of pending_leaf_decay: counts each
+    // entry's own delay down by one tick, and once it elapses, re-checks
+    // it's still a disconnected leaf (state may have changed since it was
+    // queued - a log placed back nearby, or it already came down another
+    // way) before actually removing it and rolling its drop, same as a
+    // natural break.
+    void update_leaf_decay();
 
     // Called right after a Sapling is successfully placed (World::
     // place_block already restricts that to Grass/Dirt) - queues it into
@@ -113,19 +130,20 @@ private:
     // update_sapling_growth()) rather than growing it on the spot.
     void queue_sapling_growth(int x, int y, int z);
 
-    // Every-frame drain of pending_sapling_growth: counts each entry's own
-    // delay down by delta_time, and once it elapses, re-checks the block
-    // there is still a Sapling (it may have been broken, or something else
-    // placed over it, since queued) before growing an oak tree from it -
-    // make_oak_tree()'s own template (see StructureGenerator, which places
-    // the exact same shape at world-generation time), placed here through
-    // World::set_block_and_rebuild() instead of Chunk::set_block() since
-    // this runs at an arbitrary world position at runtime, not bounded to
-    // one already-open Chunk. If the trunk's column isn't clear (something
-    // built overhead since it was planted), the attempt is deferred and
-    // retried shortly instead of discarded, same as vanilla re-rolling a
-    // blocked sapling on its next random tick.
-    void update_sapling_growth(float delta_time);
+    // Every-tick (see tick()) drain of pending_sapling_growth: counts each
+    // entry's own delay down by one tick, and once it elapses, re-checks
+    // the block there is still a Sapling (it may have been broken, or
+    // something else placed over it, since queued) before growing an oak
+    // tree from it - make_oak_tree()'s own template (see
+    // StructureGenerator, which places the exact same shape at world-
+    // generation time), placed here through World::place_structure_block()
+    // instead of Chunk::set_block() since this runs at an arbitrary world
+    // position at runtime, not bounded to one already-open Chunk. If the
+    // trunk's column isn't clear (something built overhead since it was
+    // planted), the attempt is deferred and retried shortly instead of
+    // discarded, same as vanilla re-rolling a blocked sapling on its next
+    // random tick.
+    void update_sapling_growth();
 
     // Called right after any block is removed - ShortGrass (and anything
     // else non-solid that needs ground under it) can't stay floating in

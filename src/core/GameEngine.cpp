@@ -193,9 +193,10 @@ namespace {
     // A felled tree's leaves don't vanish in the same frame the log comes
     // down - each one gets its own random delay in this range before it's
     // actually removed, so the canopy visibly thins out over a couple of
-    // seconds instead of blinking away all at once.
-    constexpr float LEAF_DECAY_MIN_DELAY_SECONDS = 1.0f;
-    constexpr float LEAF_DECAY_MAX_DELAY_SECONDS = 4.0f;
+    // seconds instead of blinking away all at once. In ticks (20/second),
+    // not seconds - see PendingLeafDecay's own comment on why.
+    constexpr int LEAF_DECAY_MIN_DELAY_TICKS = 1 * TICKS_PER_SECOND;
+    constexpr int LEAF_DECAY_MAX_DELAY_TICKS = 4 * TICKS_PER_SECOND;
 }
 
 GameEngine::GameEngine(int screen_width, int screen_height, const char* title)
@@ -314,10 +315,13 @@ void GameEngine::set_world(std::unique_ptr<World> new_world)
 void GameEngine::tick()
 {
     ++game_tick;
-    // Chunk loading/unloading is the first real occupant of this clock -
-    // see World::update_chunk_states. Everything else (day/night,
-    // scheduled block updates, random ticks) hooks in the same way, from
-    // here.
+    // Every piece of world simulation lives off this clock now - chunk
+    // streaming, fluids, falling blocks, dropped-item physics, leaf decay,
+    // sapling growth. Day/night and scheduled block updates/random ticks
+    // are still future work, but would hook in here the same way. Called
+    // unconditionally from run() regardless of what update() is doing this
+    // frame (including the inventory screen being open - see its own
+    // early-return), so none of this ever actually pauses.
     if (world) {
         // Picks up a render/fog distance change made from the pause menu's
         // Settings screen immediately, rather than only the next time a
@@ -329,6 +333,8 @@ void GameEngine::tick()
         world->update_falling_blocks();
     }
     tick_dropped_items();
+    update_leaf_decay();
+    update_sapling_growth();
 }
 
 void GameEngine::tick_dropped_items()
@@ -416,22 +422,20 @@ void GameEngine::check_leaf_decay_near(int log_x, int log_y, int log_z)
                 }
                 if (already_queued) continue;
 
-                float delay = static_cast<float>(GetRandomValue(
-                    static_cast<int>(LEAF_DECAY_MIN_DELAY_SECONDS * 100.0f),
-                    static_cast<int>(LEAF_DECAY_MAX_DELAY_SECONDS * 100.0f))) / 100.0f;
-                pending_leaf_decay.push_back({x, y, z, delay});
+                int delay_ticks = GetRandomValue(LEAF_DECAY_MIN_DELAY_TICKS, LEAF_DECAY_MAX_DELAY_TICKS);
+                pending_leaf_decay.push_back({x, y, z, delay_ticks});
             }
         }
     }
 }
 
-void GameEngine::update_leaf_decay(float delta_time)
+void GameEngine::update_leaf_decay()
 {
     if (!world) { pending_leaf_decay.clear(); return; }
 
     for (size_t i = 0; i < pending_leaf_decay.size();) {
-        pending_leaf_decay[i].remaining_seconds -= delta_time;
-        if (pending_leaf_decay[i].remaining_seconds > 0.0f) { ++i; continue; }
+        --pending_leaf_decay[i].remaining_ticks;
+        if (pending_leaf_decay[i].remaining_ticks > 0) { ++i; continue; }
 
         PendingLeafDecay entry = pending_leaf_decay[i];
         pending_leaf_decay[i] = pending_leaf_decay.back();
@@ -462,32 +466,33 @@ void GameEngine::update_leaf_decay(float delta_time)
 }
 
 namespace {
-    constexpr float SAPLING_GROW_MIN_SECONDS = 30.0f;
-    constexpr float SAPLING_GROW_MAX_SECONDS = 90.0f;
+    // In ticks (20/second), not seconds - see PendingSaplingGrowth's own
+    // comment on why.
+    constexpr int SAPLING_GROW_MIN_DELAY_TICKS = 30 * TICKS_PER_SECOND;
+    constexpr int SAPLING_GROW_MAX_DELAY_TICKS = 90 * TICKS_PER_SECOND;
     // How long a blocked attempt (something built over the trunk's own
     // column since it was planted) waits before trying again - much
     // shorter than the grow delay itself, same "keep polling, cheaply"
     // idea as a blocked vanilla sapling re-rolling every random tick
     // instead of just giving up.
-    constexpr float SAPLING_RETRY_SECONDS = 5.0f;
+    constexpr int SAPLING_RETRY_DELAY_TICKS = 5 * TICKS_PER_SECOND;
     constexpr int SAPLING_TRUNK_HEIGHT_MIN = 4;
     constexpr int SAPLING_TRUNK_HEIGHT_MAX = 6;
 }
 
 void GameEngine::queue_sapling_growth(int x, int y, int z)
 {
-    float delay = static_cast<float>(GetRandomValue(
-        static_cast<int>(SAPLING_GROW_MIN_SECONDS), static_cast<int>(SAPLING_GROW_MAX_SECONDS)));
-    pending_sapling_growth.push_back({x, y, z, delay});
+    int delay_ticks = GetRandomValue(SAPLING_GROW_MIN_DELAY_TICKS, SAPLING_GROW_MAX_DELAY_TICKS);
+    pending_sapling_growth.push_back({x, y, z, delay_ticks});
 }
 
-void GameEngine::update_sapling_growth(float delta_time)
+void GameEngine::update_sapling_growth()
 {
     if (!world) { pending_sapling_growth.clear(); return; }
 
     for (size_t i = 0; i < pending_sapling_growth.size();) {
-        pending_sapling_growth[i].remaining_seconds -= delta_time;
-        if (pending_sapling_growth[i].remaining_seconds > 0.0f) { ++i; continue; }
+        --pending_sapling_growth[i].remaining_ticks;
+        if (pending_sapling_growth[i].remaining_ticks > 0) { ++i; continue; }
 
         PendingSaplingGrowth entry = pending_sapling_growth[i];
         pending_sapling_growth[i] = pending_sapling_growth.back();
@@ -504,7 +509,7 @@ void GameEngine::update_sapling_growth(float delta_time)
             if (existing != BlockType::Air && existing != BlockType::Foliage) { trunk_clear = false; break; }
         }
         if (!trunk_clear) {
-            pending_sapling_growth.push_back({entry.x, entry.y, entry.z, SAPLING_RETRY_SECONDS});
+            pending_sapling_growth.push_back({entry.x, entry.y, entry.z, SAPLING_RETRY_DELAY_TICKS});
             continue;
         }
 
@@ -744,8 +749,7 @@ void GameEngine::update(float delta_time)
 
     // Inventory: E toggles the storage panel open/closed (hardcoded, like
     // F3/F4/F5 below - not one of Settings' rebindable actions), freeing/
-    // recapturing the cursor to match. Number keys pick a hotbar slot
-    // directly, only while the grid isn't stealing input.
+    // recapturing the cursor to match.
     if (world && IsKeyPressed(KEY_E)) {
         inventory_hud.toggle(inventory);
         if (inventory_hud.is_open()) EnableCursor(); else DisableCursor();
@@ -757,15 +761,22 @@ void GameEngine::update(float delta_time)
         enter_state(GameState::Paused);
         return;
     }
+    // Number keys pick a hotbar slot directly - unlike Q/wheel-scroll
+    // below, this works even while the inventory grid is open (including
+    // mid-drag, with a stack already picked up onto the cursor): it only
+    // ever touches inventory.selected_slot, never InventoryHud's own
+    // carried_stack, so there's nothing for the grid to steal this from.
+    for (int slot = 0; slot < HOTBAR_SIZE; ++slot) {
+        if (IsKeyPressed(KEY_ONE + slot)) inventory.selected_slot = slot;
+    }
     if (!inventory_hud.is_open()) {
-        for (int slot = 0; slot < HOTBAR_SIZE; ++slot) {
-            if (IsKeyPressed(KEY_ONE + slot)) inventory.selected_slot = slot;
-        }
         // Mouse wheel also cycles the selected hotbar slot, same "scroll
         // up/away subtracts" convention as every other scrollable list in
         // this project (WorldListScreen, SettingsScreen's Controls grid,
         // InventoryHud's own creative-page scroll) - and wraps around at
-        // either end instead of clamping, same as vanilla's hotbar.
+        // either end instead of clamping, same as vanilla's hotbar. Stays
+        // gated to the closed grid, unlike the number keys above - open,
+        // the wheel already belongs to the creative page scroll instead.
         int wheel_steps = static_cast<int>(std::round(GetMouseWheelMove()));
         if (wheel_steps != 0) {
             inventory.selected_slot = ((inventory.selected_slot - wheel_steps) % HOTBAR_SIZE + HOTBAR_SIZE) % HOTBAR_SIZE;
@@ -803,9 +814,13 @@ void GameEngine::update(float delta_time)
     }
     if (IsKeyPressed(KEY_F6)) show_wireframe = !show_wireframe;
 
+    // update_leaf_decay()/update_sapling_growth() moved to tick() - they're
+    // world simulation (see PendingLeafDecay/PendingSaplingGrowth's own
+    // comments), not per-frame visual polish, so they run on Minecraft's
+    // fixed 20/second clock instead of this variable frame rate one, the
+    // same as dropped-item physics (tick_dropped_items(), also tick()) vs.
+    // just its magnet-pull tracking staying here in update_dropped_items().
     update_dropped_items(delta_time);
-    update_leaf_decay(delta_time);
-    update_sapling_growth(delta_time);
     particles.update(delta_time, world.get());
 
     // While the inventory grid is open, it owns input instead of the
