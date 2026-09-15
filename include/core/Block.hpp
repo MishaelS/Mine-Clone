@@ -91,8 +91,8 @@ enum class BlockType : uint8_t {
     // self-drop rule and spruce_sapling/birch_sapling's, kept alongside it
     // for whenever those get an actual tree shape/block of their own -
     // only this one is placeable/grows yet. Plantable on Grass/Dirt only
-    // (World::place_block) - see GameEngine's pending_sapling_growth for
-    // the grow-into-a-tree timer.
+    // (World::place_block) - see GameEngine::update_random_ticks()/
+    // update_sapling_growth() for the random-tick grow-into-a-tree roll.
     OakSapling,
 
     // Light sources - matches drops.json's own pre-existing (until now

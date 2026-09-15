@@ -7,9 +7,10 @@
 #include <string>
 
 // Every gameplay action a player can rebind in the Settings screen - the
-// free-look camera's own movement plus the two mouse-button actions
-// (break/place). Debug toggles (F3/F4/F5) are deliberately not here: they
-// stay hardcoded in GameEngine::update(), not exposed for rebinding.
+// free-look camera's own movement, the two mouse-button actions (break/
+// place), and a few single-key UI actions (inventory/drop/chat). Debug
+// toggles (F3/F4/F5/F6) are deliberately not here: they stay hardcoded in
+// GameEngine::update(), not exposed for rebinding.
 enum class GameAction : uint8_t {
     MoveForward,
     MoveBackward,
@@ -20,6 +21,9 @@ enum class GameAction : uint8_t {
     Sprint,
     BreakBlock,
     PlaceBlock,
+    ToggleInventory,
+    DropItem,
+    OpenChat,
     Count, // not a real action; sentinel for array sizing
 };
 
@@ -53,7 +57,7 @@ const char* game_action_json_key(GameAction action);
 // Russian label for this action's row in the Settings screen.
 const char* game_action_display_name(GameAction action, bool english = false);
 
-// W/S/A/D + Space/Shift/Ctrl, mouse Left/Right for break/place.
-// MoveLeft/MoveRight keep driving `movement.y` (not `.x`) via
-// UpdateCameraPro - unchanged behavior, just named.
+// W/S/A/D + Space/Shift/Ctrl, mouse Left/Right for break/place, E/Q/T for
+// inventory/drop/chat. MoveLeft/MoveRight keep driving `movement.y` (not
+// `.x`) via UpdateCameraPro - unchanged behavior, just named.
 std::array<Binding, static_cast<size_t>(GameAction::Count)> default_keybindings();

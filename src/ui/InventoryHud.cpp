@@ -331,7 +331,7 @@ void InventoryHud::draw_hearts(int health, int max_health) const
     }
 }
 
-std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory, GameMode game_mode, World* world)
+std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory, GameMode game_mode, World* world, const Binding& drop_binding)
 {
     tooltip.clear();
 
@@ -684,13 +684,13 @@ std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory, GameMod
     // Draw as the final inventory layer so later block slots cannot cover it.
     tooltip.draw();
 
-    // Q drops one item out of whatever's hovered, Shift+Q the whole stack -
-    // only while nothing's actively being dragged (carried_stack empty),
-    // same as real Minecraft's own inventory screen gates it. GameEngine
-    // turns the returned stack into an actual DroppedItem thrown out in
-    // front of the player; this class has no notion of world position to
-    // spawn one itself.
-    if (hovered_slot && carried_stack.empty() && !hovered_slot->empty() && IsKeyPressed(KEY_Q)) {
+    // drop_binding drops one item out of whatever's hovered, Shift+it the
+    // whole stack - only while nothing's actively being dragged
+    // (carried_stack empty), same as real Minecraft's own inventory screen
+    // gates it. GameEngine turns the returned stack into an actual
+    // DroppedItem thrown out in front of the player; this class has no
+    // notion of world position to spawn one itself.
+    if (hovered_slot && carried_stack.empty() && !hovered_slot->empty() && binding_pressed(drop_binding)) {
         if (IsKeyDown(KEY_LEFT_SHIFT)) {
             dropped = *hovered_slot;
             hovered_slot->clear();

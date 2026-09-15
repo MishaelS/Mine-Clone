@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Block.hpp"
+#include "core/Keybindings.hpp"
 #include "player/Inventory.hpp"
 #include "ui/Widgets.hpp"
 
@@ -59,15 +60,18 @@ public:
     // Creative shows its paged unlimited block catalog. Survival draws
     // storage + mirrored hotbar and implements vanilla-style left/right
     // click, half stacks, Shift quick-move, double-click gather, number-key
-    // swaps and Q/Shift+Q drops. GameEngine spawns the returned DroppedItem.
-    // Inventory/Workbench also get a real crafting grid (see Recipe.hpp).
-    // Chest gets its own 27-slot storage, read from `world` via
-    // World::chest_inventory() at whatever position open_container() was
-    // last called with - `world` may be null only in states this is never
+    // swaps and drop_binding/Shift+drop_binding drops (GameAction::DropItem
+    // - Q by default, rebindable in Settings, so this must be told which
+    // physical key/button that resolves to rather than reading KEY_Q
+    // itself). GameEngine spawns the returned DroppedItem. Inventory/
+    // Workbench also get a real crafting grid (see Recipe.hpp). Chest gets
+    // its own 27-slot storage, read from `world` via World::
+    // chest_inventory() at whatever position open_container() was last
+    // called with - `world` may be null only in states this is never
     // actually called from (chest slots just render empty then). Furnace's
     // own input/fuel/output slots are still pure background decoration -
     // this project has no smelting simulation yet.
-    std::optional<ItemStack> update_grid(Inventory& inventory, GameMode game_mode, World* world);
+    std::optional<ItemStack> update_grid(Inventory& inventory, GameMode game_mode, World* world, const Binding& drop_binding);
 
 private:
     bool open = false;

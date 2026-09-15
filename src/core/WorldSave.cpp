@@ -253,7 +253,8 @@ namespace WorldSave {
         }
         out << "],\n";
         out << "  \"selected_slot\": " << state.inventory.selected_slot << ",\n";
-        out << "  \"health\": " << state.health << "\n";
+        out << "  \"health\": " << state.health << ",\n";
+        out << "  \"game_tick\": " << state.game_tick << "\n";
         out << "}\n";
 
         return static_cast<bool>(out);
@@ -301,6 +302,11 @@ namespace WorldSave {
             // health (20 - PlayerHealth::MAX_HEALTH, not included here just
             // for this one constant - see the header's own comment).
             state.health = std::clamp(static_cast<int>(root["health"].as_number(20.0)), 0, 20);
+
+            // Missing (a save from before day/night existed) defaults to 0
+            // (dawn, day 0) via as_number()'s own fallback.
+            double game_tick = root["game_tick"].as_number(0.0);
+            state.game_tick = game_tick > 0.0 ? static_cast<uint64_t>(game_tick) : 0;
 
             return state;
         } catch (const std::exception&) {

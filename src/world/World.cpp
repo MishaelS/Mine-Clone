@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <limits>
 #include <mutex>
+#include <set>
 #include <shared_mutex>
 #include <utility>
 #include <vector>
@@ -359,6 +360,7 @@ void World::draw_opaque(const Camera3D& camera) const
     // to be seen *through* it (a dropped item sitting underwater, say),
     // not just the opaque terrain drawn here.
     set_chunk_water_pass(false);
+    set_chunk_dynamic_entity_pass(false);
     for (const Chunk* chunk : compute_visible_chunks(camera)) {
         chunk->draw();
     }
@@ -391,6 +393,7 @@ void World::draw_translucent(const Camera3D& camera) const
     // call instead.
     BeginBlendMode(BLEND_ALPHA);
     rlDisableDepthMask();
+    set_chunk_dynamic_entity_pass(false);
 
     // Every see-through layer, from every visible chunk, in one single
     // flat list - every distinct transparent BlockType a chunk has
@@ -512,6 +515,37 @@ int World::get_light(int x, int y, int z) const
     if (chunk == nullptr) return MAX_LIGHT; // edge of the loaded world
 
     return chunk->get_light(x - chunk_x * CHUNK_SIZE, y - MIN_WORLD_Y, z - chunk_z * CHUNK_SIZE);
+}
+
+int World::get_sky_light(int x, int y, int z) const
+{
+    if (y < MIN_WORLD_Y || y >= MIN_WORLD_Y + CHUNK_HEIGHT) return MAX_LIGHT; // above/below the world
+
+    int chunk_x = floor_div(x, CHUNK_SIZE);
+    int chunk_z = floor_div(z, CHUNK_SIZE);
+    const Chunk* chunk = chunk_at(chunk_x, chunk_z);
+    if (chunk == nullptr) return MAX_LIGHT; // edge of the loaded world
+
+    return chunk->get_sky_light(x - chunk_x * CHUNK_SIZE, y - MIN_WORLD_Y, z - chunk_z * CHUNK_SIZE);
+}
+
+int World::get_block_light(int x, int y, int z) const
+{
+    if (y < MIN_WORLD_Y || y >= MIN_WORLD_Y + CHUNK_HEIGHT) return 0; // above/below the world - no block light source out there
+
+    int chunk_x = floor_div(x, CHUNK_SIZE);
+    int chunk_z = floor_div(z, CHUNK_SIZE);
+    const Chunk* chunk = chunk_at(chunk_x, chunk_z);
+    if (chunk == nullptr) return 0; // edge of the loaded world
+
+    return chunk->get_block_light(x - chunk_x * CHUNK_SIZE, y - MIN_WORLD_Y, z - chunk_z * CHUNK_SIZE);
+}
+
+int World::get_effective_light(int x, int y, int z, float sky_light_factor) const
+{
+    int block = get_block_light(x, y, z);
+    int sky = static_cast<int>(std::round(get_sky_light(x, y, z) * sky_light_factor));
+    return std::max(block, sky);
 }
 
 World::ChunkCoordinates World::chunk_coordinates(int x, int z) const
@@ -648,6 +682,105 @@ bool World::place_block(int x, int y, int z, BlockType type)
     schedule_fluid_neighbors(x, y, z);
     schedule_falling_check(x, y, z);
     return true;
+}
+
+int World::command_fill_region(int min_x, int min_y, int min_z, int max_x, int max_y, int max_z, BlockType type)
+{
+    int clamped_min_y = std::max(min_y, MIN_WORLD_Y);
+    int clamped_max_y = std::min(max_y, MIN_WORLD_Y + CHUNK_HEIGHT - 1);
+    if (clamped_min_y > clamped_max_y) return 0;
+
+    int placed = 0;
+    std::set<std::pair<int, int>> touched_chunks;
+    for (int x = min_x; x <= max_x; ++x) {
+        for (int z = min_z; z <= max_z; ++z) {
+            int chunk_x = floor_div(x, CHUNK_SIZE);
+            int chunk_z = floor_div(z, CHUNK_SIZE);
+            Chunk* chunk = chunk_at(chunk_x, chunk_z);
+            if (chunk == nullptr) continue;
+            int local_x = x - chunk_x * CHUNK_SIZE;
+            int local_z = z - chunk_z * CHUNK_SIZE;
+            {
+                std::unique_lock<std::shared_mutex> lock(chunk->data_mutex());
+                for (int y = clamped_min_y; y <= clamped_max_y; ++y) {
+                    chunk->set_block(local_x, y - MIN_WORLD_Y, local_z, type);
+                }
+            }
+            chunk->mark_modified();
+            for (int y = clamped_min_y; y <= clamped_max_y; ++y) {
+                schedule_fluid_neighbors(x, y, z);
+                schedule_falling_check(x, y, z);
+                ++placed;
+            }
+            touched_chunks.insert({chunk_x, chunk_z});
+        }
+    }
+    for (const auto& [chunk_x, chunk_z] : touched_chunks) {
+        Chunk* chunk = chunk_at(chunk_x, chunk_z);
+        if (chunk == nullptr) continue;
+        {
+            std::unique_lock<std::shared_mutex> lock(chunk->data_mutex());
+            chunk->compute_lighting();
+        }
+        rebuild_mesh_neighborhood(chunk_x, chunk_z);
+    }
+    return placed;
+}
+
+int World::command_clone_region(int min_x, int min_y, int min_z, int max_x, int max_y, int max_z,
+                                 int dest_x, int dest_y, int dest_z)
+{
+    std::vector<BlockType> buffer;
+    buffer.reserve(static_cast<size_t>(max_x - min_x + 1) *
+                   static_cast<size_t>(max_y - min_y + 1) *
+                   static_cast<size_t>(max_z - min_z + 1));
+    for (int x = min_x; x <= max_x; ++x) {
+        for (int y = min_y; y <= max_y; ++y) {
+            for (int z = min_z; z <= max_z; ++z) {
+                buffer.push_back(get_block(x, y, z));
+            }
+        }
+    }
+
+    int placed = 0;
+    std::set<std::pair<int, int>> touched_chunks;
+    size_t i = 0;
+    for (int x = min_x; x <= max_x; ++x) {
+        for (int y = min_y; y <= max_y; ++y) {
+            for (int z = min_z; z <= max_z; ++z) {
+                BlockType type = buffer[i++];
+                int wx = dest_x + (x - min_x);
+                int wy = dest_y + (y - min_y);
+                int wz = dest_z + (z - min_z);
+                if (wy < MIN_WORLD_Y || wy >= MIN_WORLD_Y + CHUNK_HEIGHT) continue;
+                int chunk_x = floor_div(wx, CHUNK_SIZE);
+                int chunk_z = floor_div(wz, CHUNK_SIZE);
+                Chunk* chunk = chunk_at(chunk_x, chunk_z);
+                if (chunk == nullptr) continue;
+                int local_x = wx - chunk_x * CHUNK_SIZE;
+                int local_z = wz - chunk_z * CHUNK_SIZE;
+                {
+                    std::unique_lock<std::shared_mutex> lock(chunk->data_mutex());
+                    chunk->set_block(local_x, wy - MIN_WORLD_Y, local_z, type);
+                }
+                chunk->mark_modified();
+                schedule_fluid_neighbors(wx, wy, wz);
+                schedule_falling_check(wx, wy, wz);
+                touched_chunks.insert({chunk_x, chunk_z});
+                ++placed;
+            }
+        }
+    }
+    for (const auto& [chunk_x, chunk_z] : touched_chunks) {
+        Chunk* chunk = chunk_at(chunk_x, chunk_z);
+        if (chunk == nullptr) continue;
+        {
+            std::unique_lock<std::shared_mutex> lock(chunk->data_mutex());
+            chunk->compute_lighting();
+        }
+        rebuild_mesh_neighborhood(chunk_x, chunk_z);
+    }
+    return placed;
 }
 
 void World::place_structure_block(int x, int y, int z, BlockType type, bool allow_foliage_overwrite)
@@ -988,6 +1121,16 @@ std::vector<World::ChestSnapshot> World::all_chest_inventories() const
     result.reserve(chest_storage.size());
     for (const auto& [key, slots] : chest_storage) {
         result.push_back({key.x, key.y, key.z, slots});
+    }
+    return result;
+}
+
+std::vector<std::pair<int, int>> World::loaded_chunk_coordinates() const
+{
+    std::vector<std::pair<int, int>> result;
+    result.reserve(chunks.size());
+    for (const auto& [key, chunk] : chunks) {
+        result.push_back(unpack_chunk_key(key));
     }
     return result;
 }

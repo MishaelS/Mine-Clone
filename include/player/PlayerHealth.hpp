@@ -60,6 +60,12 @@ public:
     // of that per-hit bookkeeping is meaningful.
     void set_health(int value);
 
+    // Instantly reduces health to 0, ignoring invulnerability - only for
+    // the "/kill" chat command. No situational damage source should ever
+    // bypass invulnerability this way; damage() is what those all go
+    // through instead.
+    void kill();
+
     int health() const { return current_health; }
     bool is_dead() const { return current_health <= 0; }
     bool is_invulnerable() const { return invulnerable_seconds > 0.0f; }

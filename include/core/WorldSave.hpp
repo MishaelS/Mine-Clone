@@ -36,6 +36,16 @@ struct PlayerSaveState {
     // header has no other reason to depend on). Missing in an older save
     // defaults to full health - see WorldSave::load_player_state().
     int health = 20;
+
+    // GameEngine's own game_tick - really a world property (DayNightCycle's
+    // sun/moon angle, random ticks) rather than a per-player one, but kept
+    // here rather than splitting it into its own file since this project
+    // only ever has the one player/world pair open at a time anyway.
+    // Without this, every reload snapped the sun back to dawn (tick 0)
+    // instead of resuming wherever the day/night cycle actually was.
+    // Missing in an older save defaults to 0 (dawn, day 0) - see
+    // WorldSave::load_player_state().
+    uint64_t game_tick = 0;
 };
 
 // A dropped item still sitting on the ground, last time this world was

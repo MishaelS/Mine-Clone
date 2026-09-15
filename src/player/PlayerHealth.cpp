@@ -38,6 +38,11 @@ void PlayerHealth::heal(int amount)
     current_health = std::min(MAX_HEALTH, current_health + amount);
 }
 
+void PlayerHealth::kill()
+{
+    current_health = 0;
+}
+
 void PlayerHealth::update(float delta_time)
 {
     if (invulnerable_seconds > 0.0f) {

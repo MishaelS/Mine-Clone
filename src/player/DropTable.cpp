@@ -87,6 +87,21 @@ void Load_drop_table()
     }
 }
 
+bool can_harvest_block(BlockType type, const ItemStack& selected)
+{
+    const std::optional<BlockDropRule>& rule = drop_table[static_cast<size_t>(type)];
+    // No table entry, or no tool requirement at all - always harvestable,
+    // matching resolve_block_drops()'s own "no entry -> drops itself"
+    // fallback (that fallback never withholds a drop for lacking a tool).
+    if (!rule || rule->requires_tool == ToolKind::None) return true;
+
+    bool wielding_right_kind = selected.is_tool() &&
+        get_item_properties(selected.tool).tool_kind == rule->requires_tool;
+    if (!wielding_right_kind) return false;
+    if (rule->min_tier > 0 && get_item_properties(selected.tool).tier < rule->min_tier) return false;
+    return true;
+}
+
 std::vector<DropRoll> resolve_block_drops(BlockType type, const ItemStack& selected)
 {
     const std::optional<BlockDropRule>& rule = drop_table[static_cast<size_t>(type)];
@@ -96,12 +111,7 @@ std::vector<DropRoll> resolve_block_drops(BlockType type, const ItemStack& selec
     // than silently yielding nothing.
     if (!rule) return {{false, type, ItemType::None, 1}};
 
-    if (rule->requires_tool != ToolKind::None) {
-        bool wielding_right_kind = selected.is_tool() &&
-            get_item_properties(selected.tool).tool_kind == rule->requires_tool;
-        if (!wielding_right_kind) return {};
-        if (rule->min_tier > 0 && get_item_properties(selected.tool).tier < rule->min_tier) return {};
-    }
+    if (!can_harvest_block(type, selected)) return {};
 
     std::vector<DropRoll> result;
     for (const DropEntry& entry : rule->drops) {

@@ -507,6 +507,11 @@ void block_icon(Rectangle bounds, BlockType type)
         case BlockType::Torch:            items_png_source = {13 * ICON_TILE_PIXELS, 3 * ICON_TILE_PIXELS, ICON_TILE_PIXELS, ICON_TILE_PIXELS}; break;
         case BlockType::RedstoneTorch:     items_png_source = { 6 * ICON_TILE_PIXELS, 6 * ICON_TILE_PIXELS, ICON_TILE_PIXELS, ICON_TILE_PIXELS}; break;
         case BlockType::LitRedstoneTorch:  items_png_source = { 6 * ICON_TILE_PIXELS, 7 * ICON_TILE_PIXELS, ICON_TILE_PIXELS, ICON_TILE_PIXELS}; break;
+        // Same reasoning as the torches above - a sapling's terrain.png
+        // cross sprite is a thin sprig on a mostly-transparent tile, barely
+        // readable at icon scale. Same tile ItemType::Sapling's own loose-
+        // item icon already uses (see Item.cpp's define_material call).
+        case BlockType::OakSapling:        items_png_source = {14 * ICON_TILE_PIXELS, 2 * ICON_TILE_PIXELS, ICON_TILE_PIXELS, ICON_TILE_PIXELS}; break;
         default: use_items_png_icon = false; break;
     }
     if (use_items_png_icon) {

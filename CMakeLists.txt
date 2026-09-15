@@ -37,6 +37,7 @@ add_executable(${PROJECT_NAME}
     src/core/PerlinNoise.cpp
     src/core/TerrainNoise.cpp
     src/core/Biome.cpp
+    src/core/DayNightCycle.cpp
     src/core/Keybindings.cpp
     src/core/Settings.cpp
     src/core/WorldSave.cpp
@@ -75,6 +76,7 @@ add_executable(${PROJECT_NAME}
     src/ui/SettingsScreen.cpp
     src/ui/PauseMenuScreen.cpp
     src/ui/InventoryHud.cpp
+    src/ui/ChatHud.cpp
 )
 target_include_directories(${PROJECT_NAME} PRIVATE include)
 

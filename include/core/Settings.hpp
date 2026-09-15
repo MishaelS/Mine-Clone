@@ -18,6 +18,14 @@ struct Settings {
     int render_distance_chunks = 8;    // today's hardcoded LOADED_RADIUS
     int fog_distance_blocks = 102;     // today's derived default (8 chunks * 16 blocks * 0.8)
     TextureFilterMode texture_filter = TextureFilterMode::Point;
+    // 100 = today's normal look (unmodified) - the maximum; dragging it
+    // down scales how strongly block/sky light shows on already-lit
+    // terrain and entities (see Chunk.hpp's set_chunk_brightness()) -
+    // never the skybox/sun/moon/fog, which aren't lit by a block light
+    // level at all. Same "current look is the ceiling" mapping a lot of
+    // games use for this slider rather than vanilla Minecraft's own
+    // Moody/Bright wording.
+    int brightness = 100;
     int target_fps = 60;
     int window_width = 1280;
     int window_height = 720;

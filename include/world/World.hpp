@@ -16,6 +16,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 class TerrainNoise;
@@ -107,7 +108,29 @@ public:
 
     // max(sky, block) light, 0..15, at world-space (x, y, z). Out-of-range
     // reads as MAX_LIGHT (open, sunlit space), same as Chunk::get_light.
+    // This is the raw, time-invariant *potential* light - real Minecraft
+    // never touches its own stored skylight with time of day either, only
+    // how much of it actually shows right now (see get_effective_light()
+    // below) - so this alone isn't what a future gameplay check (plant
+    // growth, mob spawning) should key off, only what a debug readout or
+    // the propagation algorithm itself needs.
     int get_light(int x, int y, int z) const;
+
+    // The two channels get_light() maxes together, exposed separately - see
+    // Chunk::get_sky_light()/get_block_light()'s own comment. Out-of-range
+    // reads as MAX_LIGHT sky / 0 block (open, sunlit space has no block
+    // light source of its own).
+    int get_sky_light(int x, int y, int z) const;
+    int get_block_light(int x, int y, int z) const;
+
+    // Real "how lit is this right now" query - day/night-adjusted, unlike
+    // get_light() above. `sky_light_factor` is DayNightCycle::
+    // sky_light_factor(game_tick) - World has no clock of its own, so the
+    // caller (GameEngine, already computing this same value once per frame
+    // for the chunk mesh shader/entity tint) passes it in rather than this
+    // taking a game_tick and reaching for DayNightCycle itself. Block light
+    // (torches, lava) is returned unscaled; only the sky contribution is.
+    int get_effective_light(int x, int y, int z, float sky_light_factor) const;
 
     // Which chunk (chunk-grid coordinates, not world-space) a world-space
     // (x, z) falls in - for the debug overlay. Doesn't check whether that
@@ -171,6 +194,30 @@ public:
     // space.
     // True only when the block was actually placed.
     bool place_block(int x, int y, int z, BlockType type);
+
+    // Unconditionally overwrites every cell in the box from (min_x, min_y,
+    // min_z) to (max_x, max_y, max_z) inclusive with `type` - for chat
+    // commands (/setblock, as a 1x1x1 box, and /fill) that need to replace
+    // whatever's already there, unlike place_block()'s "only ever fills
+    // empty space" rule meant for the player's own right-click placement.
+    // Writes every cell first, then relights/remeshes each touched chunk
+    // exactly once at the end - critical for a large box: doing that full
+    // relight+remesh pass after every single cell instead (what looping
+    // place_block()-style calls would do) turns a big /fill into a
+    // multi-second freeze. Cells outside the world's own Y range or outside
+    // a chunk that isn't currently loaded are silently skipped. Returns how
+    // many cells were actually written.
+    int command_fill_region(int min_x, int min_y, int min_z, int max_x, int max_y, int max_z, BlockType type);
+
+    // Same batching idea as command_fill_region(), for /clone: reads the
+    // whole source box (min_x..max_x, min_y..max_y, min_z..max_z) before
+    // writing anything back - safe even when the destination overlaps the
+    // source, which a same-world "shift this build over" clone commonly
+    // does - then writes it to a same-sized box whose lowest corner is
+    // (dest_x, dest_y, dest_z). Returns how many cells were actually
+    // written.
+    int command_clone_region(int min_x, int min_y, int min_z, int max_x, int max_y, int max_z,
+                              int dest_x, int dest_y, int dest_z);
 
     // One block of a Structure being grown at runtime (see GameEngine::
     // update_sapling_growth) - world-space, arbitrary position, unlike
@@ -337,6 +384,14 @@ public:
         std::array<ItemStack, INVENTORY_STORAGE_SIZE> slots;
     };
     std::vector<ChestSnapshot> all_chest_inventories() const;
+
+    // Every currently loaded chunk's own (chunk_x, chunk_z) - for
+    // GameEngine's random-tick dispatcher (update_random_ticks()), which
+    // needs to pick a few random block positions inside each one every
+    // game tick, the same way real Minecraft's own random ticks do. Same
+    // "return a snapshot instead of exposing the map itself" shape as
+    // all_chest_inventories() above.
+    std::vector<std::pair<int, int>> loaded_chunk_coordinates() const;
 
 private:
     struct ChestPosKey {

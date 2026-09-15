@@ -302,12 +302,24 @@ namespace {
     // Light lookup, resolved the same way - a sample that steps outside the
     // chunk being meshed reads the neighbor's real computed light instead
     // of assuming full sky light. Out-of-range on y or a missing neighbor
-    // still reads as open, sunlit space, same as before.
-    int light_at(const Neighborhood& nb, int x, int y, int z) {
+    // still reads as open, sunlit space, same as before - sky light there
+    // is MAX_LIGHT (unlit is never "outside the world"'s own fault), block
+    // light is 0 (nothing out there emitting any). Split into two channels
+    // (rather than one light_at() the old single-channel mesh used) so
+    // day/night dimming - applied per-fragment in chunk.fs, from the same
+    // two channels carried all the way to the GPU - can scale only the sky
+    // contribution, never block light (torches, lava).
+    int sky_light_at(const Neighborhood& nb, int x, int y, int z) {
         if (y < 0 || y >= CHUNK_HEIGHT) return MAX_LIGHT;
         const Chunk* chunk = nb.resolve(x, z);
         if (chunk == nullptr) return MAX_LIGHT;
-        return chunk->get_light(x, y, z);
+        return chunk->get_sky_light(x, y, z);
+    }
+    int block_light_at(const Neighborhood& nb, int x, int y, int z) {
+        if (y < 0 || y >= CHUNK_HEIGHT) return 0;
+        const Chunk* chunk = nb.resolve(x, z);
+        if (chunk == nullptr) return 0;
+        return chunk->get_block_light(x, y, z);
     }
 
     // The 4 cells relevant to one face-corner's vertex: the cell right
@@ -365,18 +377,34 @@ namespace {
         return 3 - (static_cast<int>(s1) + static_cast<int>(s2) + static_cast<int>(cc));
     }
 
-    // Average light (0..1) of the same three neighbor cells used for AO, plus
-    // the cell right outside the face - the same per-vertex sampling
-    // Minecraft calls "smooth lighting".
-    float vertex_light(const Neighborhood& nb, int x, int y, int z, Vector3 normal, Vector3 corner) {
+    // Average sky/block light (each 0..1, raw - NOT floored at
+    // MIN_LIGHT_FRACTION here) of the same three neighbor cells used for
+    // AO, plus the cell right outside the face - the same per-vertex
+    // sampling Minecraft calls "smooth lighting", just kept as two separate
+    // channels (see sky_light_at()/block_light_at()'s own comment) instead
+    // of one pre-combined value, all the way through to the GPU. The floor
+    // is applied once, in chunk.fs, *after* both the day/night combine and
+    // the brightness slider's own gamma curve - flooring each raw channel
+    // this early would let a torch's own genuine block light get
+    // needlessly gamma-darkened too (see chunk.fs's own comment on why
+    // block light stays completely exempt from the brightness slider).
+    struct VertexLight { float sky, block; };
+    VertexLight vertex_light(const Neighborhood& nb, int x, int y, int z, Vector3 normal, Vector3 corner) {
         NeighborCells cells = compute_neighbor_cells(x, y, z, normal, corner);
 
-        int total = light_at(nb, cells.base[0]  , cells.base[1]  , cells.base[2]  )
-                  + light_at(nb, cells.side1[0] , cells.side1[1] , cells.side1[2] )
-                  + light_at(nb, cells.side2[0] , cells.side2[1] , cells.side2[2] )
-                  + light_at(nb, cells.corner[0], cells.corner[1], cells.corner[2]);
+        int sky_total = sky_light_at(nb, cells.base[0]  , cells.base[1]  , cells.base[2]  )
+                      + sky_light_at(nb, cells.side1[0] , cells.side1[1] , cells.side1[2] )
+                      + sky_light_at(nb, cells.side2[0] , cells.side2[1] , cells.side2[2] )
+                      + sky_light_at(nb, cells.corner[0], cells.corner[1], cells.corner[2]);
+        int block_total = block_light_at(nb, cells.base[0]  , cells.base[1]  , cells.base[2]  )
+                        + block_light_at(nb, cells.side1[0] , cells.side1[1] , cells.side1[2] )
+                        + block_light_at(nb, cells.side2[0] , cells.side2[1] , cells.side2[2] )
+                        + block_light_at(nb, cells.corner[0], cells.corner[1], cells.corner[2]);
 
-        return std::max(MIN_LIGHT_FRACTION, (total / 4.0f) / MAX_LIGHT);
+        return {
+            (sky_total / 4.0f) / MAX_LIGHT,
+            (block_total / 4.0f) / MAX_LIGHT,
+        };
     }
 
     // One of these per distinct transparent-but-not-translucent BlockType
@@ -416,7 +444,19 @@ namespace {
     // corners, or a side face's top edge - never Bottom's, which are all at
     // y < 0) by that many world units - see WATER_SURFACE_DROP, the only
     // current caller that passes anything other than the default 0.
-    void append_face(ChunkMeshBuffers& mesh_data, const Face& face, Vector3 center, Rectangle uv, const float brightness[4], Color tint, float top_drop = 0.0f) {
+    // `shade` is the day/night-*independent* part of a corner's brightness
+    // (AO * FACE_DIRECTION_SHADE, or plain 1.0 for cross-shaped foliage,
+    // which has neither) - baked straight into mesh_data.colors, same as
+    // the old single-channel brightness always was. `sky_fraction`/
+    // `block_fraction` are vertex_light()'s own two channels, carried
+    // through as a second per-vertex attribute (mesh_data.light, uploaded
+    // as the mesh's texcoords2 - see upload_buffers()) instead: chunk.fs
+    // combines them with the current daylightFactor uniform itself, per
+    // fragment, so day/night dims only the sky contribution without ever
+    // needing this mesh rebuilt when the time of day changes.
+    void append_face(ChunkMeshBuffers& mesh_data, const Face& face, Vector3 center, Rectangle uv,
+                      const float shade[4], const float sky_fraction[4], const float block_fraction[4],
+                      const float ao[4], Color tint, float top_drop = 0.0f) {
         uv = get_sample_safe_block_uv(uv);
         Vector3 corners[4] = {face.v1, face.v2, face.v3, face.v4};
         if (top_drop != 0.0f) {
@@ -442,13 +482,25 @@ namespace {
             mesh_data.texcoords.push_back(u[corner]);
             mesh_data.texcoords.push_back(v[corner]);
 
-            mesh_data.colors.push_back(static_cast<unsigned char>(brightness[corner] * tint.r));
-            mesh_data.colors.push_back(static_cast<unsigned char>(brightness[corner] * tint.g));
-            mesh_data.colors.push_back(static_cast<unsigned char>(brightness[corner] * tint.b));
-            // Not scaled by brightness, unlike the color channels - alpha is
+            mesh_data.colors.push_back(static_cast<unsigned char>(shade[corner] * tint.r));
+            mesh_data.colors.push_back(static_cast<unsigned char>(shade[corner] * tint.g));
+            mesh_data.colors.push_back(static_cast<unsigned char>(shade[corner] * tint.b));
+            // Not scaled by shade, unlike the color channels - alpha is
             // this face's opacity (see BlockProperties::translucent), not
             // part of its shading.
             mesh_data.colors.push_back(tint.a);
+
+            mesh_data.light.push_back(sky_fraction[corner]);
+            mesh_data.light.push_back(block_fraction[corner]);
+
+            // 4 identical copies - raylib's tangents are XYZW per vertex
+            // and only .x is actually read (see chunk.fs), but the buffer
+            // still has to be the full 4 floats/vertex upload_buffers()
+            // validates against.
+            mesh_data.ao.push_back(ao[corner]);
+            mesh_data.ao.push_back(ao[corner]);
+            mesh_data.ao.push_back(ao[corner]);
+            mesh_data.ao.push_back(ao[corner]);
         }
     }
 
@@ -493,6 +545,8 @@ namespace {
             buffers.normals.size() != vertex_count * 3 ||
             buffers.texcoords.size() != vertex_count * 2 ||
             buffers.colors.size() != vertex_count * 4 ||
+            buffers.light.size() != vertex_count * 2 ||
+            buffers.ao.size() != vertex_count * 4 ||
             vertex_count % 3 != 0) {
             TraceLog(LOG_ERROR, "Rejected malformed chunk mesh buffers");
             return false;
@@ -505,6 +559,8 @@ namespace {
         mesh.normals = to_mesh_buffer(buffers.normals);
         mesh.texcoords = to_mesh_buffer(buffers.texcoords);
         mesh.colors = to_mesh_buffer(buffers.colors);
+        mesh.texcoords2 = to_mesh_buffer(buffers.light);
+        mesh.tangents = to_mesh_buffer(buffers.ao);
         UploadMesh(&mesh, false);
         return true;
     }
@@ -549,15 +605,36 @@ void set_chunk_water_pass(bool active)
     SetShaderValue(chunk_shader, water_pass_loc, &value, SHADER_UNIFORM_INT);
 }
 
+void set_chunk_daylight(float sky_light_factor)
+{
+    static int daylight_loc = GetShaderLocation(chunk_shader, "daylightFactor");
+    SetShaderValue(chunk_shader, daylight_loc, &sky_light_factor, SHADER_UNIFORM_FLOAT);
+}
+
+void set_chunk_brightness(float gamma)
+{
+    static int brightness_loc = GetShaderLocation(chunk_shader, "brightnessGamma");
+    SetShaderValue(chunk_shader, brightness_loc, &gamma, SHADER_UNIFORM_FLOAT);
+}
+
+void set_chunk_dynamic_entity_pass(bool active)
+{
+    static int loc = GetShaderLocation(chunk_shader, "isDynamicEntityPass");
+    int value = active ? 1 : 0; // GLSL bool uniforms are set as int from the C++ side
+    SetShaderValue(chunk_shader, loc, &value, SHADER_UNIFORM_INT);
+}
+
 void begin_dynamic_entity_shader()
 {
     set_chunk_water_pass(false);
+    set_chunk_dynamic_entity_pass(true);
     BeginShaderMode(chunk_shader);
 }
 
 void end_dynamic_entity_shader()
 {
     EndShaderMode();
+    set_chunk_dynamic_entity_pass(false);
 }
 
 void unload_chunk_fog_shader()
@@ -1554,16 +1631,28 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                 ChunkMeshBuffers& mesh_data = *mesh_data_ptr;
 
                 if (properties.render_shape == BlockRenderShape::Cross) {
-                    float light = std::max(MIN_LIGHT_FRACTION,
-                        static_cast<float>(get_light(x, y, z)) / static_cast<float>(MAX_LIGHT));
-                    float brightness[4] = {light, light, light, light};
+                    // No AO/face-direction shading for a cross shape (both
+                    // are cube-face concepts) - shade stays flat 1.0, and
+                    // the block's own single sky/block cell (no per-vertex
+                    // "smooth lighting" sampling either, same as before)
+                    // covers every corner of every cross quad alike.
+                    float shade[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+                    float ao[4] = {1.0f, 1.0f, 1.0f, 1.0f}; // no occlusion - cross shapes have none
+                    // Raw, not floored - see vertex_light()'s own comment
+                    // on why the MIN_LIGHT_FRACTION floor now lives in
+                    // chunk.fs instead, applied after both day/night and
+                    // the brightness slider's own gamma curve.
+                    float sky = static_cast<float>(get_sky_light(x, y, z)) / static_cast<float>(MAX_LIGHT);
+                    float block = static_cast<float>(get_block_light(x, y, z)) / static_cast<float>(MAX_LIGHT);
+                    float sky_fraction[4] = {sky, sky, sky, sky};
+                    float block_fraction[4] = {block, block, block, block};
                     Color tint = type == BlockType::ShortGrass
                         ? column_grass_tint[z * CHUNK_SIZE + x]
                         : properties.texture_tints[static_cast<int>(BlockFace::North)];
                     for (const Face& cross_face : CROSS_FACES) {
                         append_face(mesh_data, cross_face, center,
                             properties.texture_uvs[static_cast<int>(BlockFace::North)],
-                            brightness, tint);
+                            shade, sky_fraction, block_fraction, ao, tint);
                     }
                     continue;
                 }
@@ -1605,11 +1694,17 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                     if (properties.transparent && neighbor_type == type && properties.cull_same_faces) continue;
 
                     Vector3 corners[4] = {f.v1, f.v2, f.v3, f.v4};
-                    float brightness[4];
+                    float shade[4];
+                    float ao_strength[4];
+                    float sky_fraction[4];
+                    float block_fraction[4];
                     for (int i = 0; i < 4; ++i) {
-                        int ao = vertex_ao(nb, x, y, z, f.normal, corners[i]);
-                        float light_fraction = vertex_light(nb, x, y, z, f.normal, corners[i]);
-                        brightness[i] = AO_BRIGHTNESS[ao] * light_fraction * FACE_DIRECTION_SHADE[face];
+                        int ao_level = vertex_ao(nb, x, y, z, f.normal, corners[i]);
+                        VertexLight light = vertex_light(nb, x, y, z, f.normal, corners[i]);
+                        shade[i] = FACE_DIRECTION_SHADE[face];
+                        ao_strength[i] = AO_BRIGHTNESS[ao_level];
+                        sky_fraction[i] = light.sky;
+                        block_fraction[i] = light.block;
                     }
 
                     // A grass top's tint depends on this column's own blend
@@ -1643,7 +1738,8 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                         bool is_front = face == static_cast<int>(BlockFace::North) + static_cast<int>(facing);
                         texture_face = is_front ? static_cast<int>(BlockFace::South) : static_cast<int>(BlockFace::East);
                     }
-                    append_face(mesh_data, f, center, properties.texture_uvs[texture_face], brightness, tint, top_drop);
+                    append_face(mesh_data, f, center, properties.texture_uvs[texture_face],
+                        shade, sky_fraction, block_fraction, ao_strength, tint, top_drop);
                 }
             }
         }

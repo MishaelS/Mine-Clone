@@ -12,6 +12,8 @@
 #include "core/Keybindings.hpp"
 #include "core/WorldSave.hpp"
 #include "rendering/Skybox.hpp"
+#include "rendering/EntityLighting.hpp"
+#include "core/DayNightCycle.hpp"
 #include "ui/DebugOverlay.hpp"
 #include "worldgen/Structure.hpp"
 
@@ -19,7 +21,10 @@
 #include "rlgl.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <sstream>
+#include <unordered_set>
 
 namespace {
     constexpr float CAMERA_MOVE_SPEED_DEFAULT = 4.0f; // world units per second
@@ -50,6 +55,12 @@ namespace {
     // sense of depth/atmosphere instead of reading perfectly crisp right
     // up against the camera; deliberately subtle (~7%), not real fog.
     constexpr unsigned char CAMERA_HAZE_ALPHA = 18;
+
+    // How much darker shadow gets at the brightness slider's own minimum
+    // (settings.brightness == 10) - see set_chunk_brightness()'s own
+    // comment for the full gamma-curve reasoning. Tune to taste; 1.0 at
+    // the slider's max is always a no-op regardless of this constant.
+    constexpr float BRIGHTNESS_GAMMA_RANGE = 2.0f;
 
     // Q-drop (spawn_dropped_item()): thrown out from just in front of the
     // player - not right at their own position, or it would immediately
@@ -110,30 +121,42 @@ namespace {
     constexpr float DEATH_RESPAWN_SECONDS = 2.0f; // real Minecraft's own death-screen delay, just without the screen/button
     constexpr float HURT_FLASH_SECONDS    = 0.3f;
 
-    // Breaking with the wrong tool (or bare hands) still works, just at the
-    // bare-hand multiplier (1x) below rather than refusing outright - no
-    // hard "needs a pickaxe to drop stone" requirement, since a lost/broken
-    // tool can now be recrafted (see Recipe.hpp) but resolve_block_drops()'s
-    // own tool gating is still what actually withholds a drop for an ore
-    // mined with too weak a tool.
+    // Breaking with the wrong tool (or bare hands) still works, just much
+    // slower below (the /100 divisor rather than /30 - see the formula's
+    // own comment) rather than refusing outright - no hard block on the
+    // *attempt*, since a lost/broken tool can now be recrafted (see
+    // Recipe.hpp); resolve_block_drops()'s own tool gating (the exact same
+    // can_harvest_block() check used here) is what actually withholds a
+    // drop at the end of it for an ore mined with too weak a tool.
     //
-    // Beta 1.7.3's own tick-quantized formula (breaking is simulated at the
-    // game's 20 ticks/second, not a continuous real-number countdown):
-    //   progress per tick = multiplier / hardness / 30
-    //   ticks required     = ceil(1 / progress per tick) = ceil(30 * hardness / multiplier)
+    // Real Minecraft's own tick-quantized formula (breaking is simulated at
+    // the game's 20 ticks/second, not a continuous real-number countdown) -
+    // two independent conditions, not one:
+    //   speed = (tool's category matches this block's effective_tool) ? that tool's own speed : 1
+    //   divisor = can_harvest_block(type, selected) ? 30 : 100
+    //   progress per tick = speed / hardness / divisor
+    //   ticks required     = ceil(1 / progress per tick) = ceil(divisor * hardness / speed)
     // then converted to seconds at TICKS_PER_SECOND so breaking_progress's
-    // own delta_time accumulation still lands on a whole-tick boundary
-    // (e.g. Stone + Diamond Pickaxe: 30*1.5/8 = 5.625 -> 6 ticks -> 0.3s).
+    // own delta_time accumulation still lands on a whole-tick boundary.
+    // The two conditions are independent, not the same check: a Log has no
+    // requires_tool at all (can_harvest_block() is always true for it, so
+    // hand-mining one still uses divisor 30 - no five-Log-lengths-slower
+    // penalty), it's specifically Stone/ore's own hard pickaxe requirement
+    // that triggers the /100 divisor when unmet. (e.g. Stone hand-mined:
+    // speed=1, divisor=100 -> 100*1.5/1 = 150 ticks = 7.5s; Stone + Diamond
+    // Pickaxe: speed=8, divisor=30 (a wood pickaxe already satisfies
+    // Stone's own min tier) -> 30*1.5/8 = 5.625 -> 6 ticks -> 0.3s).
     float break_seconds_required(BlockType type, const ItemStack& selected) {
         const BlockProperties& block_properties = get_block_properties(type);
-        float multiplier = 1.0f;
+        float speed = 1.0f;
         if (selected.is_tool()) {
             const ItemProperties& tool_properties = get_item_properties(selected.tool);
             if (tool_properties.tool_kind == block_properties.effective_tool) {
-                multiplier = tool_properties.mining_speed_multiplier;
+                speed = tool_properties.mining_speed_multiplier;
             }
         }
-        int ticks = std::max(1, static_cast<int>(std::ceil(30.0f * block_properties.hardness / multiplier)));
+        float divisor = can_harvest_block(type, selected) ? 30.0f : 100.0f;
+        int ticks = std::max(1, static_cast<int>(std::ceil(divisor * block_properties.hardness / speed)));
         return static_cast<float>(ticks) / static_cast<float>(TICKS_PER_SECOND);
     }
 
@@ -197,6 +220,89 @@ namespace {
     // not seconds - see PendingLeafDecay's own comment on why.
     constexpr int LEAF_DECAY_MIN_DELAY_TICKS = 1 * TICKS_PER_SECOND;
     constexpr int LEAF_DECAY_MAX_DELAY_TICKS = 4 * TICKS_PER_SECOND;
+
+    // Halves the overall decay rate: once an eligible leaf's delay above
+    // elapses, it only actually decays this fraction of the time (1/2) -
+    // the other half, update_leaf_decay() just re-rolls a fresh delay and
+    // checks again later instead of removing it. Expected checks before it
+    // finally goes is 1 / (1/LEAF_DECAY_CHANCE_DENOMINATOR) = 2, doubling
+    // the average total wait without touching the delay range above.
+    constexpr int LEAF_DECAY_CHANCE_DENOMINATOR = 2;
+
+    // --- Chat command parsing helpers (see GameEngine::execute_chat_command) ---
+
+    std::vector<std::string> split_whitespace(const std::string& text) {
+        std::vector<std::string> tokens;
+        std::istringstream stream(text);
+        std::string token;
+        while (stream >> token) tokens.push_back(token);
+        return tokens;
+    }
+
+    // Whole-string parse (not just a leading prefix) - "12abc" must fail,
+    // not silently read as 12, the same std::stoi/std::stof would let
+    // through if the trailing-character check below didn't reject it.
+    std::optional<int> parse_int(const std::string& text) {
+        try {
+            size_t consumed = 0;
+            int value = std::stoi(text, &consumed);
+            if (consumed != text.size()) return std::nullopt;
+            return value;
+        } catch (...) { return std::nullopt; }
+    }
+    std::optional<float> parse_float(const std::string& text) {
+        try {
+            size_t consumed = 0;
+            float value = std::stof(text, &consumed);
+            if (consumed != text.size()) return std::nullopt;
+            return value;
+        } catch (...) { return std::nullopt; }
+    }
+
+    // Same cap real Minecraft's own /fill refuses past ("too many blocks in
+    // the specified area") - without one, a careless /fill spanning
+    // thousands of blocks on a side would stall a frame for a very long
+    // time (each cell re-lights/remeshes its whole chunk neighborhood).
+    constexpr long long COMMAND_VOLUME_LIMIT = 32768;
+
+    // Commands real Minecraft has that this project deliberately doesn't
+    // implement yet - each names the missing underlying system (mobs/
+    // entities, enchanting, hunger/XP, gamerules, weather/difficulty,
+    // multiplayer accounts) rather than silently no-op-ing or pretending.
+    const std::unordered_set<std::string> UNSUPPORTED_COMMANDS = {
+        "enchant", "effect", "xp", "gamerule", "weather", "difficulty",
+        "summon", "spawnpoint", "kick", "op", "execute",
+    };
+
+    const char* unsupported_command_reason(const std::string& command) {
+        if (command == "enchant") return "нет системы зачарований";
+        if (command == "effect") return "нет системы эффектов/зелий";
+        if (command == "xp") return "нет системы опыта";
+        if (command == "gamerule") return "нет системы игровых правил";
+        if (command == "weather") return "нет погодной системы";
+        if (command == "difficulty") return "нет уровней сложности";
+        if (command == "summon") return "нет существ/мобов";
+        if (command == "spawnpoint") return "нет системы точек возрождения игрока (см. /setworldspawn для точки мира)";
+        if (command == "kick") return "нет мультиплеера";
+        if (command == "op") return "нет мультиплеера";
+        if (command == "execute") return "слишком сложная команда для текущей реализации";
+        return "не реализовано";
+    }
+
+    const char* CHAT_HELP_LINES[] = {
+        "Доступные команды:",
+        "/tp x y z - телепортация",
+        "/give предмет [кол-во] - выдать предмет",
+        "/clear - очистить инвентарь",
+        "/gamemode survival|creative - сменить режим игры",
+        "/time set day|night|noon|midnight|<тики> - время суток",
+        "/setworldspawn [x y z] - точка возрождения мира",
+        "/setblock x y z блок - поставить блок",
+        "/fill x1 y1 z1 x2 y2 z2 блок - залить область",
+        "/clone x1 y1 z1 x2 y2 z2 x y z - скопировать область",
+        "/kill - убить себя",
+        "/say текст - сообщение в чат",
+    };
 }
 
 GameEngine::GameEngine(int screen_width, int screen_height, const char* title)
@@ -309,6 +415,12 @@ void GameEngine::set_world(std::unique_ptr<World> new_world)
         player_health.reset();
         reset_life_timers();
         camera_view = CameraView::FirstPerson;
+        // A brand-new world (or a previous world's leftover value, if this
+        // isn't the app's first one this session) starts fresh at dawn -
+        // start_singleplayer_world()'s own saved-state branch overrides
+        // this with whatever was actually persisted, for a world that's
+        // been played before.
+        game_tick = 0;
     }
 }
 
@@ -317,11 +429,15 @@ void GameEngine::tick()
     ++game_tick;
     // Every piece of world simulation lives off this clock now - chunk
     // streaming, fluids, falling blocks, dropped-item physics, leaf decay,
-    // sapling growth. Day/night and scheduled block updates/random ticks
-    // are still future work, but would hook in here the same way. Called
-    // unconditionally from run() regardless of what update() is doing this
-    // frame (including the inventory screen being open - see its own
-    // early-return), so none of this ever actually pauses.
+    // random ticks (sapling growth today), and DayNightCycle's own sun/moon
+    // angle (see draw()'s call into DayNightCycle::sun_direction(game_tick)) -
+    // this is the ONLY place game_tick is ever incremented, exactly once per
+    // call, so its rate is entirely governed by how often run()'s fixed-
+    // timestep accumulator calls tick() (nominally 20/second - see
+    // Tick.hpp), never by delta_time directly. Called unconditionally from
+    // run() regardless of what update() is doing this frame (including a UI
+    // screen owning input - see update()'s own ui_captured), so none of
+    // this ever actually pauses.
     if (world) {
         // Picks up a render/fog distance change made from the pause menu's
         // Settings screen immediately, rather than only the next time a
@@ -334,7 +450,7 @@ void GameEngine::tick()
     }
     tick_dropped_items();
     update_leaf_decay();
-    update_sapling_growth();
+    update_random_ticks();
 }
 
 void GameEngine::tick_dropped_items()
@@ -446,6 +562,16 @@ void GameEngine::update_leaf_decay()
         if (!is_leaf_block(world->get_block(entry.x, entry.y, entry.z))) continue;
         if (has_nearby_log(*world, entry.x, entry.y, entry.z)) continue;
 
+        // Half the time, this eligible leaf doesn't decay just yet - it
+        // re-rolls a fresh delay and gets re-checked later instead (see
+        // LEAF_DECAY_CHANCE_DENOMINATOR's own comment), roughly doubling
+        // the average time a disconnected canopy takes to fully clear.
+        if (GetRandomValue(0, LEAF_DECAY_CHANCE_DENOMINATOR - 1) != 0) {
+            int delay_ticks = GetRandomValue(LEAF_DECAY_MIN_DELAY_TICKS, LEAF_DECAY_MAX_DELAY_TICKS);
+            pending_leaf_decay.push_back({entry.x, entry.y, entry.z, delay_ticks});
+            continue;
+        }
+
         if (std::optional<BlockType> decayed = world->break_block(entry.x, entry.y, entry.z)) {
             Vector3 center = {entry.x + 0.5f, entry.y + 0.5f, entry.z + 0.5f};
             particles.spawn_destroy(*decayed, center);
@@ -466,72 +592,80 @@ void GameEngine::update_leaf_decay()
 }
 
 namespace {
-    // In ticks (20/second), not seconds - see PendingSaplingGrowth's own
-    // comment on why.
-    constexpr int SAPLING_GROW_MIN_DELAY_TICKS = 30 * TICKS_PER_SECOND;
-    constexpr int SAPLING_GROW_MAX_DELAY_TICKS = 90 * TICKS_PER_SECOND;
-    // How long a blocked attempt (something built over the trunk's own
-    // column since it was planted) waits before trying again - much
-    // shorter than the grow delay itself, same "keep polling, cheaply"
-    // idea as a blocked vanilla sapling re-rolling every random tick
-    // instead of just giving up.
-    constexpr int SAPLING_RETRY_DELAY_TICKS = 5 * TICKS_PER_SECOND;
+    // Real Minecraft's own random-tick rate: this many random block
+    // positions get checked per loaded chunk, per game tick - not every
+    // block every tick (a chunk holds tens of thousands of them), which is
+    // exactly why a lone sapling can sit for minutes before the dispatcher
+    // happens to land on it.
+    constexpr int RANDOM_TICK_SPEED = 3;
+
+    // 1-in-7 chance a sapling turns into a tree the random tick that
+    // actually lands on it - real Minecraft's own sapling growth odds.
+    constexpr int SAPLING_GROWTH_CHANCE_DENOMINATOR = 7;
+
     constexpr int SAPLING_TRUNK_HEIGHT_MIN = 4;
     constexpr int SAPLING_TRUNK_HEIGHT_MAX = 6;
 }
 
-void GameEngine::queue_sapling_growth(int x, int y, int z)
+void GameEngine::update_random_ticks()
 {
-    int delay_ticks = GetRandomValue(SAPLING_GROW_MIN_DELAY_TICKS, SAPLING_GROW_MAX_DELAY_TICKS);
-    pending_sapling_growth.push_back({x, y, z, delay_ticks});
+    if (!world) return;
+
+    for (const auto& [chunk_x, chunk_z] : world->loaded_chunk_coordinates()) {
+        for (int i = 0; i < RANDOM_TICK_SPEED; ++i) {
+            int local_x = GetRandomValue(0, CHUNK_SIZE - 1);
+            int local_y = GetRandomValue(0, CHUNK_HEIGHT - 1);
+            int local_z = GetRandomValue(0, CHUNK_SIZE - 1);
+            int world_x = chunk_x * CHUNK_SIZE + local_x;
+            int world_y = MIN_WORLD_Y + local_y;
+            int world_z = chunk_z * CHUNK_SIZE + local_z;
+
+            // Dispatch on whatever block actually happens to be at this
+            // random position right now - a future random-tick block
+            // (a crop, grass spread, ...) would add its own case here the
+            // same way, rather than each growing its own separate scan.
+            switch (world->get_block(world_x, world_y, world_z)) {
+                case BlockType::OakSapling:
+                    update_sapling_growth(world_x, world_y, world_z);
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
 }
 
-void GameEngine::update_sapling_growth()
+void GameEngine::update_sapling_growth(int x, int y, int z)
 {
-    if (!world) { pending_sapling_growth.clear(); return; }
+    if (GetRandomValue(0, SAPLING_GROWTH_CHANCE_DENOMINATOR - 1) != 0) return;
 
-    for (size_t i = 0; i < pending_sapling_growth.size();) {
-        --pending_sapling_growth[i].remaining_ticks;
-        if (pending_sapling_growth[i].remaining_ticks > 0) { ++i; continue; }
+    int trunk_height = GetRandomValue(SAPLING_TRUNK_HEIGHT_MIN, SAPLING_TRUNK_HEIGHT_MAX);
+    for (int dy = 1; dy <= trunk_height; ++dy) {
+        BlockType existing = world->get_block(x, y + dy, z);
+        // Blocked (something built over the trunk's own column since it
+        // was planted) - just give up silently. Unlike the old per-
+        // sapling queue, there's no retry to schedule: this exact sapling
+        // simply gets another independent 1-in-7 roll on some future
+        // random tick for free, same as a blocked vanilla sapling does.
+        if (existing != BlockType::Air && existing != BlockType::Foliage) return;
+    }
 
-        PendingSaplingGrowth entry = pending_sapling_growth[i];
-        pending_sapling_growth[i] = pending_sapling_growth.back();
-        pending_sapling_growth.pop_back();
+    // Clear the sapling itself first (no drop/particles - it's turning
+    // into the tree, not being destroyed) so the origin block (the bottom
+    // trunk log, landing exactly on the sapling's own position) finds Air
+    // like every other block placed below, instead of World::
+    // place_structure_block() needing its own OakSapling special case.
+    world->break_block(x, y, z);
 
-        // Re-validate - it could have been broken, or something else
-        // placed over it, since it was queued.
-        if (world->get_block(entry.x, entry.y, entry.z) != BlockType::OakSapling) continue;
-
-        int trunk_height = GetRandomValue(SAPLING_TRUNK_HEIGHT_MIN, SAPLING_TRUNK_HEIGHT_MAX);
-        bool trunk_clear = true;
-        for (int y = 1; y <= trunk_height; ++y) {
-            BlockType existing = world->get_block(entry.x, entry.y + y, entry.z);
-            if (existing != BlockType::Air && existing != BlockType::Foliage) { trunk_clear = false; break; }
-        }
-        if (!trunk_clear) {
-            pending_sapling_growth.push_back({entry.x, entry.y, entry.z, SAPLING_RETRY_DELAY_TICKS});
-            continue;
-        }
-
-        // Clear the sapling itself first (no drop/particles - it's turning
-        // into the tree, not being destroyed) so the origin block (the
-        // bottom trunk log, landing exactly on the sapling's own position)
-        // finds Air like every other block placed below, instead of
-        // World::place_structure_block() needing its own OakSapling
-        // special case.
-        world->break_block(entry.x, entry.y, entry.z);
-
-        // Same template make_oak_tree()/StructureGenerator place at
-        // world-generation time, just placed here one world-space block at
-        // a time via World::place_structure_block() instead of
-        // Chunk::set_block() - this runs at an arbitrary runtime position,
-        // not bounded to one already-open Chunk the way generation is.
-        Structure tree = make_oak_tree(trunk_height);
-        for (const StructureBlock& block : tree.get_blocks()) {
-            world->place_structure_block(entry.x + block.x, entry.y + block.y, entry.z + block.z,
-                block.type, block.replace_rule == StructureReplaceRule::AirOrFoliage);
-        }
-        // Not ++i - pop_back() just moved a different element into slot i.
+    // Same template make_oak_tree()/StructureGenerator place at world-
+    // generation time, just placed here one world-space block at a time
+    // via World::place_structure_block() instead of Chunk::set_block() -
+    // this runs at an arbitrary runtime position, not bounded to one
+    // already-open Chunk the way generation is.
+    Structure tree = make_oak_tree(trunk_height);
+    for (const StructureBlock& block : tree.get_blocks()) {
+        world->place_structure_block(x + block.x, y + block.y, z + block.z,
+            block.type, block.replace_rule == StructureReplaceRule::AirOrFoliage);
     }
 }
 
@@ -679,10 +813,11 @@ void GameEngine::respawn_player()
 {
     if (!world) return;
 
-    // Same fixed point set_world() itself spawns a brand-new session at -
-    // this project has no bed/respawn-anchor system, so death always
-    // returns here.
-    Vector3 spawn = world->find_spawn_position();
+    // Same fixed point set_world() itself spawns a brand-new session at,
+    // unless "/setworldspawn" overrode it for this session - this project
+    // has no bed/respawn-anchor system, so death always returns to one of
+    // these two.
+    Vector3 spawn = world_spawn_override.value_or(world->find_spawn_position());
     spawn.y += PlayerController::EYE_HEIGHT;
     Vector3 shift = Vector3Subtract(spawn, camera.position);
     camera.position = spawn;
@@ -704,6 +839,259 @@ void GameEngine::reset_life_timers()
     hurt_flash_seconds = 0.0f;
     death_respawn_timer = 0.0f;
     was_dead_last_frame = false;
+}
+
+void GameEngine::handle_chat_submit(const std::string& text)
+{
+    if (text.empty()) return;
+    if (text[0] == '/') {
+        execute_chat_command(text.substr(1));
+    } else {
+        // No other player exists yet to actually send this to - see
+        // ChatHud's own comment on the local-echo/future-multiplayer split.
+        chat_hud.push_message("<Игрок> " + text);
+    }
+}
+
+void GameEngine::execute_chat_command(const std::string& command)
+{
+    std::vector<std::string> tokens = split_whitespace(command);
+    if (tokens.empty()) {
+        chat_hud.push_message("Пустая команда.");
+        return;
+    }
+
+    std::string name = tokens[0];
+    std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return std::tolower(c); });
+    std::vector<std::string> args(tokens.begin() + 1, tokens.end());
+
+    // The raw text after the first token, exactly as typed (not tokens
+    // rejoined with single spaces) - only /say wants this.
+    std::string rest;
+    if (size_t space = command.find_first_of(" \t"); space != std::string::npos) {
+        size_t start = command.find_first_not_of(" \t", space);
+        if (start != std::string::npos) rest = command.substr(start);
+    }
+
+    auto push = [this](const std::string& message) { chat_hud.push_message(message); };
+
+    if (UNSUPPORTED_COMMANDS.count(name)) {
+        push(std::string("Команда /") + name + " пока не поддерживается: " + unsupported_command_reason(name) + ".");
+        return;
+    }
+
+    if (name == "help" || name == "?") {
+        for (const char* line : CHAT_HELP_LINES) push(line);
+        return;
+    }
+
+    if (name == "say") {
+        if (rest.empty()) { push("Использование: /say <текст>"); return; }
+        push("[Сервер] " + rest);
+        return;
+    }
+
+    // Every command below actually touches the world/player - none of it
+    // means anything without one loaded (chat can't even open without
+    // `world` either, but a belt-and-suspenders check costs nothing).
+    if (!world) {
+        push("Мир не загружен.");
+        return;
+    }
+
+    if (name == "tp") {
+        // Vanilla allows a leading target-selector token before the
+        // coordinates ("/tp <player> <x> <y> <z>") - accepted and ignored
+        // here (there's only ever the one player to move).
+        size_t coord_index = args.size() == 4 ? 1 : 0;
+        if (args.size() != 3 && args.size() != 4) {
+            push("Использование: /tp <x> <y> <z>");
+            return;
+        }
+        std::optional<float> x = parse_float(args[coord_index]);
+        std::optional<float> y = parse_float(args[coord_index + 1]);
+        std::optional<float> z = parse_float(args[coord_index + 2]);
+        if (!x || !y || !z) {
+            push("Координаты должны быть числами.");
+            return;
+        }
+        Vector3 target = {*x, *y + PlayerController::EYE_HEIGHT, *z};
+        Vector3 shift = Vector3Subtract(target, camera.position);
+        camera.position = target;
+        camera.target = Vector3Add(camera.target, shift);
+        player_controller.reset();
+        push("Телепортировано.");
+        return;
+    }
+
+    if (name == "give") {
+        if (args.empty()) { push("Использование: /give <предмет> [количество]"); return; }
+        int count = 1;
+        if (args.size() >= 2) {
+            std::optional<int> parsed = parse_int(args[1]);
+            if (!parsed || *parsed <= 0) { push("Количество должно быть положительным целым числом."); return; }
+            count = *parsed;
+        }
+        if (std::optional<BlockType> block = block_type_from_name(args[0])) {
+            int leftover = inventory.add(*block, count);
+            push("Выдано: " + ui::block_display_name(*block) + " x" + std::to_string(count - leftover) +
+                 (leftover > 0 ? " (не поместилось: " + std::to_string(leftover) + ")" : ""));
+        } else if (std::optional<ItemType> item = item_type_from_name(args[0])) {
+            const ItemProperties& properties = get_item_properties(*item);
+            if (properties.category == ItemCategory::Tool) {
+                int given = 0;
+                for (int i = 0; i < count; ++i) {
+                    if (!inventory.add_tool(*item)) break;
+                    ++given;
+                }
+                push("Выдано: " + ui::item_display_name(*item) + " x" + std::to_string(given) +
+                     (given < count ? " (инвентарь переполнен)" : ""));
+            } else {
+                int leftover = inventory.add_item(*item, count);
+                push("Выдано: " + ui::item_display_name(*item) + " x" + std::to_string(count - leftover) +
+                     (leftover > 0 ? " (не поместилось: " + std::to_string(leftover) + ")" : ""));
+            }
+        } else {
+            push("Неизвестный предмет или блок: " + args[0]);
+        }
+        return;
+    }
+
+    if (name == "clear") {
+        for (ItemStack& stack : inventory.hotbar) stack.clear();
+        for (ItemStack& stack : inventory.storage) stack.clear();
+        push("Инвентарь очищен.");
+        return;
+    }
+
+    if (name == "gamemode") {
+        if (args.empty()) { push("Использование: /gamemode survival|creative"); return; }
+        if (args[0] == "survival") {
+            current_game_mode = GameMode::Survival;
+            push("Режим игры: выживание.");
+        } else if (args[0] == "creative") {
+            current_game_mode = GameMode::Creative;
+            push("Режим игры: творческий.");
+        } else if (args[0] == "adventure" || args[0] == "spectator") {
+            push("Режим \"" + args[0] + "\" пока не реализован (нет соответствующей игровой системы).");
+        } else {
+            push("Неизвестный режим игры: " + args[0]);
+        }
+        return;
+    }
+
+    if (name == "time") {
+        if (args.size() < 2 || args[0] != "set") {
+            push("Использование: /time set day|night|noon|midnight|<тики>");
+            return;
+        }
+        uint64_t target_tick;
+        if (args[1] == "day") target_tick = 1000;
+        else if (args[1] == "noon") target_tick = 6000;
+        else if (args[1] == "night") target_tick = 13000;
+        else if (args[1] == "midnight") target_tick = 18000;
+        else {
+            std::optional<int> parsed = parse_int(args[1]);
+            if (!parsed || *parsed < 0) { push("Неизвестное значение времени: " + args[1]); return; }
+            target_tick = static_cast<uint64_t>(*parsed) % DayNightCycle::DAY_LENGTH_TICKS;
+        }
+        uint64_t day = game_tick / DayNightCycle::DAY_LENGTH_TICKS;
+        game_tick = day * DayNightCycle::DAY_LENGTH_TICKS + target_tick;
+        push("Время установлено.");
+        return;
+    }
+
+    if (name == "setworldspawn") {
+        Vector3 spawn;
+        if (args.size() >= 3) {
+            std::optional<float> x = parse_float(args[0]);
+            std::optional<float> y = parse_float(args[1]);
+            std::optional<float> z = parse_float(args[2]);
+            if (!x || !y || !z) { push("Координаты должны быть числами."); return; }
+            spawn = {*x, *y, *z};
+        } else {
+            spawn = player_controller.feet_position(camera);
+        }
+        world_spawn_override = spawn;
+        push("Точка возрождения мира установлена.");
+        return;
+    }
+
+    if (name == "setblock") {
+        if (args.size() < 4) { push("Использование: /setblock <x> <y> <z> <блок>"); return; }
+        std::optional<int> x = parse_int(args[0]);
+        std::optional<int> y = parse_int(args[1]);
+        std::optional<int> z = parse_int(args[2]);
+        if (!x || !y || !z) { push("Координаты должны быть целыми числами."); return; }
+        std::optional<BlockType> block = block_type_from_name(args[3]);
+        if (!block) { push("Неизвестный блок: " + args[3]); return; }
+        if (world->command_fill_region(*x, *y, *z, *x, *y, *z, *block) > 0) push("Блок установлен.");
+        else push("Не удалось установить блок (вне загруженной области?).");
+        return;
+    }
+
+    if (name == "fill") {
+        if (args.size() < 7) { push("Использование: /fill <x1> <y1> <z1> <x2> <y2> <z2> <блок>"); return; }
+        std::optional<int> coords[6];
+        for (int i = 0; i < 6; ++i) coords[i] = parse_int(args[i]);
+        if (std::any_of(std::begin(coords), std::end(coords), [](auto& c) { return !c.has_value(); })) {
+            push("Координаты должны быть целыми числами.");
+            return;
+        }
+        std::optional<BlockType> block = block_type_from_name(args[6]);
+        if (!block) { push("Неизвестный блок: " + args[6]); return; }
+        int min_x = std::min(*coords[0], *coords[3]), max_x = std::max(*coords[0], *coords[3]);
+        int min_y = std::min(*coords[1], *coords[4]), max_y = std::max(*coords[1], *coords[4]);
+        int min_z = std::min(*coords[2], *coords[5]), max_z = std::max(*coords[2], *coords[5]);
+        long long volume = static_cast<long long>(max_x - min_x + 1) *
+                            static_cast<long long>(max_y - min_y + 1) *
+                            static_cast<long long>(max_z - min_z + 1);
+        if (volume > COMMAND_VOLUME_LIMIT) {
+            push("Слишком большая область: " + std::to_string(volume) + " блоков (максимум " +
+                 std::to_string(COMMAND_VOLUME_LIMIT) + ").");
+            return;
+        }
+        int placed = world->command_fill_region(min_x, min_y, min_z, max_x, max_y, max_z, *block);
+        push("Установлено блоков: " + std::to_string(placed));
+        return;
+    }
+
+    if (name == "clone") {
+        if (args.size() < 9) { push("Использование: /clone <x1> <y1> <z1> <x2> <y2> <z2> <x> <y> <z>"); return; }
+        std::optional<int> coords[9];
+        for (int i = 0; i < 9; ++i) coords[i] = parse_int(args[i]);
+        if (std::any_of(std::begin(coords), std::end(coords), [](auto& c) { return !c.has_value(); })) {
+            push("Координаты должны быть целыми числами.");
+            return;
+        }
+        int min_x = std::min(*coords[0], *coords[3]), max_x = std::max(*coords[0], *coords[3]);
+        int min_y = std::min(*coords[1], *coords[4]), max_y = std::max(*coords[1], *coords[4]);
+        int min_z = std::min(*coords[2], *coords[5]), max_z = std::max(*coords[2], *coords[5]);
+        long long volume = static_cast<long long>(max_x - min_x + 1) *
+                            static_cast<long long>(max_y - min_y + 1) *
+                            static_cast<long long>(max_z - min_z + 1);
+        if (volume > COMMAND_VOLUME_LIMIT) {
+            push("Слишком большая область: " + std::to_string(volume) + " блоков (максимум " +
+                 std::to_string(COMMAND_VOLUME_LIMIT) + ").");
+            return;
+        }
+        int dest_x = *coords[6], dest_y = *coords[7], dest_z = *coords[8];
+        int placed = world->command_clone_region(min_x, min_y, min_z, max_x, max_y, max_z, dest_x, dest_y, dest_z);
+        push("Скопировано блоков: " + std::to_string(placed));
+        return;
+    }
+
+    if (name == "kill") {
+        if (current_game_mode != GameMode::Survival) {
+            push("/kill работает только в режиме выживания.");
+            return;
+        }
+        player_health.kill();
+        push("Вы себя убили.");
+        return;
+    }
+
+    push("Неизвестная команда: /" + name + ". Наберите /help для списка команд.");
 }
 
 Camera3D GameEngine::make_render_camera() const
@@ -737,6 +1125,11 @@ void GameEngine::draw_player_model() const
 
 void GameEngine::update(float delta_time)
 {
+    // For the open-transition check right after every path that can open
+    // the inventory grid (E, or right-clicking a Workbench/Furnace/Chest)
+    // - see its own comment further down.
+    bool inventory_was_open = inventory_hud.is_open();
+
     // Mouse wheel adjusting walking speed - commented out for now (left
     // over from when this was a free-fly camera with no gravity); walking
     // speed stays fixed at CAMERA_MOVE_SPEED_DEFAULT instead. Uncomment to
@@ -747,29 +1140,52 @@ void GameEngine::update(float delta_time)
     //                                CAMERA_MOVE_SPEED_MIN, CAMERA_MOVE_SPEED_MAX);
     // }
 
-    // Inventory: E toggles the storage panel open/closed (hardcoded, like
-    // F3/F4/F5 below - not one of Settings' rebindable actions), freeing/
-    // recapturing the cursor to match.
-    if (world && IsKeyPressed(KEY_E)) {
+    // Inventory: toggles the storage panel open/closed (default E -
+    // GameAction::ToggleInventory, rebindable in Settings > Controls),
+    // freeing/recapturing the cursor to match. Chat owns the keyboard while
+    // it's open (typing this key there shouldn't also toggle the
+    // inventory), so this whole block is skipped then, same as it already
+    // skips while the grid itself is open.
+    bool chat_open = chat_hud.is_open();
+    if (world && !chat_open && binding_pressed(settings.keybindings[static_cast<size_t>(GameAction::ToggleInventory)])) {
         inventory_hud.toggle(inventory);
         if (inventory_hud.is_open()) EnableCursor(); else DisableCursor();
     }
-    if (inventory_hud.is_open() && IsKeyPressed(KEY_ESCAPE)) {
+    // Chat: default T (GameAction::OpenChat, rebindable) opens it empty;
+    // "/" (fixed, not rebindable - it's a punctuation shortcut, not really
+    // its own action) opens it pre-filled - only when nothing else is
+    // already claiming keyboard input, same "one modal input surface at a
+    // time" rule the inventory/pause menu already follow. Escape takes
+    // priority over everything else below: closing chat first, same as
+    // vanilla, rather than falling through to the pause menu underneath it.
+    if (chat_open && IsKeyPressed(KEY_ESCAPE)) {
+        chat_hud.close();
+    } else if (world && !chat_open && !inventory_hud.is_open() &&
+               binding_pressed(settings.keybindings[static_cast<size_t>(GameAction::OpenChat)])) {
+        chat_hud.open_chat();
+    } else if (world && !chat_open && !inventory_hud.is_open() && IsKeyPressed(KEY_SLASH)) {
+        chat_hud.open_command();
+    } else if (inventory_hud.is_open() && IsKeyPressed(KEY_ESCAPE)) {
         inventory_hud.close(inventory);
         DisableCursor();
-    } else if (world && IsKeyPressed(KEY_ESCAPE)) {
+    } else if (world && !chat_open && IsKeyPressed(KEY_ESCAPE)) {
         enter_state(GameState::Paused);
         return;
     }
+    chat_open = chat_hud.is_open(); // may have just changed above
     // Number keys pick a hotbar slot directly - unlike Q/wheel-scroll
     // below, this works even while the inventory grid is open (including
     // mid-drag, with a stack already picked up onto the cursor): it only
     // ever touches inventory.selected_slot, never InventoryHud's own
     // carried_stack, so there's nothing for the grid to steal this from.
-    for (int slot = 0; slot < HOTBAR_SIZE; ++slot) {
-        if (IsKeyPressed(KEY_ONE + slot)) inventory.selected_slot = slot;
+    // Still excluded while chat owns the keyboard - typing a digit there
+    // must not also swap the selected slot underneath it.
+    if (!chat_open) {
+        for (int slot = 0; slot < HOTBAR_SIZE; ++slot) {
+            if (IsKeyPressed(KEY_ONE + slot)) inventory.selected_slot = slot;
+        }
     }
-    if (!inventory_hud.is_open()) {
+    if (!inventory_hud.is_open() && !chat_open) {
         // Mouse wheel also cycles the selected hotbar slot, same "scroll
         // up/away subtracts" convention as every other scrollable list in
         // this project (WorldListScreen, SettingsScreen's Controls grid,
@@ -781,12 +1197,13 @@ void GameEngine::update(float delta_time)
         if (wheel_steps != 0) {
             inventory.selected_slot = ((inventory.selected_slot - wheel_steps) % HOTBAR_SIZE + HOTBAR_SIZE) % HOTBAR_SIZE;
         }
-        // Q: throw one item out of the selected hotbar slot. While the
-        // inventory screen is open instead, the equivalent (Q over a
-        // hovered slot) is handled inside draw()'s own
-        // inventory_hud.update_grid() call - it needs to know which slot
-        // the mouse is over, which only that call already tracks.
-        if (world && IsKeyPressed(KEY_Q)) {
+        // Drop (default Q, GameAction::DropItem - rebindable): throw one
+        // item out of the selected hotbar slot. While the inventory screen
+        // is open instead, the equivalent (drop over a hovered slot) is
+        // handled inside draw()'s own inventory_hud.update_grid() call
+        // (passed the same binding) - it needs to know which slot the
+        // mouse is over, which only that call already tracks.
+        if (world && binding_pressed(settings.keybindings[static_cast<size_t>(GameAction::DropItem)])) {
             ItemStack& selected = inventory.hotbar[inventory.selected_slot];
             if (current_game_mode == GameMode::Creative) {
                 ItemStack copy = selected;
@@ -814,28 +1231,23 @@ void GameEngine::update(float delta_time)
     }
     if (IsKeyPressed(KEY_F6)) show_wireframe = !show_wireframe;
 
-    // update_leaf_decay()/update_sapling_growth() moved to tick() - they're
-    // world simulation (see PendingLeafDecay/PendingSaplingGrowth's own
-    // comments), not per-frame visual polish, so they run on Minecraft's
+    // update_leaf_decay()/update_random_ticks() (sapling growth) live in
+    // tick() - they're world simulation (see PendingLeafDecay's own
+    // comment), not per-frame visual polish, so they run on Minecraft's
     // fixed 20/second clock instead of this variable frame rate one, the
     // same as dropped-item physics (tick_dropped_items(), also tick()) vs.
     // just its magnet-pull tracking staying here in update_dropped_items().
     update_dropped_items(delta_time);
     particles.update(delta_time, world.get());
 
-    // While the inventory grid is open, it owns input instead of the
-    // camera/world below (drawn and handled together in draw(), the same
-    // immediate-mode pattern every menu screen already uses) - same idea
-    // as spawn_settle_frames suppressing rotation, just gated on is_open()
-    // rather than a frame counter. Debug toggles above still work either
-    // way, same as F3 staying live over Minecraft's own inventory screen.
-    if (inventory_hud.is_open()) {
-        targeted_block = std::nullopt;
-        for (auto& object : objects) {
-            if (object->is_active()) object->update(delta_time, world.get());
-        }
-        return;
-    }
+    // Inventory and chat both steal the mouse/keyboard from the camera and
+    // block interaction below - but, unlike the old early-return this
+    // replaced, everything else (gravity, drowning, a planted sapling
+    // growing) keeps simulating right through either being open, the same
+    // way tick()'s own world-simulation clock never gated on this at all.
+    // Only look (camera rotation) and interaction (raycasting needs the
+    // crosshair, which a UI screen doesn't move) actually need suppressing.
+    bool ui_captured = inventory_hud.is_open() || chat_open;
 
     // Free-look camera: rebindable keys (Settings) to move, mouse to look.
     // Today's defaults are still W/A/S/D + Space to jump - see
@@ -845,11 +1257,13 @@ void GameEngine::update(float delta_time)
     };
     Vector2 mouse_delta = GetMouseDelta();
     Vector3 rotation = {mouse_delta.x * CAMERA_MOUSE_SENSITIVITY, mouse_delta.y * CAMERA_MOUSE_SENSITIVITY, 0.0f};
-    if (spawn_settle_frames > 0) {
+    if (spawn_settle_frames > 0 || ui_captured) {
         // See spawn_settle_frames's own comment: this delta might still be
-        // a spurious startup jump, not real player input.
+        // a spurious startup jump, not real player input - and while a UI
+        // screen owns the mouse, its own delta means "moving the cursor
+        // over a button", never "look around".
         rotation = {0.0f, 0.0f, 0.0f};
-        --spawn_settle_frames;
+        if (spawn_settle_frames > 0) --spawn_settle_frames;
     }
 
     Vector3 previous_camera_position = camera.position;
@@ -861,9 +1275,14 @@ void GameEngine::update(float delta_time)
     // later. Physics (gravity, whatever residual velocity was left) still
     // runs so the body doesn't hang frozen mid-air.
     bool alive = !player_health.is_dead();
+    // Movement input specifically also stops while a UI screen is open -
+    // WASD types into chat instead of walking, same as vanilla - but
+    // player_controller.update() below still runs every frame regardless,
+    // zero-input, so gravity/buoyancy/damage keep applying.
+    bool accepts_movement_input = alive && !ui_captured;
     if (world) {
         PlayerInput input;
-        if (alive) {
+        if (accepts_movement_input) {
             input.forward = (is_action_down(GameAction::MoveForward) ? 1.0f : 0.0f) -
                             (is_action_down(GameAction::MoveBackward) ? 1.0f : 0.0f);
             input.right = (is_action_down(GameAction::MoveRight) ? 1.0f : 0.0f) -
@@ -935,8 +1354,9 @@ void GameEngine::update(float delta_time)
     // as a ray direction.
     Vector3 aim = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
 
-    if (!alive) {
-        // Dead: no aiming, no breaking/placing - see the input freeze above.
+    if (!alive || ui_captured) {
+        // Dead, or a UI screen owns the mouse: no aiming, no breaking/
+        // placing - see the input freeze above.
         targeted_block = std::nullopt;
         is_breaking = false;
         breaking_progress = 0.0f;
@@ -1104,14 +1524,26 @@ void GameEngine::update(float delta_time)
                     if (block_is_directional(selected.block)) {
                         world->set_block_orientation(place_x, place_y, place_z, direction_facing_player(aim));
                     }
-                    if (selected.block == BlockType::OakSapling) queue_sapling_growth(place_x, place_y, place_z);
+                    // No explicit queueing needed for a freshly placed
+                    // sapling any more - it's just a regular block in a
+                    // loaded chunk now, so update_random_ticks() will find
+                    // it on its own on some future random tick.
                     if (current_game_mode == GameMode::Survival && --selected.count <= 0) selected.clear();
                 }
             }
         }
     }
 
-    } // alive
+    } // alive && !ui_captured
+
+    // Just opened (E, or right-clicking a Workbench/Furnace/Chest) - draw()
+    // reuses the exact same frozen-blurred-background mechanism the Esc
+    // pause menu does (see pause_snapshot_pending's own comment there),
+    // rather than a separate texture: the two screens never overlap, since
+    // Esc closes an already-open inventory instead of pausing over it.
+    if (!inventory_was_open && inventory_hud.is_open()) {
+        pause_snapshot_pending = true;
+    }
 
     for (auto& object : objects) {
         if (object->is_active()) {
@@ -1126,62 +1558,125 @@ void GameEngine::draw()
     BeginDrawing();
     ClearBackground(RAYWHITE);
 
-    // How far the current frame already is into the *next* tick (0 right
-    // after one lands, approaching 1 right before the next does) - every
-    // tick-simulated entity (dropped items, falling blocks) interpolates
-    // its last two tick positions by this instead of snapping between
-    // them, so 20Hz physics still reads as smooth motion at render rate.
-    float tick_alpha = std::clamp(tick_accumulator / TICK_DURATION, 0.0f, 1.0f);
+    // Inventory screens (hotbar grid, chest/furnace/workbench) freeze-frame
+    // the world behind them the same way the Esc pause menu does - a
+    // one-time blurred snapshot (pause_snapshot/pause_snapshot_pending,
+    // shared with the pause menu below since the two never overlap: Esc
+    // closes an open inventory first rather than pausing over it) instead
+    // of a live re-render every frame, both because re-blurring a full
+    // frame is far too expensive to do continuously and because it reads
+    // as the same familiar "paused" look. The world itself keeps
+    // simulating regardless (see update()'s own ui_captured handling,
+    // which is exactly why this is purely visual, not an actual pause) -
+    // gravity/damage/a growing sapling just aren't shown while it's
+    // covered by a frozen picture of the moment the grid opened.
+    //
+    // pause_snapshot_pending forces one more live frame through even while
+    // the grid is already open - set the instant it (or Esc's own pause)
+    // just opened, it's what actually gives capture_blurred_background()
+    // below fresh pixels to grab before this same condition flips back to
+    // showing the cached texture on every subsequent frame.
+    bool show_live_world = !inventory_hud.is_open() || pause_snapshot_pending;
+    if (show_live_world) {
+        // How far the current frame already is into the *next* tick (0
+        // right after one lands, approaching 1 right before the next does)
+        // - every tick-simulated entity (dropped items, falling blocks)
+        // interpolates its last two tick positions by this instead of
+        // snapping between them, so 20Hz physics still reads as smooth
+        // motion at render rate.
+        float tick_alpha = std::clamp(tick_accumulator / TICK_DURATION, 0.0f, 1.0f);
 
-    Camera3D render_camera = make_render_camera();
-    BeginMode3D(render_camera);
-    draw_skybox(render_camera.position);
-    if (world) {
-        // Wireframe ("skeleton") debug view: draws the exact same chunk
-        // meshes, just as GL_LINE edges instead of filled/textured
-        // triangles - every block's own face boundaries end up visible,
-        // which is what actually reveals block positions/mesh structure,
-        // rather than a separate position-label overlay.
-        if (show_wireframe) rlEnableWireMode();
-        world->draw_opaque(render_camera);
-        world->draw_falling_blocks(tick_alpha);
-        if (show_chunk_borders) {
-            world->draw_chunk_borders();
-        }
-    }
-    if (world) begin_dynamic_entity_shader();
-    for (auto& object : objects) {
-        if (object->is_active()) {
-            object->draw();
-        }
-    }
-    for (const auto& item : dropped_items) {
-        if (item->is_active() && world) item->render(tick_alpha, render_camera.position, *world);
-    }
-    draw_player_model();
-    particles.draw(render_camera, world.get());
-    if (world) end_dynamic_entity_shader();
-    if (world) {
-        // Water/glass/ice, drawn only now - after every opaque and solid-
-        // entity thing above - so its own alpha blending correctly
-        // composites over whatever's actually underwater (a dropped item,
-        // say) instead of always rendering in front of it regardless of
-        // real depth.
-        world->draw_translucent(render_camera);
-        if (show_wireframe) rlDisableWireMode();
-    }
-    if (targeted_block) {
-        ui::block_outline(targeted_block->x, targeted_block->y, targeted_block->z);
-        if (is_breaking && targeted_block->x == breaking_x && targeted_block->y == breaking_y &&
-            targeted_block->z == breaking_z) {
-            ui::block_breaking_overlay(breaking_x, breaking_y, breaking_z, breaking_progress);
-        }
-    }
-    EndMode3D();
+        // game_tick has no meaningful value before a world exists (see
+        // GameEngine::tick()) - harmless either way here (DayNightCycle::
+        // sun_direction(0) is just a valid dawn-position vector, not a
+        // crash), but draw_celestial_bodies() below still keeps its own
+        // `world` guard since drawing the sun/moon quads at all before a
+        // world exists would be pointless.
+        Vector3 sun_dir = DayNightCycle::sun_direction(game_tick);
 
-    Color haze_color = skybox_horizon_color();
-    haze_color.a = CAMERA_HAZE_ALPHA;
-    DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), haze_color);
+        Camera3D render_camera = make_render_camera();
+        BeginMode3D(render_camera);
+        draw_skybox(render_camera.position, sun_dir);
+        if (world) {
+            // Sun/moon - drawn right after the sky's own gradient, still
+            // well before any real terrain.
+            draw_celestial_bodies(render_camera.position, sun_dir);
+
+            // Day/night sky-light dimming - one shared value (block light
+            // never changes with time, only how much of a cell's sky light
+            // actually shows) fed to both the chunk mesh's own shader
+            // uniform and dynamic entities' CPU-computed tint, so terrain,
+            // dropped items, particles and the player's own model all
+            // darken at night in lockstep instead of chunk faces alone
+            // shifting while everything else stays lit as if at noon.
+            float sky_factor = DayNightCycle::sky_light_factor(game_tick);
+            set_chunk_daylight(sky_factor);
+            set_entity_daylight_factor(sky_factor);
+
+            // Settings > Graphics' brightness slider - a gamma exponent on
+            // the already-combined light strength (1.0 at the slider's own
+            // max, a no-op; higher only darkens shadow - see
+            // set_chunk_brightness()'s own comment for why direct sunlight
+            // never dims from this). Never touches the sky/sun/moon/fog,
+            // which aren't lit by a block light level at all.
+            float brightness_gamma = 1.0f + (100.0f - settings.brightness) / 100.0f * BRIGHTNESS_GAMMA_RANGE;
+            set_chunk_brightness(brightness_gamma);
+            set_entity_brightness_factor(brightness_gamma);
+
+            // Wireframe ("skeleton") debug view: draws the exact same chunk
+            // meshes, just as GL_LINE edges instead of filled/textured
+            // triangles - every block's own face boundaries end up visible,
+            // which is what actually reveals block positions/mesh structure,
+            // rather than a separate position-label overlay.
+            if (show_wireframe) rlEnableWireMode();
+            world->draw_opaque(render_camera);
+            world->draw_falling_blocks(tick_alpha);
+            if (show_chunk_borders) {
+                world->draw_chunk_borders();
+            }
+        }
+        if (world) begin_dynamic_entity_shader();
+        for (auto& object : objects) {
+            if (object->is_active()) {
+                object->draw();
+            }
+        }
+        for (const auto& item : dropped_items) {
+            if (item->is_active() && world) item->render(tick_alpha, render_camera.position, *world);
+        }
+        draw_player_model();
+        particles.draw(render_camera, world.get());
+        if (world) end_dynamic_entity_shader();
+        if (world) {
+            // Water/glass/ice, drawn only now - after every opaque and solid-
+            // entity thing above - so its own alpha blending correctly
+            // composites over whatever's actually underwater (a dropped item,
+            // say) instead of always rendering in front of it regardless of
+            // real depth.
+            world->draw_translucent(render_camera);
+            if (show_wireframe) rlDisableWireMode();
+        }
+        if (targeted_block) {
+            ui::block_outline(targeted_block->x, targeted_block->y, targeted_block->z);
+            if (is_breaking && targeted_block->x == breaking_x && targeted_block->y == breaking_y &&
+                targeted_block->z == breaking_z) {
+                ui::block_breaking_overlay(breaking_x, breaking_y, breaking_z, breaking_progress);
+            }
+        }
+        EndMode3D();
+
+        Color haze_color = skybox_horizon_color();
+        haze_color.a = CAMERA_HAZE_ALPHA;
+        DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), haze_color);
+    } else if (IsTextureValid(pause_snapshot)) {
+        // The haze rectangle above is already baked into this captured
+        // frame (it was drawn to the back buffer right before the capture
+        // below ever ran) - redrawing it here would double it up.
+        DrawTexturePro(pause_snapshot,
+            {0.0f, 0.0f, static_cast<float>(pause_snapshot.width), static_cast<float>(pause_snapshot.height)},
+            {0.0f, 0.0f, static_cast<float>(GetScreenWidth()), static_cast<float>(GetScreenHeight())},
+            {0.0f, 0.0f}, 0.0f, WHITE);
+    }
 
     if (pause_snapshot_pending) {
         if (IsTextureValid(pause_snapshot)) UnloadTexture(pause_snapshot);
@@ -1200,7 +1695,7 @@ void GameEngine::draw()
     }
 
     bool show_death_screen = world && player_health.is_dead();
-    if (!show_death_screen) ui::crosshair();
+    if (!show_death_screen && !inventory_hud.is_open()) ui::crosshair();
 
     if (is_breaking) {
         const float bar_width = ui::scaled(BREAK_BAR_WIDTH);
@@ -1223,12 +1718,19 @@ void GameEngine::draw()
             inventory_hud.draw_hearts(player_health.health(), PlayerHealth::MAX_HEALTH);
         }
         // Drawn and click-handled together here (not from update()) - the
-        // same immediate-mode pattern every menu screen already uses, and
-        // simplest since update() already returned early while it's open.
+        // same immediate-mode pattern every menu screen already uses.
         if (inventory_hud.is_open()) {
-            if (std::optional<ItemStack> dropped = inventory_hud.update_grid(inventory, current_game_mode, world.get())) {
+            const Binding& drop_binding = settings.keybindings[static_cast<size_t>(GameAction::DropItem)];
+            if (std::optional<ItemStack> dropped = inventory_hud.update_grid(inventory, current_game_mode, world.get(), drop_binding)) {
                 spawn_dropped_item(*dropped);
             }
+        }
+
+        // Same immediate-mode draw+handle pattern as the inventory grid
+        // above - chat_hud reports a submitted line (already closed) the
+        // frame Enter/click-away confirms it.
+        if (std::optional<std::string> submitted = chat_hud.update_and_draw()) {
+            handle_chat_submit(*submitted);
         }
     }
 
@@ -1458,6 +1960,10 @@ void GameEngine::start_singleplayer_world(const std::string& folder_name)
         player_health.set_health(saved->health);
         reset_life_timers();
         camera_view = CameraView::FirstPerson;
+        // Resume the day/night cycle (and every random-tick roll) exactly
+        // where it was, instead of set_world()'s own fresh-dawn default -
+        // see PlayerSaveState::game_tick's own comment.
+        game_tick = saved->game_tick;
         // Blocking: the world needs to actually be there around the
         // player's resumed position by the time Playing starts, not merely
         // dispatched - see World::update_chunk_states_blocking()'s own
@@ -1498,6 +2004,7 @@ void GameEngine::save_player_state()
     state.forward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
     state.inventory = inventory;
     state.health = player_health.health();
+    state.game_tick = game_tick;
     WorldSave::save_player_state(current_world_folder, state);
 
     // Every item still on the ground, so it's there (and keeps counting
@@ -1536,5 +2043,7 @@ void GameEngine::return_to_main_menu()
     footstep_particle_distance = 0.0f;
     current_world_folder.clear();
     inventory_hud.close(inventory);
+    chat_hud.close(); // otherwise its is_open() would leak into the next world's very first frame
+    world_spawn_override.reset(); // session-only override - see its own comment
     enter_state(GameState::MainMenu);
 }

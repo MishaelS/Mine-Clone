@@ -19,12 +19,12 @@ SettingsScreen::Action SettingsScreen::update(Settings& settings)
         }
     }
 
-    const float width = ui::scaled(ui::MENU_WIDTH);
-    const float height = ui::scaled(ui::BUTTON_HEIGHT);
-    const float gap = ui::scaled(ui::BUTTON_GAP);
-    const float half = (width - gap) * 0.5f;
-    const float x = (GetScreenWidth() - width) * 0.5f;
-    const float top = ui::scaled(108.0f);
+    const float width   = ui::scaled(ui::MENU_WIDTH);
+    const float height  = ui::scaled(ui::BUTTON_HEIGHT);
+    const float gap     = ui::scaled(ui::BUTTON_GAP);
+    const float half    = (width - gap) * 0.5f;
+    const float x       = (GetScreenWidth() - width) * 0.5f;
+    const float top     = ui::scaled(108.0f);
     const auto cell = [&](int column, int row) {
         return Rectangle{x + column * (half + gap), top + row * (height + gap), half, height};
     };
@@ -49,7 +49,7 @@ SettingsScreen::Action SettingsScreen::update(Settings& settings)
         changed |= ui::slider_int(cell(0, 0), ui::tr("settings.master"), settings.master_volume, 0, 100);
         scale_button(cell(1, 0));
         if (ui::button(cell(0, 2), ui::tr("settings.graphics") + "...")) enter(Section::Graphics);
-        if (ui::button(cell(1, 2), ui::tr("settings.sound") + "...")) enter(Section::Sound);
+        if (ui::button(cell(1, 2), ui::tr("settings.sound"   ) + "...")) enter(Section::Sound);
         if (ui::button(cell(0, 3), ui::tr("settings.controls") + "...")) enter(Section::Controls);
         if (ui::button(cell(1, 3), ui::tr("settings.language") + "...")) enter(Section::Language);
     } else if (section == Section::Graphics) {
@@ -82,6 +82,11 @@ SettingsScreen::Action SettingsScreen::update(Settings& settings)
                 ? TEXTURE_FILTER_BILINEAR : TEXTURE_FILTER_POINT);
             changed = true;
         }
+        // 100 (today's normal look) is the ceiling, not a Moody/Bright
+        // midpoint the way vanilla Minecraft's own brightness slider works -
+        // see Settings::brightness's own comment and Chunk.hpp's
+        // set_chunk_brightness().
+        changed |= ui::slider_int(cell(0, 3), ui::tr("settings.brightness"), settings.brightness, 10, 100);
     } else if (section == Section::Sound) {
         changed |= ui::slider_int(cell(0, 0), ui::tr("settings.master"), settings.master_volume, 0, 100);
         changed |= ui::slider_int(cell(1, 0), ui::tr("settings.music"), settings.music_volume, 0, 100);
@@ -97,8 +102,8 @@ SettingsScreen::Action SettingsScreen::update(Settings& settings)
             changed = true;
         }
     } else {
-        // At a high GUI Scale level the 2-column grid (5 rows for the
-        // current 9 actions) can be taller than the gap between `top` and
+        // At a high GUI Scale level the 2-column grid (6 rows for the
+        // current 12 actions) can be taller than the gap between `top` and
         // the Done button below - scroll it instead of letting rows
         // overlap Done, the same wheel-scroll pattern WorldListScreen
         // already uses for its own (unbounded) list.

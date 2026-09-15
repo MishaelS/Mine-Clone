@@ -89,6 +89,7 @@ namespace {
         "move_left",
         "move_right",
         "jump", "sneak", "sprint", "break_block", "place_block",
+        "toggle_inventory", "drop_item", "open_chat",
     };
 
     constexpr const char* ACTION_DISPLAY_NAMES[] = {
@@ -97,9 +98,11 @@ namespace {
         "Влево",
         "Вправо",
         "Прыжок", "Красться / вниз", "Бег", "Ломать блок", "Ставить блок",
+        "Инвентарь", "Выбросить предмет", "Открыть чат",
     };
     constexpr const char* ACTION_DISPLAY_NAMES_EN[] = {
         "Forward", "Back", "Left", "Right", "Jump", "Sneak / down", "Sprint", "Break block", "Place block",
+        "Inventory", "Drop item", "Open chat",
     };
 }
 
@@ -125,5 +128,8 @@ std::array<Binding, static_cast<size_t>(GameAction::Count)> default_keybindings(
     bindings[static_cast<size_t>(GameAction::Sprint)]       = {BindingKind::Key, KEY_LEFT_CONTROL};
     bindings[static_cast<size_t>(GameAction::BreakBlock)]   = {BindingKind::MouseButton, MOUSE_BUTTON_LEFT};
     bindings[static_cast<size_t>(GameAction::PlaceBlock)]   = {BindingKind::MouseButton, MOUSE_BUTTON_RIGHT};
+    bindings[static_cast<size_t>(GameAction::ToggleInventory)] = {BindingKind::Key, KEY_E};
+    bindings[static_cast<size_t>(GameAction::DropItem)]        = {BindingKind::Key, KEY_Q};
+    bindings[static_cast<size_t>(GameAction::OpenChat)]        = {BindingKind::Key, KEY_T};
     return bindings;
 }

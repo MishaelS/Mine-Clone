@@ -5,6 +5,41 @@
 #include <algorithm>
 #include <cmath>
 
+// Set once per frame by GameEngine::draw() - DayNightCycle::
+// sky_light_factor(game_tick), the exact same value fed to the chunk
+// mesh's own "daylightFactor" shader uniform (see Chunk.hpp's
+// set_chunk_daylight()) - 1.0 at full day, DayNightCycle::
+// MIN_NIGHT_SKY_LIGHT_FACTOR at full night. entity_environment_tint()
+// below multiplies it into the same sky/block combine the chunk shader
+// does, so a dropped item/particle/the player's own model darken at night
+// in step with the terrain right next to them, not just the chunk mesh.
+// A plain global (an `inline` variable - one shared definition across
+// every translation unit that includes this header, C++17) rather than a
+// parameter threaded through every entity renderer's own draw() call,
+// mirroring the same "GameEngine sets it once per frame, everything else
+// reads it implicitly" shape the chunk shader's own uniforms already use -
+// just on the CPU side instead of the GPU's.
+inline float g_entity_sky_light_factor = 1.0f;
+
+inline void set_entity_daylight_factor(float sky_light_factor)
+{
+    g_entity_sky_light_factor = sky_light_factor;
+}
+
+// Settings > Graphics' brightness slider, mirroring Chunk.hpp's
+// set_chunk_brightness() for dynamic entities - a gamma exponent applied
+// (pow(light, gamma)) to the sky term ONLY, below - never to block light,
+// so a dropped item sitting right next to a torch stays exactly as bright
+// regardless of the slider, the same as a chunk face does (see chunk.fs's
+// own comment for why block light is fully exempt, not just at its own
+// maximum). 1.0 is the slider's own max (a no-op).
+inline float g_entity_brightness_gamma = 1.0f;
+
+inline void set_entity_brightness_factor(float gamma)
+{
+    g_entity_brightness_gamma = gamma;
+}
+
 // Trilinear light sample at an arbitrary point, not just a whole block cell
 // - the same "smooth lighting" idea Chunk::build_mesh()'s own vertex_light()
 // applies to chunk mesh faces (averaging the light of the cells touching a
@@ -15,6 +50,12 @@
 // as living at block *centers* (x+0.5, y+0.5, z+0.5), matching how a block's
 // own face brightness is anchored, so the interpolation lines up with the
 // terrain mesh's own lighting instead of reading half a block offset.
+//
+// Sky and block light are sampled (and interpolated) as two separate
+// channels, same as vertex_light() does for chunk mesh faces, so only the
+// sky channel ever gets g_entity_sky_light_factor applied - block light
+// (torches, lava) reaches full strength on an entity exactly as it always
+// has, day or night.
 inline float sample_light_smooth(const World& world, Vector3 position)
 {
     Vector3 p = {position.x - 0.5f, position.y - 0.5f, position.z - 0.5f};
@@ -25,19 +66,39 @@ inline float sample_light_smooth(const World& world, Vector3 position)
     const float fy = p.y - static_cast<float>(by);
     const float fz = p.z - static_cast<float>(bz);
 
-    auto sample = [&](int dx, int dy, int dz) {
-        return static_cast<float>(world.get_light(bx + dx, by + dy, bz + dz));
+    auto sample_sky = [&](int dx, int dy, int dz) {
+        return static_cast<float>(world.get_sky_light(bx + dx, by + dy, bz + dz));
+    };
+    auto sample_block = [&](int dx, int dy, int dz) {
+        return static_cast<float>(world.get_block_light(bx + dx, by + dy, bz + dz));
     };
 
-    const float x0z0 = sample(0, 0, 0) * (1.0f - fx) + sample(1, 0, 0) * fx;
-    const float x0z1 = sample(0, 0, 1) * (1.0f - fx) + sample(1, 0, 1) * fx;
-    const float x1z0 = sample(0, 1, 0) * (1.0f - fx) + sample(1, 1, 0) * fx;
-    const float x1z1 = sample(0, 1, 1) * (1.0f - fx) + sample(1, 1, 1) * fx;
-    const float y0 = x0z0 * (1.0f - fz) + x0z1 * fz;
-    const float y1 = x1z0 * (1.0f - fz) + x1z1 * fz;
-    const float light = y0 * (1.0f - fy) + y1 * fy;
+    const float sky_x0z0 = sample_sky(0, 0, 0) * (1.0f - fx) + sample_sky(1, 0, 0) * fx;
+    const float sky_x0z1 = sample_sky(0, 0, 1) * (1.0f - fx) + sample_sky(1, 0, 1) * fx;
+    const float sky_x1z0 = sample_sky(0, 1, 0) * (1.0f - fx) + sample_sky(1, 1, 0) * fx;
+    const float sky_x1z1 = sample_sky(0, 1, 1) * (1.0f - fx) + sample_sky(1, 1, 1) * fx;
+    const float sky_y0 = sky_x0z0 * (1.0f - fz) + sky_x0z1 * fz;
+    const float sky_y1 = sky_x1z0 * (1.0f - fz) + sky_x1z1 * fz;
+    const float sky = sky_y0 * (1.0f - fy) + sky_y1 * fy;
 
-    return std::max(MIN_LIGHT_FRACTION, light / static_cast<float>(MAX_LIGHT));
+    const float block_x0z0 = sample_block(0, 0, 0) * (1.0f - fx) + sample_block(1, 0, 0) * fx;
+    const float block_x0z1 = sample_block(0, 0, 1) * (1.0f - fx) + sample_block(1, 0, 1) * fx;
+    const float block_x1z0 = sample_block(0, 1, 0) * (1.0f - fx) + sample_block(1, 1, 0) * fx;
+    const float block_x1z1 = sample_block(0, 1, 1) * (1.0f - fx) + sample_block(1, 1, 1) * fx;
+    const float block_y0 = block_x0z0 * (1.0f - fz) + block_x0z1 * fz;
+    const float block_y1 = block_x1z0 * (1.0f - fz) + block_x1z1 * fz;
+    const float block = block_y0 * (1.0f - fy) + block_y1 * fy;
+
+    // Raw sky/block fractions (no floor yet - see chunk.fs's own comment on
+    // why it's applied last, to the max of both terms, instead of baked
+    // into each one this early). Day/night and the brightness slider's own
+    // gamma both apply to the sky term only; block light (torches, lava)
+    // passes through untouched by either, so it reaches an entity exactly
+    // as strong as it always has.
+    const float sky_fraction = sky / static_cast<float>(MAX_LIGHT);
+    const float block_fraction = block / static_cast<float>(MAX_LIGHT);
+    const float sky_term = std::pow(std::clamp(sky_fraction * g_entity_sky_light_factor, 0.0f, 1.0f), g_entity_brightness_gamma);
+    return std::max(MIN_LIGHT_FRACTION, std::max(block_fraction, sky_term));
 }
 
 // Dynamic geometry is not part of a chunk mesh, so it cannot inherit the

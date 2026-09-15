@@ -13,7 +13,7 @@
 
 class TerrainNoise;
 
-constexpr int CHUNK_SIZE = 16;    // width/depth (X/Z) - chunks are still only streamed in the X/Z grid (World::update_chunk_states), no vertical stacking
+constexpr int CHUNK_SIZE   = 16;  // width/depth (X/Z) - chunks are still only streamed in the X/Z grid (World::update_chunk_states), no vertical stacking
 constexpr int CHUNK_HEIGHT = 384; // Y - a single chunk spans the whole world height, Minecraft 1.18+'s build limit (-64..319)
 
 // World-space Y of a chunk's own local index 0 - Minecraft's own world
@@ -64,9 +64,9 @@ enum class ChunkState : uint8_t {
 // directly above it - acts like a fresh source for spreading sideways
 // *from this layer*, but unlike a real source it dries up if that feed
 // from above stops. Meaningless wherever the block itself isn't Water.
-constexpr uint8_t FLUID_LEVEL_SOURCE = 0;
+constexpr uint8_t FLUID_LEVEL_SOURCE   = 0;
 constexpr uint8_t FLUID_LEVEL_MAX_FLOW = 7;  // farthest a FLOWING level can reach; one more step than this can't flow at all
-constexpr uint8_t FLUID_LEVEL_FALLING = 8;
+constexpr uint8_t FLUID_LEVEL_FALLING  = 8;
 
 // Compiles assets/shaders/chunk.{vs,fs} - raylib's own default mesh shader
 // (texture*vertexColor, so AO/tint already baked into vertex colors by
@@ -106,6 +106,41 @@ void set_chunk_water_time(float time);
 // the only caller.
 void set_chunk_water_pass(bool active);
 
+// Feeds the chunk shader's own day/night dimming - call once per frame
+// (GameEngine::draw() does this, same as set_chunk_fog()) with
+// DayNightCycle::sky_light_factor(game_tick): 1.0 at full day, its own
+// MIN_NIGHT_SKY_LIGHT_FACTOR at full night. The fragment shader multiplies
+// this into each fragment's own sky-light vertex channel only - block
+// light (torches, lava), baked into a separate channel, is never scaled by
+// it - see chunk.fs's own comment.
+void set_chunk_daylight(float sky_light_factor);
+
+// Settings > Graphics' own brightness slider - call once per frame with a
+// gamma exponent derived from settings.brightness (1.0 at the slider's own
+// max - a no-op). Applied as pow(lightScale, gamma) to the *final* combined
+// light strength (block and sky alike, after day/night's own combine), so
+// it only ever darkens shadow: anything already at full strength (direct
+// sunlight, a torch up close) stays pow(1.0, gamma) == 1.0 regardless of
+// the slider, same as real sunlit blocks never dimming from it. A flat
+// client-side render adjustment, not a lighting-simulation value - never
+// touches the skybox/sun/moon/fog (not lit by a block light level at all)
+// or World::get_effective_light()'s own data, only how dim/bright
+// already-computed block lighting reads on screen.
+void set_chunk_brightness(float gamma);
+
+// True only while begin_dynamic_entity_shader()'s own draws (players,
+// item entities, particles) are active. Dynamic entities have no per-
+// vertex sky/block light channels the way a chunk mesh does (see
+// chunk.fs's own comment) - their light is already fully baked into
+// vertexColor by entity_environment_tint(), which folds day/night in
+// itself (EntityLighting.hpp's set_entity_daylight_factor()) - so while
+// this is true, the shader skips its own two-channel combine and just
+// trusts that baked color as-is. begin_dynamic_entity_shader()/
+// end_dynamic_entity_shader() toggle this themselves; World::draw_opaque()/
+// draw_translucent() also set it false before their own chunk-mesh draws,
+// so neither relies on call-order assumptions about the other.
+void set_chunk_dynamic_entity_pass(bool active);
+
 // Dynamic immediate-mode geometry (players, item entities, particles) must
 // use the same fog program as chunk meshes.  Without it, a camera inside
 // water sees fogged terrain but perfectly sharp entities, making them look
@@ -131,6 +166,24 @@ struct ChunkMeshBuffers {
     std::vector<float> normals;
     std::vector<float> texcoords;
     std::vector<unsigned char> colors;
+    // Per-vertex (sky, block) light fractions, each 0..1 - uploaded as the
+    // mesh's texcoords2 (see Chunk::upload_buffers()) rather than baked
+    // into `colors` the way the day/night-independent face-direction
+    // shading is, so chunk.fs can combine them with the current
+    // daylightFactor uniform itself, per fragment, instead of this mesh
+    // needing to be rebuilt whenever the time of day changes.
+    std::vector<float> light;
+
+    // Per-vertex ambient occlusion strength (AO_BRIGHTNESS[ao], 0.5..1.0 -
+    // 1.0 meaning "no occlusion"), 4 identical copies per vertex - uploaded
+    // as the mesh's tangents (unused by chunk meshes otherwise, so it's a
+    // free XYZW slot; only .x is actually read - see Chunk::upload_buffers()).
+    // Kept separate from `colors`' own baked face-direction shading for the
+    // same reason `light` is: chunk.fs blends this dynamically against how
+    // directly sunlit a fragment currently is (see its own comment), so
+    // real Minecraft-style vertex AO doesn't darken a corner that's
+    // actually standing in direct sunlight right now - only true shadow.
+    std::vector<float> ao;
 };
 
 // One distinct transparent-but-not-translucent BlockType's own mesh data -
@@ -361,6 +414,18 @@ public:
     // itself and call this only with this chunk's own local coordinates.
     int get_light(int x, int y, int z) const;
 
+    // The two channels get_light() itself maxes together - torch/lava light
+    // (block) is time-invariant; open-sky light (sky) is the *raw*,
+    // always-fully-lit propagated value real Minecraft itself never
+    // modifies either - day/night dims how much a cell's sky light actually
+    // shows, not the stored value. Public (like get_light()) so World/
+    // GameEngine's own day/night-aware queries (World::get_effective_light())
+    // and the chunk mesh's own two-channel vertex data (see build_mesh())
+    // can read each channel separately instead of only ever seeing them
+    // pre-combined.
+    int get_sky_light(int x, int y, int z) const;
+    int get_block_light(int x, int y, int z) const;
+
     // Guards blocks/light/fluid_level/column biome tints/highest_block_y
     // once this chunk is live in World::chunks and so reachable from more
     // than one thread (ChunkWorkerPool's background workers, alongside the
@@ -420,9 +485,7 @@ private:
     // including air, let light pass through). Out-of-range counts as open.
     bool is_opaque(int x, int y, int z) const;
 
-    int get_sky_light(int x, int y, int z) const;
     void set_sky_light(int x, int y, int z, int value);
-    int get_block_light(int x, int y, int z) const;
     void set_block_light(int x, int y, int z, int value);
 
     std::array<BlockType, CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE> blocks;

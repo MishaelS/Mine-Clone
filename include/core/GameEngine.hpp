@@ -23,6 +23,7 @@
 #include "ui/SettingsScreen.hpp"
 #include "ui/PauseMenuScreen.hpp"
 #include "ui/InventoryHud.hpp"
+#include "ui/ChatHud.hpp"
 #include "world/World.hpp"
 
 // A leaf block found disconnected from every nearby log (see
@@ -33,20 +34,10 @@
 // every other world-simulation timer here - so it (like the chunk/fluid/
 // falling-block/dropped-item simulation tick() already drives) keeps
 // advancing at Minecraft's own steady 20/second regardless of the render
-// frame rate, and keeps running even while the inventory screen owns
-// input (see update()'s own early-return once the grid is open - it
-// happens after tick()'s own dispatch in run(), not inside it, so nothing
-// here is gated on the grid being closed the way player movement/camera
-// control is).
+// frame rate, and keeps running even while a UI screen (inventory, chat)
+// owns input in update() - see update()'s own ui_captured, which tick()
+// itself was never gated on to begin with.
 struct PendingLeafDecay {
-    int x, y, z;
-    int remaining_ticks;
-};
-
-// A planted Sapling block (see GameEngine::queue_sapling_growth) waiting
-// to become a tree - one entry per placement, counted down the same way
-// PendingLeafDecay is.
-struct PendingSaplingGrowth {
     int x, y, z;
     int remaining_ticks;
 };
@@ -71,16 +62,16 @@ public:
 private:
     // Fixed-rate game-logic step, called exactly 20 times per second of real
     // time regardless of the render frame rate (see run()) - Minecraft's own
-    // tick rate. Every piece of world simulation that isn't purely visual
+    // tick rate, and the same clock game_tick/DayNightCycle's sun and moon
+    // advance on. Every piece of world simulation that isn't purely visual
     // hangs off this clock: chunk streaming, fluids, falling blocks,
-    // dropped-item physics, leaf decay, and sapling growth. Called
+    // dropped-item physics, leaf decay, sapling/crop random ticks. Called
     // unconditionally from run() whenever state == GameState::Playing,
-    // independent of update()'s own early-return while the inventory
-    // screen is open - so the world keeps existing (chunks load, water
-    // flows, a planted sapling keeps counting down) even while the player
-    // is just browsing their inventory, not merely while they're actively
-    // playing. Day/night and scheduled block updates/random ticks are
-    // still future work, but would hook in here the same way.
+    // regardless of whether a UI screen (inventory, chat) currently owns
+    // input in update() - so the world keeps existing (chunks load, water
+    // flows, a planted sapling keeps getting its random-tick chance to grow)
+    // even while the player is just browsing their inventory, not merely
+    // while they're actively playing.
     void tick();
 
     void update(float delta_time);
@@ -124,26 +115,32 @@ private:
     // natural break.
     void update_leaf_decay();
 
-    // Called right after a Sapling is successfully placed (World::
-    // place_block already restricts that to Grass/Dirt) - queues it into
-    // pending_sapling_growth with a randomized delay (see
-    // update_sapling_growth()) rather than growing it on the spot.
-    void queue_sapling_growth(int x, int y, int z);
+    // Real Minecraft's own "random tick" mechanism, the shared dispatcher
+    // every random-tick-driven block (currently just OakSapling; a future
+    // crop would hook in the same way) grows/decays through instead of each
+    // scheduling its own individual timer: called once per game tick (see
+    // tick()), and for every currently loaded chunk (World::
+    // loaded_chunk_coordinates()) picks RANDOM_TICK_SPEED random block
+    // positions inside it and dispatches on whatever block actually
+    // happens to be there right now. This is why a lone sapling can sit
+    // for minutes - it only gets its growth roll on the rare tick the
+    // dispatcher's own random pick happens to land exactly on it.
+    void update_random_ticks();
 
-    // Every-tick (see tick()) drain of pending_sapling_growth: counts each
-    // entry's own delay down by one tick, and once it elapses, re-checks
-    // the block there is still a Sapling (it may have been broken, or
-    // something else placed over it, since queued) before growing an oak
-    // tree from it - make_oak_tree()'s own template (see
-    // StructureGenerator, which places the exact same shape at world-
-    // generation time), placed here through World::place_structure_block()
-    // instead of Chunk::set_block() since this runs at an arbitrary world
-    // position at runtime, not bounded to one already-open Chunk. If the
-    // trunk's column isn't clear (something built overhead since it was
-    // planted), the attempt is deferred and retried shortly instead of
-    // discarded, same as vanilla re-rolling a blocked sapling on its next
-    // random tick.
-    void update_sapling_growth();
+    // One random-tick hit on an OakSapling at (x, y, z) (see
+    // update_random_ticks()) - rolls a 1-in-7 chance (real Minecraft's own
+    // sapling growth odds) to grow it into an oak tree right now. On a
+    // successful roll, still backs off harmlessly if the trunk's own
+    // column isn't clear (something built overhead since it was planted):
+    // there's no explicit retry to schedule the way the old per-sapling
+    // timer needed, since a blocked sapling simply gets another
+    // independent 1-in-7 roll on some future random tick for free. Grows
+    // via make_oak_tree()'s own template (see StructureGenerator, which
+    // places the exact same shape at world-generation time), placed here
+    // through World::place_structure_block() instead of Chunk::set_block()
+    // since this runs at an arbitrary world position at runtime, not
+    // bounded to one already-open Chunk.
+    void update_sapling_growth(int x, int y, int z);
 
     // Called right after any block is removed - ShortGrass (and anything
     // else non-solid that needs ground under it) can't stay floating in
@@ -194,6 +191,31 @@ private:
     // contents along with the block. No-op if the chest was empty/never
     // opened (take_chest_inventory() just returns all-empty then).
     void spill_chest_if_any(int x, int y, int z);
+
+    // Chat submit (draw()'s own call into chat_hud.update_and_draw()): a
+    // "/"-prefixed line goes to execute_chat_command() below, anything else
+    // just gets echoed back into the log under the player's own name - see
+    // ChatHud's own comment on why there's no one else to actually send it
+    // to yet.
+    void handle_chat_submit(const std::string& text);
+
+    // Parses and runs one command (already stripped of its leading "/") -
+    // a deliberately small subset of real Minecraft's own command set,
+    // picked for what this project actually has underlying systems for
+    // (no entities/mobs, no enchanting, no hunger/XP, no gamerules, no
+    // weather/difficulty, no multiplayer) - anything else replies with a
+    // plain "not supported" message instead of silently doing nothing.
+    // Every reply/error - success or not - goes back through
+    // chat_hud.push_message().
+    void execute_chat_command(const std::string& command);
+
+    // saves/<folder>/'s custom world spawn (from a bare "/setworldspawn"
+    // using the player's own current feet position, or one given explicit
+    // coordinates) - std::nullopt uses World::find_spawn_position()'s own
+    // default instead. Session-only for now (not written to world.json),
+    // consulted only by respawn_player(); a fresh session still starts at
+    // the world's own default spawn via set_world().
+    std::optional<Vector3> world_spawn_override;
 
     Camera3D make_render_camera() const;
     void draw_player_model() const;
@@ -311,9 +333,9 @@ private:
     // WorldSave persists both the hotbar and storage grids.
     Inventory inventory = default_inventory();
     InventoryHud inventory_hud;
+    ChatHud chat_hud;
     std::vector<std::unique_ptr<DroppedItem>> dropped_items;
     std::vector<PendingLeafDecay> pending_leaf_decay;
-    std::vector<PendingSaplingGrowth> pending_sapling_growth;
     ParticleSystem particles;
     float footstep_particle_distance = 0.0f;
 

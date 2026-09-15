@@ -27,6 +27,7 @@ namespace {
         {"settings.scale.1", "Стандартный"}, {"settings.scale.2", "Средний"},
         {"settings.scale.3", "Большой"}, {"settings.scale.4", "Огромный"},
         {"settings.render", "Дальность рендера"}, {"settings.fog", "Дальность видимости"},
+        {"settings.brightness", "Яркость"},
         {"settings.fps", "Ограничение FPS"}, {"settings.filter", "Фильтрация"},
         {"settings.point", "Пиксельная"}, {"settings.smooth", "Плавная"},
         {"settings.master", "Общая громкость"}, {"settings.effects", "Блоки и шаги"},
@@ -56,6 +57,7 @@ namespace {
         {"settings.scale.1", "Standard"}, {"settings.scale.2", "Medium"},
         {"settings.scale.3", "Large"}, {"settings.scale.4", "Huge"},
         {"settings.render", "Render Distance"}, {"settings.fog", "Fog Distance"},
+        {"settings.brightness", "Brightness"},
         {"settings.fps", "Max Framerate"}, {"settings.filter", "Filtering"},
         {"settings.point", "Pixel Perfect"}, {"settings.smooth", "Smooth"},
         {"settings.master", "Master Volume"}, {"settings.effects", "Blocks & Steps"},
@@ -210,32 +212,28 @@ namespace {
 
 namespace ui {
 
-void set_language(const std::string& language_code)
-{
-    current_language = language_code == "en" ? "en" : "ru";
-}
+    void set_language(const std::string& language_code) {
+        current_language = language_code == "en" ? "en" : "ru";
+    }
 
-const std::string& language() { return current_language; }
+    const std::string& language() { return current_language; }
 
-std::string block_display_name(BlockType type)
-{
-    const std::string& id = get_block_name(type);
-    return display_name("block." + id, id, current_language == "en");
-}
+    std::string block_display_name(BlockType type) {
+        const std::string& id = get_block_name(type);
+        return display_name("block." + id, id, current_language == "en");
+    }
 
-std::string item_display_name(ItemType type)
-{
-    const std::string id = type == ItemType::None ? "none" : get_item_name(type);
-    return display_name("item." + id, id, current_language == "en");
-}
+    std::string item_display_name(ItemType type) {
+        const std::string id = type == ItemType::None ? "none" : get_item_name(type);
+        return display_name("item." + id, id, current_language == "en");
+    }
 
-const std::string& tr(std::string_view key)
-{
-    const Dictionary& dictionary = current_language == "en" ? EN : RU;
-    auto found = dictionary.find(key);
-    if (found != dictionary.end()) return found->second;
-    auto content = CONTENT_NAMES.find(key);
-    return content == CONTENT_NAMES.end() ? missing : content->second[current_language == "en" ? 1 : 0];
-}
+    const std::string& tr(std::string_view key) {
+        const Dictionary& dictionary = current_language == "en" ? EN : RU;
+        auto found = dictionary.find(key);
+        if (found != dictionary.end()) return found->second;
+        auto content = CONTENT_NAMES.find(key);
+        return content == CONTENT_NAMES.end() ? missing : content->second[current_language == "en" ? 1 : 0];
+    }
 
 }
