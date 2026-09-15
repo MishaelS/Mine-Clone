@@ -70,11 +70,9 @@ struct Inventory {
     bool put_back(const ItemStack& stack);
 };
 
-// A survival-style inventory: empty except for the handful of starting
-// tools below. Blocks otherwise enter it only through world drops - and
-// with no crafting system yet, a fresh tool has no other way in either, so
-// default_inventory() is currently the only source of one. Revisit once
-// crafting exists and remove these.
+// A survival-style inventory: starts completely empty (no starting tools -
+// removed by request). Blocks/tools only ever enter it through world drops
+// (and, once a crafting system exists, crafting) from here on.
 Inventory default_inventory();
 
 // Unlimited creative hotbar seed (the first nine registered blocks) and

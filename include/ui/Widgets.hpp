@@ -8,14 +8,18 @@
 #include <functional>
 #include <string>
 
-// Minimal hand-rolled immediate-mode widget set for the menu screens - no
-// GUI library is linked in this project (raygui.h exists only, unused,
-// inside external/raylib/examples/), so every screen (MainMenuScreen,
+// Widget set for the menu screens - every screen (MainMenuScreen,
 // WorldListScreen, WorldCreateScreen, SettingsScreen) builds its layout out
-// of these. No widget IDs or persistent hover/focus state here - each call
-// recomputes hover purely from the current mouse position, and a caller
-// that needs focus (text_input) tracks which field is focused itself and
-// passes it in.
+// of these. Callers never see it, but internally button()/text_input()/
+// slider_int() are backed by raygui (external/raygui) rather than
+// hand-rolled hit-testing: it owns click-edge/disabled-gating/keyboard
+// focus/drag-outside-bounds capture, while button() still draws its own
+// Minecraft nine-patch texture on top (raygui has no notion of that art
+// style) and text_input()/slider_int() get a restyled-to-match-the-theme
+// version of raygui's own look. See src/ui/Widgets.cpp. No widget IDs or
+// persistent hover state beyond that here - each call recomputes hover
+// purely from the current mouse position, and a caller that needs focus
+// (text_input) tracks which field is focused itself and passes it in.
 namespace ui {
     // One scale shared by every menu widget and in-game HUD. Levels mirror
     // Minecraft's GUI scale option: 1 standard, 2 medium, 3 large, 4 huge.
@@ -26,8 +30,8 @@ namespace ui {
     int scaled_font(int value);
     int text_size();
     constexpr float BUTTON_HEIGHT = 40.0f;
-    constexpr float BUTTON_GAP = 8.0f;
-    constexpr float MENU_WIDTH = 640.0f;
+    constexpr float BUTTON_GAP    = 8.0f;
+    constexpr float MENU_WIDTH    = 640.0f;
     enum class TextAlign { Center, Left };
     void begin_frame();
 
@@ -83,7 +87,9 @@ namespace ui {
     // separate segmented-control widget.
     // `enabled = false` grays it out and never returns true, however the
     // mouse moves - used for the still-unimplemented "Сетевая игра".
-    // Returns true on the exact frame it's clicked.
+    // Returns true once, the frame the button is released (raygui's own
+    // click-edge convention - a drag-off-then-release cancels the click,
+    // unlike a plain press check).
     bool button(Rectangle bounds, const std::string& text, bool selected = false, bool enabled = true);
 
     struct TextInputState {
@@ -91,18 +97,23 @@ namespace ui {
         size_t max_codepoints = 32;   // counted in codepoints, not bytes - a Cyrillic name is 2 bytes/letter
     };
 
-    // While `focused`, appends this frame's typed characters (GetCharPressed(),
-    // UTF-8-encoded) to state.text, and Backspace (incl. held-key repeat)
-    // removes exactly one trailing UTF-8 codepoint (never leaves a
-    // dangling continuation byte from a multi-byte Cyrillic character).
-    // Draws the field's box/border and current text/cursor regardless of
-    // focus. Returns true if the box itself was clicked this frame - the
-    // caller updates its own idea of which field is focused from that;
-    // this function doesn't track focus across calls.
+    // While `focused` (raygui's "edit mode"), edits state.text in place:
+    // UTF-8 typing, backspace/delete (incl. held-key repeat and word-skip
+    // with Ctrl), arrow-key/click-to-position caret, and Ctrl+V paste, all
+    // handled by raygui's GuiTextBox. Draws the field's box/border and
+    // current text/caret regardless of focus. Returns true if the box
+    // itself was clicked this frame - the caller updates its own idea of
+    // which field is focused from that; this function doesn't track focus
+    // across calls. state.max_codepoints is still enforced afterwards
+    // (raygui only knows about its scratch buffer's byte size, not the
+    // caller's codepoint budget - a Cyrillic name is 2 bytes/letter).
     bool text_input(Rectangle bounds, TextInputState& state, bool focused);
 
-    // Full button-height Minecraft slider with its caption centered on the
-    // track. Captures the pointer until release, even outside its bounds.
+    // Full button-height slider with its caption centered on the track,
+    // restyled to the game's dark theme rather than Minecraft's own pixel
+    // art (no bespoke slider texture exists for raygui to skin with).
+    // Backed by raygui's GuiSlider, which already captures the pointer
+    // until release even outside its bounds.
     bool slider_int(Rectangle bounds, const std::string& label_text, int& value, int min_value, int max_value);
 
     // Draws `type` as a three-face isometric block item using its top and

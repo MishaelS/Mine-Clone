@@ -27,6 +27,14 @@ enum class ItemType : uint8_t {
     Stick, Coal, IronIngot, GoldIngot, Diamond, RedstoneDust,
     Sapling, Apple, WheatSeeds,
 
+    // Food - a Material like the ones above (stacks, no durability), plus
+    // ItemProperties::heal_amount > 0 marks it edible - see PlayerHealth::
+    // heal() and GameEngine's own right-click-to-eat handling. No hunger
+    // system exists here, so eating restores health directly instead of a
+    // separate hunger bar the way vanilla's foods do.
+    GoldenApple, Soup, RawPorkchop, CookedPorkchop, RawFish, CookedFish,
+    Bread, Cookie, Egg, MilkBucket,
+
     Count, // not a real item; sentinel for table sizing
 };
 
@@ -50,6 +58,7 @@ struct ItemProperties {
     // pickaxe still can't mine Iron ore). 0 for a Material (unused).
     int tier = 0;
     Rectangle atlas_source;        // pixel-space rect within items.png (not normalized - DrawTexturePro takes pixels)
+    int heal_amount = 0;           // half-hearts restored on eating (PlayerHealth's own unit) - 0 for anything not food
 };
 
 // Uploads items.png and fills the ItemType -> ItemProperties table. Every

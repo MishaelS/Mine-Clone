@@ -53,6 +53,16 @@ namespace {
         item_names[index] = name;
     }
 
+    // Same as define_material() plus how many half-hearts eating it
+    // restores (ItemProperties::heal_amount) - see PlayerHealth::heal()
+    // and GameEngine's own right-click-to-eat handling.
+    void define_food(ItemType type, const char* name, const char* display_name, int heal_amount, int col, int row)
+    {
+        size_t index = static_cast<size_t>(type);
+        item_table[index] = {display_name, ItemCategory::Material, ToolKind::None, 0, 1.0f, 0, tile(col, row), heal_amount};
+        item_names[index] = name;
+    }
+
 }
 
 void Load_item_definitions()
@@ -103,8 +113,25 @@ void Load_item_definitions()
     define_material(ItemType::Diamond    , "diamond"      , "Алмаз"          ,  7,  3);
     define_material(ItemType::RedstoneDust,"redstone_dust", "Редстоун"       ,  8,  3);
     define_material(ItemType::Sapling    , "sapling"      , "Саженец"        , 14,  2);
-    define_material(ItemType::Apple      , "apple"        , "Яблоко"         , 10,  0);
     define_material(ItemType::WheatSeeds , "wheat_seeds"  , "Семена пшеницы" ,  9,  0);
+
+    // Food - tile coordinates read directly off this project's own
+    // items.png (verified by inspecting the atlas image, not guessed).
+    // heal_amount is in half-hearts (PlayerHealth's own unit, 2 per
+    // heart) - roughly Beta/modern Minecraft's own hunger-point values for
+    // each food, just applied straight to health since there's no hunger
+    // bar here for them to restore instead (see Item.hpp's own comment).
+    define_food(ItemType::Apple,          "apple",           "Яблоко",           4, 10, 0);
+    define_food(ItemType::GoldenApple,    "golden_apple",    "Золотое яблоко",  10, 11, 0);
+    define_food(ItemType::Soup,           "soup",            "Суп",              6,  8, 4);
+    define_food(ItemType::RawPorkchop,    "raw_porkchop",    "Сырая свинина",    3,  7, 5);
+    define_food(ItemType::CookedPorkchop, "cooked_porkchop", "Жареная свинина",  8,  8, 5);
+    define_food(ItemType::RawFish,        "raw_fish",        "Сырая рыба",       2,  9, 5);
+    define_food(ItemType::CookedFish,     "cooked_fish",     "Жареная рыба",     5, 10, 5);
+    define_food(ItemType::Bread,          "bread",           "Хлеб",             5,  9, 2);
+    define_food(ItemType::Cookie,         "cookie",          "Печенье",          2, 12, 5);
+    define_food(ItemType::Egg,            "egg",             "Яйцо",             2, 12, 0);
+    define_food(ItemType::MilkBucket,     "milk_bucket",     "Ведро молока",     6, 13, 4);
 }
 
 const ItemProperties& get_item_properties(ItemType type)

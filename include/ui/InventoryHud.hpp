@@ -49,6 +49,13 @@ public:
     // GameEngine::update() just sets inventory.selected_slot directly.
     void draw_hotbar(const Inventory& inventory) const;
 
+    // The row of 10 hearts above the hotbar (Survival only - GameEngine
+    // never calls this in Creative, matching real Minecraft hiding its own
+    // health/hunger bars there). `health`/`max_health` are PlayerHealth's
+    // own half-heart units - see assets/sprites/gui/hearts/heart{0,1,2}.png
+    // for the full/half/empty frames this steps through per heart.
+    void draw_hearts(int health, int max_health) const;
+
     // Creative shows its paged unlimited block catalog. Survival draws
     // storage + mirrored hotbar and implements vanilla-style left/right
     // click, half stacks, Shift quick-move, double-click gather, number-key

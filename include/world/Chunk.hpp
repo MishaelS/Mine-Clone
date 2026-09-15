@@ -80,12 +80,16 @@ void load_chunk_shader();
 // Configures every chunk's shared atlas material for distance fog - call
 // once per frame (World::draw() does this) before any Chunk::draw(), since
 // camera_position changes every frame. Fragments at or past fog_end fade
-// fully to fog_color; fragments before fog_start are unaffected; a linear
-// ramp fills the gap between them (world units from the camera). fog_color
-// should match the skybox's own horizon color (skybox_horizon_color(),
-// Skybox.hpp) so the render-distance edge reads as fading into the sky
-// instead of a hard cutoff where chunks just stop being drawn.
-void set_chunk_fog(Vector3 camera_position, Color fog_color, float fog_start, float fog_end);
+// fully to a fog color; fragments before fog_start are unaffected; a
+// linear ramp fills the gap between them (world units from the camera).
+// That fog color itself isn't flat - the shader blends fog_color toward
+// fog_sky_color as the view ray tilts upward (fog_color at eye level,
+// fog_sky_color straight up), matching the skybox's own vertical gradient
+// (skybox_horizon_color()/skybox_sky_color(), Skybox.hpp) instead of one
+// fixed tone, so a chunk silhouette rising above the horizon line fogs
+// into whatever sky color actually sits behind it at that height rather
+// than staying visible as a mismatched pale shape against a bluer sky.
+void set_chunk_fog(Vector3 camera_position, Color fog_color, Color fog_sky_color, float fog_start, float fog_end);
 
 // Feeds the water shader's own animation its clock - call once per frame
 // (World::draw() does this, same as set_chunk_fog()) with seconds since

@@ -21,11 +21,17 @@ uniform sampler2D texture0;
 uniform vec4 colDiffuse;
 
 // Set once per frame from World::draw() (see Chunk.hpp's set_chunk_fog) -
-// fogColor matches the skybox's own horizon color, so the render-distance
-// edge reads as fading into the sky instead of a hard cutoff where chunks
-// just stop being drawn. fogStart/fogEnd come from World::LOADED_RADIUS.
+// fogColor/fogSkyColor match the skybox's own horizon/sky gradient (see
+// Skybox.cpp), so the render-distance edge reads as fading into the sky
+// instead of a hard cutoff where chunks just stop being drawn - blended
+// per-fragment between the two below, by view angle, rather than tinting
+// every fragment with the flat horizon color alone; that left a mismatch
+// visible as a pale silhouette wherever terrain rose above the horizon
+// line, fogged a shade too light against the bluer sky actually behind
+// it. fogStart/fogEnd come from World::LOADED_RADIUS.
 uniform vec3 cameraPosition;
 uniform vec3 fogColor;
+uniform vec3 fogSkyColor;
 uniform float fogStart;
 uniform float fogEnd;
 
@@ -70,5 +76,14 @@ void main()
 
     float distance = length(fragWorldPosition - cameraPosition);
     float fogFactor = clamp((distance - fogStart) / (fogEnd - fogStart), 0.0, 1.0);
-    finalColor.rgb = mix(finalColor.rgb, fogColor, fogFactor);
+
+    // Same horizon->sky blend draw_skybox()'s own cube gradient makes by
+    // vertical position, approximated here by the view ray's own upward
+    // component instead (level = fogColor, straight up = fogSkyColor) -
+    // downward view rays clamp to fogColor too, since nothing below the
+    // horizon in this skybox gets any bluer.
+    vec3 viewDir = normalize(fragWorldPosition - cameraPosition);
+    vec3 skyTintedFogColor = mix(fogColor, fogSkyColor, clamp(viewDir.y, 0.0, 1.0));
+
+    finalColor.rgb = mix(finalColor.rgb, skyTintedFogColor, fogFactor);
 }

@@ -207,6 +207,22 @@ public:
     // ever starts dispatching background work.
     void update_chunk_states_blocking(Vector3 observer_position);
 
+    // Applies a live change to config.loaded_radius_chunks/fog_distance_
+    // blocks (Settings' render/fog distance sliders) - GameEngine::tick()
+    // calls this once a tick whenever a world exists, so a change made
+    // from the pause menu takes effect immediately instead of only on the
+    // next world started (see GameEngine::start_singleplayer_world(),
+    // which is where these first come from). A no-op call when neither
+    // value actually changed, so this is cheap to call unconditionally.
+    // fog_distance_blocks needs nothing further - draw_opaque() already
+    // reads config.fog_distance_blocks fresh every frame - but
+    // loaded_radius_chunks also resets last_observer_chunk, forcing the
+    // very next update_chunk_states() to rescan even if the observer
+    // hasn't left their current chunk since the last call (that alone is
+    // what decides its own early-out, so a changed radius would otherwise
+    // sit unapplied until the player actually moved).
+    void set_view_distance(int loaded_radius_chunks, int fog_distance_blocks);
+
     // Drains a small, bounded number of finished background results
     // (ChunkWorkerPool::drain_gen_results()/drain_mesh_results()) and
     // integrates them: a finished generation result gets inserted into

@@ -5,8 +5,8 @@
 #include "raylib.h"
 
 namespace {
-    constexpr float BUTTON_WIDTH = 400.0f;
-    constexpr float BUTTON_HEIGHT = ui::BUTTON_HEIGHT;
+    constexpr float BUTTON_WIDTH   = 400.0f;
+    constexpr float BUTTON_HEIGHT  = ui::BUTTON_HEIGHT;
     constexpr float BUTTON_SPACING = ui::BUTTON_GAP;
     constexpr Color OVERLAY_COLOR = {0, 0, 0, 105};
 }

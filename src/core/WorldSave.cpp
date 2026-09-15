@@ -252,7 +252,8 @@ namespace WorldSave {
             if (i + 1 < state.inventory.storage.size()) out << ", ";
         }
         out << "],\n";
-        out << "  \"selected_slot\": " << state.inventory.selected_slot << "\n";
+        out << "  \"selected_slot\": " << state.inventory.selected_slot << ",\n";
+        out << "  \"health\": " << state.health << "\n";
         out << "}\n";
 
         return static_cast<bool>(out);
@@ -295,6 +296,11 @@ namespace WorldSave {
             if (state.inventory.selected_slot < 0 || state.inventory.selected_slot >= HOTBAR_SIZE) {
                 state.inventory.selected_slot = 0;
             }
+
+            // Missing (a save from before health existed) defaults to full
+            // health (20 - PlayerHealth::MAX_HEALTH, not included here just
+            // for this one constant - see the header's own comment).
+            state.health = std::clamp(static_cast<int>(root["health"].as_number(20.0)), 0, 20);
 
             return state;
         } catch (const std::exception&) {

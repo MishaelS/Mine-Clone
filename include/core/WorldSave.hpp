@@ -28,9 +28,14 @@ struct WorldInfo {
 // separate from world.json's immutable creation metadata (name/seed/mode),
 // since this changes on every exit while that never does.
 struct PlayerSaveState {
-    Vector3 position = {0.0f, 0.0f, 0.0f};    // camera position (eye height already included)
-    Vector3 forward = {0.0f, 0.0f, -1.0f};    // normalized look direction - camera.target is reconstructed from this on load
+    Vector3 position = {0.0f, 0.0f,  0.0f};    // camera position (eye height already included)
+    Vector3 forward  = {0.0f, 0.0f, -1.0f};    // normalized look direction - camera.target is reconstructed from this on load
     Inventory inventory;
+    // Half-heart units, same as PlayerHealth::MAX_HEALTH (kept as a plain
+    // int here rather than including player/PlayerHealth.hpp, which this
+    // header has no other reason to depend on). Missing in an older save
+    // defaults to full health - see WorldSave::load_player_state().
+    int health = 20;
 };
 
 // A dropped item still sitting on the ground, last time this world was

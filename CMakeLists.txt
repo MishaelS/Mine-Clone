@@ -19,6 +19,14 @@ set(FASTNOISE2_TOOLS OFF CACHE BOOL "" FORCE)
 set(FASTNOISE2_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(external/FastNoise2)
 
+# raygui: single-header immediate-mode GUI widgets for raylib. Drives the
+# menu screens' interactive controls (buttons, text boxes, sliders) - see
+# src/ui/Widgets.cpp - instead of this project hand-rolling its own
+# hit-testing/focus/drag state machine for them. Header-only: its
+# implementation is compiled once, in src/ui/RayGuiImpl.cpp.
+add_library(raygui INTERFACE)
+target_include_directories(raygui INTERFACE external/raygui/src)
+
 add_executable(${PROJECT_NAME}
     # Application and reusable core services
     src/main.cpp
@@ -38,6 +46,7 @@ add_executable(${PROJECT_NAME}
     src/player/Entity.cpp
     src/player/Inventory.cpp
     src/player/PlayerController.cpp
+    src/player/PlayerHealth.cpp
     src/player/Item.cpp
     src/player/DroppedItem.cpp
     src/player/DropTable.cpp
@@ -55,6 +64,7 @@ add_executable(${PROJECT_NAME}
     src/worldgen/StructureGenerator.cpp
 
     # UI: reusable widgets and independent screens
+    src/ui/RayGuiImpl.cpp
     src/ui/Widgets.cpp
     src/ui/Localization.cpp
     src/ui/FontManager.cpp
@@ -73,7 +83,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE include)
 # actual thread library linked in, unlike raylib/FastNoise2 which don't
 # require this on their own.
 find_package(Threads REQUIRED)
-target_link_libraries(${PROJECT_NAME} PRIVATE raylib FastNoise Threads::Threads)
+target_link_libraries(${PROJECT_NAME} PRIVATE raylib FastNoise Threads::Threads raygui)
 target_compile_definitions(${PROJECT_NAME} PRIVATE
     ASSETS_PATH="${CMAKE_SOURCE_DIR}/assets/"
     SAVE_DATA_PATH="${CMAKE_SOURCE_DIR}/"

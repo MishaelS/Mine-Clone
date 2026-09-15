@@ -9,9 +9,9 @@
 #include <cstdint>
 
 namespace {
-    constexpr int CANDIDATE_CELL_SIZE = 4;
-    constexpr int TREE_RADIUS = 2;
-    constexpr int MIN_TREE_HEIGHT = 4;
+    constexpr int CANDIDATE_CELL_SIZE  = 4;
+    constexpr int TREE_RADIUS          = 2;
+    constexpr int MIN_TREE_HEIGHT      = 4;
     constexpr int TREE_HEIGHT_VARIANTS = 3;
     constexpr uint32_t SHORT_GRASS_SEED_SALT = 0x6A09E667u;
 
@@ -21,11 +21,11 @@ namespace {
     {
         switch (biome) {
             case Biome::Forest: return 0.68f;
-            case Biome::Hills:  return 0.23f;
+            case Biome::Hills : return 0.23f;
             case Biome::Plains: return 0.09f;
             case Biome::Desert:
-            case Biome::Ocean:
-            case Biome::Sea:    return 0.0f;
+            case Biome::Ocean :
+            case Biome::Sea   : return 0.0f;
         }
         return 0.0f;
     }
@@ -35,10 +35,10 @@ namespace {
         switch (biome) {
             case Biome::Plains: return 0.30f;
             case Biome::Forest: return 0.20f;
-            case Biome::Hills:  return 0.10f;
+            case Biome::Hills : return 0.10f;
             case Biome::Desert:
-            case Biome::Ocean:
-            case Biome::Sea:    return 0.0f;
+            case Biome::Ocean :
+            case Biome::Sea   : return 0.0f;
         }
         return 0.0f;
     }

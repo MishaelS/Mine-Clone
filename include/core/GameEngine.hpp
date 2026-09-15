@@ -13,6 +13,7 @@
 #include "player/Inventory.hpp"
 #include "player/DroppedItem.hpp"
 #include "player/PlayerController.hpp"
+#include "player/PlayerHealth.hpp"
 #include "effects/ParticleSystem.hpp"
 #include "rendering/PlayerRenderer.hpp"
 #include "audio/AudioSystem.hpp"
@@ -107,6 +108,40 @@ private:
     // resolve_block_drops() table a manual break would (bare-handed).
     void check_grass_support_above(int x, int y, int z);
 
+    // Survival-only environmental damage - fall, drowning, lava/fire,
+    // cactus, suffocation and the void safety net - checked every frame
+    // against PlayerController's own freshly-computed contact flags (see
+    // its is_in_lava()/is_touching_cactus()/is_head_submerged()/
+    // is_suffocating()) plus the void-Y check against camera.position
+    // itself. Also advances player_health's own invulnerability/regen
+    // clock and, once dead, counts down to respawn_player(). No-op outside
+    // Survival - Creative is invulnerable, same as real Minecraft, and
+    // player_health simply never leaves full health there.
+    void update_player_damage(float delta_time);
+
+    // Applies `amount` half-hearts from `source` via player_health.damage()
+    // and, if it actually landed (not blocked by invulnerability), kicks
+    // off the red hurt-flash overlay (see hurt_flash_seconds/draw()).
+    void apply_damage(int amount, DamageSource source);
+
+    // Teleports the camera back to World::find_spawn_position() (the same
+    // fixed point a brand-new session on this world starts at - this
+    // project has no bed/respawn-anchor system) and resets every piece of
+    // per-life state (health, fire, air, controller velocity) - called
+    // automatically by update_player_damage() a couple seconds after
+    // death, real Minecraft's own death-screen delay just without the
+    // screen or its click-to-respawn button. Inventory is left untouched -
+    // there's no drop-on-death here (yet).
+    void respawn_player();
+
+    // Zeroes every per-life timer (burning, breath, suffocation, the hurt
+    // flash, the death/respawn countdown) - shared by set_world(),
+    // start_singleplayer_world()'s saved-state path and respawn_player(),
+    // everywhere a life is starting fresh. Doesn't touch player_health
+    // itself - callers decide separately whether that means reset() (full
+    // health) or restoring a specific saved value (set_health()).
+    void reset_life_timers();
+
     // Called right after a Chest block is removed - spills whatever
     // World::chest_inventory() had stored there as ordinary dropped items
     // (same as a real Minecraft chest) instead of silently deleting its
@@ -182,7 +217,40 @@ private:
     // rendering, so they never move the PlayerController hitbox.
     Camera3D camera;
     PlayerController player_controller;
+    PlayerHealth player_health; // Survival only - see update_player_damage()
     PlayerRenderer player_renderer;
+
+    // Drowning: seconds of air left, drained while PlayerController reports
+    // the eye position submerged and restored otherwise - once it hits 0
+    // and the head is still under, drown_damage_timer paces the resulting
+    // damage at one hit/second the same way real Minecraft's own breath
+    // meter does.
+    float air_seconds        = 15.0f;
+    float drown_damage_timer = 0.0f;
+
+    // Burning: real Minecraft sets an entity that touches lava on fire for
+    // a fixed duration (independent of how brief the contact was) rather
+    // than only hurting it while actually inside the lava - lava contact
+    // itself is checked directly against PlayerController::is_in_lava() and
+    // doesn't need its own timer since its 0.5s damage interval already
+    // matches player_health's own post-hit invulnerability window.
+    float fire_seconds_remaining = 0.0f;
+    float fire_damage_timer      = 0.0f;
+
+    float suffocation_damage_timer = 0.0f;
+
+    // Death/respawn: set the instant player_health.is_dead() first becomes
+    // true (see was_dead_last_frame), counts down in update_player_damage()
+    // to the automatic respawn_player() call.
+    float death_respawn_timer = 0.0f;
+    bool was_dead_last_frame = false;
+
+    // Brief red screen flash whenever apply_damage() actually lands a hit -
+    // draw()'s only feedback for taking damage (there's no hurt sound/hit
+    // animation asset in this project yet). Counts down to 0 in draw().
+    float hurt_flash_seconds = 0.0f;
+
+
     enum class CameraView : uint8_t { FirstPerson, ThirdPersonBack, ThirdPersonFront };
     CameraView camera_view = CameraView::FirstPerson;
     std::vector<std::unique_ptr<GameObject>> objects;

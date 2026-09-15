@@ -5,6 +5,7 @@
 #include "world/Chunk.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 SettingsScreen::Action SettingsScreen::update(Settings& settings)
 {
@@ -96,13 +97,30 @@ SettingsScreen::Action SettingsScreen::update(Settings& settings)
             changed = true;
         }
     } else {
+        // At a high GUI Scale level the 2-column grid (5 rows for the
+        // current 9 actions) can be taller than the gap between `top` and
+        // the Done button below - scroll it instead of letting rows
+        // overlap Done, the same wheel-scroll pattern WorldListScreen
+        // already uses for its own (unbounded) list.
+        const int total_rows = (static_cast<int>(settings.keybindings.size()) + 1) / 2;
+        const float bottom_limit = GetScreenHeight() - ui::scaled(68.0f) - gap;
+        const int visible_rows = std::max(1, static_cast<int>((bottom_limit - top) / (height + gap)));
+        Rectangle grid_area = {x, top, width, std::max(0.0f, bottom_limit - top)};
+        if (CheckCollisionPointRec(GetMousePosition(), grid_area)) {
+            controls_first_row -= static_cast<int>(std::round(GetMouseWheelMove()));
+        }
+        controls_first_row = std::clamp(controls_first_row, 0, std::max(0, total_rows - visible_rows));
+
         for (size_t i = 0; i < settings.keybindings.size(); ++i) {
+            const int row = static_cast<int>(i / 2) - controls_first_row;
+            if (row < 0 || row >= visible_rows) continue; // scrolled out of view
+
             const GameAction action = static_cast<GameAction>(i);
             const bool active = rebinding_action && *rebinding_action == action;
             const bool english = settings.language == "en";
             const std::string caption = std::string(game_action_display_name(action, english)) + ": " +
                 (active ? "..." : binding_display_name(settings.keybindings[i], english));
-            if (ui::button(cell(static_cast<int>(i % 2), static_cast<int>(i / 2)), caption, active,
+            if (ui::button(cell(static_cast<int>(i % 2), row), caption, active,
                            !rebinding_action || active) && !was_rebinding && !rebinding_action) {
                 rebinding_action = action;
             }

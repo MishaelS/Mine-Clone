@@ -76,3 +76,8 @@ Color skybox_horizon_color()
 {
     return HORIZON_COLOR;
 }
+
+Color skybox_sky_color()
+{
+    return SKY_COLOR;
+}

@@ -83,6 +83,53 @@ namespace {
         return false;
     }
 
+    // Same shape as box_touches_water, minus the partial-surface-height
+    // check (lava has no equivalent "floating on the surface" case that
+    // matters for damage - any overlap with the cell counts) - used for
+    // lava-contact damage/catching fire.
+    bool box_touches_lava(const World& world, Vector3 feet)
+    {
+        const int min_x = static_cast<int>(std::floor(feet.x - HALF_WIDTH + COLLISION_EPSILON));
+        const int max_x = static_cast<int>(std::floor(feet.x + HALF_WIDTH - COLLISION_EPSILON));
+        const int min_y = static_cast<int>(std::floor(feet.y + COLLISION_EPSILON));
+        const int max_y = static_cast<int>(std::floor(feet.y + PlayerController::HEIGHT - COLLISION_EPSILON));
+        const int min_z = static_cast<int>(std::floor(feet.z - HALF_WIDTH + COLLISION_EPSILON));
+        const int max_z = static_cast<int>(std::floor(feet.z + HALF_WIDTH - COLLISION_EPSILON));
+        for (int x = min_x; x <= max_x; ++x) {
+            for (int y = min_y; y <= max_y; ++y) {
+                for (int z = min_z; z <= max_z; ++z) {
+                    if (world.get_block(x, y, z) == BlockType::Lava) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // Cactus is a full solid collision cube in this engine (unlike real
+    // Minecraft's own slightly-inset cactus hitbox), so the movement solver
+    // above never actually lets the hitbox overlap a cactus cell - probing
+    // with a small horizontal margin instead means standing flush against
+    // one still counts as contact, the same way vanilla's inset hitbox lets
+    // a flush-pressed player take damage without ever being "inside" it.
+    bool box_touches_cactus(const World& world, Vector3 feet)
+    {
+        constexpr float MARGIN = 0.1f;
+        const int min_x = static_cast<int>(std::floor(feet.x - HALF_WIDTH - MARGIN + COLLISION_EPSILON));
+        const int max_x = static_cast<int>(std::floor(feet.x + HALF_WIDTH + MARGIN - COLLISION_EPSILON));
+        const int min_y = static_cast<int>(std::floor(feet.y + COLLISION_EPSILON));
+        const int max_y = static_cast<int>(std::floor(feet.y + PlayerController::HEIGHT - COLLISION_EPSILON));
+        const int min_z = static_cast<int>(std::floor(feet.z - HALF_WIDTH - MARGIN + COLLISION_EPSILON));
+        const int max_z = static_cast<int>(std::floor(feet.z + HALF_WIDTH + MARGIN - COLLISION_EPSILON));
+        for (int x = min_x; x <= max_x; ++x) {
+            for (int y = min_y; y <= max_y; ++y) {
+                for (int z = min_z; z <= max_z; ++z) {
+                    if (world.get_block(x, y, z) == BlockType::Cactus) return true;
+                }
+            }
+        }
+        return false;
+    }
+
     bool move_axis(const World& world, Vector3& feet, float delta, int axis)
     {
         if (std::fabs(delta) <= 0.000001f) return false;
@@ -142,6 +189,13 @@ void PlayerController::reset()
     vertical_velocity = 0.0f;
     grounded = false;
     touching_water = false;
+    touching_lava = false;
+    touching_cactus = false;
+    head_submerged = false;
+    suffocating = false;
+    fall_distance = 0.0f;
+    just_landed = false;
+    landing_fall_distance = 0.0f;
 }
 
 void PlayerController::update(Camera3D& eyes, const World& world, GameMode mode,
@@ -156,6 +210,8 @@ void PlayerController::update(Camera3D& eyes, const World& world, GameMode mode,
     Vector3 previous = eyes.position;
     Vector3 feet = feet_position(eyes);
     touching_water = box_touches_water(world, feet);
+    touching_lava = box_touches_lava(world, feet);
+    touching_cactus = box_touches_cactus(world, feet);
     if (mode == GameMode::Creative) {
         float speed = CREATIVE_SPEED * (input.sprint ? CREATIVE_SPRINT_MULTIPLIER : 1.0f);
         Vector3 delta = Vector3Scale(wish, speed * delta_time);
@@ -165,9 +221,17 @@ void PlayerController::update(Camera3D& eyes, const World& world, GameMode mode,
         horizontal_velocity = {0.0f, 0.0f, 0.0f};
         vertical_velocity = 0.0f;
         grounded = false;
+        // Creative is invulnerable (GameEngine never reads these while in
+        // that mode), but keep them from holding a stale true from before
+        // a hypothetical mode switch.
+        head_submerged = false;
+        suffocating = false;
+        fall_distance = 0.0f;
+        just_landed = false;
         return;
     }
 
+    bool prev_grounded = grounded; // for the landing edge below - see just_landed
     grounded = box_blocked(world, {feet.x, feet.y - GROUND_PROBE, feet.z});
     // Fluid contact is an AABB-volume query, not one sample at the player's
     // centre.  Keeping water physics active while any part of the 0.6-wide
@@ -211,6 +275,7 @@ void PlayerController::update(Camera3D& eyes, const World& world, GameMode mode,
     if (in_water && input.jump && (blocked_x || blocked_z)) {
         vertical_velocity = std::max(vertical_velocity, WATER_EXIT_VELOCITY);
     }
+    float feet_y_before_vertical = feet.y;
     bool blocked_y = move_axis(world, feet, vertical_velocity * delta_time, 1);
     if (blocked_x) horizontal_velocity.x = 0.0f;
     if (blocked_z) horizontal_velocity.z = 0.0f;
@@ -219,9 +284,53 @@ void PlayerController::update(Camera3D& eyes, const World& world, GameMode mode,
         vertical_velocity = 0.0f;
     }
 
+    // Fall-distance bookkeeping (real Minecraft's own rule): resets the
+    // instant any part of the hitbox touches water (a water landing is
+    // always safe), accumulates only while actually descending, and resets
+    // on an ascending step too (a jump's upward half isn't "falling" -
+    // distance starts fresh again from whatever apex it reaches). Reported
+    // back to GameEngine only on the exact frame grounded flips false ->
+    // true, via consume_landing_fall_distance() - see its own comment.
+    float descended = feet_y_before_vertical - feet.y;
+    if (in_water) {
+        fall_distance = 0.0f;
+    } else if (descended > 0.0f) {
+        fall_distance += descended;
+    } else if (vertical_velocity > 0.0f) {
+        fall_distance = 0.0f;
+    }
+    just_landed = grounded && !prev_grounded;
+    if (just_landed) {
+        landing_fall_distance = fall_distance;
+        fall_distance = 0.0f;
+    }
+
     eyes.position = {feet.x, feet.y + EYE_HEIGHT, feet.z};
     Vector3 shift = Vector3Subtract(eyes.position, previous);
     eyes.target = Vector3Add(eyes.target, shift);
+
+    // Suffocation/drowning both key off the eye position specifically (a
+    // block clipped into just the player's head, or a head that's dipped
+    // below the water surface while the feet aren't necessarily submerged
+    // at all), not the whole hitbox AABB the checks above use.
+    int eye_x = static_cast<int>(std::floor(eyes.position.x));
+    int eye_y = static_cast<int>(std::floor(eyes.position.y));
+    int eye_z = static_cast<int>(std::floor(eyes.position.z));
+    BlockType eye_block = world.get_block(eye_x, eye_y, eye_z);
+    const BlockProperties& eye_properties = get_block_properties(eye_block);
+    // Solid and NOT flagged transparent - excludes leaves/glass (both
+    // solid but transparent) the same way real Minecraft's own
+    // non-suffocating full blocks are excluded, while still catching an
+    // ordinary opaque block (stone, dirt, ...) placed into the player.
+    suffocating = eye_properties.solid && !eye_properties.transparent;
+    head_submerged = eye_block == BlockType::Water && eyes.position.y < eye_y + WATER_SURFACE_HEIGHT;
+}
+
+float PlayerController::consume_landing_fall_distance()
+{
+    if (!just_landed) return -1.0f;
+    just_landed = false;
+    return landing_fall_distance;
 }
 
 Vector3 PlayerController::feet_position(const Camera3D& eyes) const

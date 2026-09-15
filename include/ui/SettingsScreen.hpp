@@ -13,7 +13,7 @@
 class SettingsScreen {
 public:
     enum class Section { Overview, Controls, Graphics, Sound, Language };
-    void enter(Section initial = Section::Overview) { section = initial; rebinding_action.reset(); }
+    void enter(Section initial = Section::Overview) { section = initial; rebinding_action.reset(); controls_first_row = 0; }
     enum class ActionType { None, Back };
     struct Action { ActionType type = ActionType::None; };
 
@@ -30,4 +30,10 @@ private:
     // press to become its new binding - see the .cpp for why update() must
     // check this *before* any row's own button() call can newly set it.
     std::optional<GameAction> rebinding_action;
+
+    // How many keybinding rows are scrolled off the top of Section::
+    // Controls' 2-column grid - at a high GUI Scale level the whole grid
+    // can be taller than the space above the Done button, so it scrolls
+    // (mouse wheel) instead of letting rows overlap Done. See update().
+    int controls_first_row = 0;
 };

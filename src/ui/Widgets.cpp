@@ -4,33 +4,34 @@
 #include "rendering/BlockMesh.hpp"
 
 #include "rlgl.h"
+// Declarations only here - RAYGUI_IMPLEMENTATION is compiled once, in
+// RayGuiImpl.cpp. Backs button()/text_input()/slider_int() below.
+#include "raygui.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <utility>
+#include <vector>
 
 namespace {
-    constexpr float TEXT_SPACING = 1.0f;
+    // Own name, not raygui's TEXT_SPACING style property (GuiDefaultProperty)
+    // - both are in scope here since this file includes raygui.h.
+    constexpr float LABEL_SPACING = 1.0f;
     constexpr int BASE_TEXT_SIZE = 16;
     constexpr float BORDER_THICKNESS = 2.0f;
 
     const char* BUTTON_TEXTURE_PATH = "sprites/gui/widgets/widget1.png";
     const char* BUTTON_HOVER_TEXTURE_PATH = "sprites/gui/widgets/widget2.png";
-    // Same 200x20 strip layout as the two button textures above, so they
-    // share one nine-patch border size - see draw_nine_patch_texture().
+    // Same 200x20 strip layout as widget1/2.png above, so they share one
+    // nine-patch border size - see draw_nine_patch_texture().
     const char* TEXTFIELD_TEXTURE_PATH = "sprites/gui/widgets/widget0.png";
     constexpr float NINE_PATCH_BORDER = 3.0f;
-
-    // The slider's draggable handle, 7x20 - small enough to draw as one
-    // straight (non-nine-patch) stretch into its handle rect.
-    const char* SLIDER_HANDLE_TEXTURE_PATH = "sprites/gui/widgets/widget3.png";
-    const char* SLIDER_HANDLE_ACTIVE_TEXTURE_PATH = "sprites/gui/widgets/widget4.png";
 
     const char* OPTIONS_BACKGROUND_TEXTURE_PATH = "sprites/gui/optionsBackground.png";
     constexpr float OPTIONS_BACKGROUND_TILE_SCALE = 4.0f; // on-screen size of each 16px source tile
 
-    // block_button()'s own flat chrome - unrelated to the widget0-4
+    // block_button()'s own flat chrome - unrelated to the widget0-2
     // textures above, kept as-is (no texture asset covers this slot look).
     constexpr Color BUTTON_FILL = {60, 60, 68, 255};
     constexpr Color BUTTON_FILL_HOVER = {82, 82, 92, 255};
@@ -157,23 +158,73 @@ namespace {
     ui::SoundCallback sound_callback;
     std::string hovered_button_id;
     bool hovered_last_frame = false;
-    std::string active_slider_id;
+
+    // One-time raygui setup, lazily run from begin_frame()'s first call
+    // (needs FontManager's font already loaded, which GameEngine::init()
+    // guarantees happens before the first frame).
+    void init_raygui_style()
+    {
+        static bool ready = false;
+        if (ready) return;
+        ready = true;
+
+        GuiLoadStyleDefault();
+        GuiSetFont(FontManager::get());
+
+        // button() below draws its own Minecraft nine-patch texture and
+        // shadowed label() text every call - raygui contributes nothing
+        // visual to it, only click-edge/disabled-state via GuiButton(), so
+        // every part of its style that could draw something is switched
+        // off here, once, rather than pushed/popped per call.
+        GuiSetStyle(BUTTON, BORDER_WIDTH, 0);
+        for (int state = 0; state < 4; ++state) {
+            GuiSetStyle(BUTTON, BASE_COLOR_NORMAL + state * 3, ColorToInt(BLANK));
+            GuiSetStyle(BUTTON, TEXT_COLOR_NORMAL + state * 3, ColorToInt(BLANK));
+        }
+
+        // Text fields and sliders never had bespoke pixel-art assets (the
+        // old hand-rolled text_input() drew a flat rect too) - restyled to
+        // the game's dark theme instead of Minecraft's own look, and
+        // otherwise left to raygui's own drawing.
+        GuiSetStyle(TEXTBOX, BASE_COLOR_NORMAL, ColorToInt(BLACK));
+        GuiSetStyle(TEXTBOX, BASE_COLOR_FOCUSED, ColorToInt(BLACK));
+        GuiSetStyle(TEXTBOX, BASE_COLOR_PRESSED, ColorToInt(BLACK));
+        GuiSetStyle(TEXTBOX, BORDER_COLOR_NORMAL, ColorToInt(Color{160, 160, 160, 255}));
+        GuiSetStyle(TEXTBOX, BORDER_COLOR_FOCUSED, ColorToInt(WHITE));
+        GuiSetStyle(TEXTBOX, BORDER_COLOR_PRESSED, ColorToInt(WHITE));
+        GuiSetStyle(TEXTBOX, TEXT_COLOR_NORMAL, ColorToInt(WHITE));
+        GuiSetStyle(TEXTBOX, TEXT_COLOR_FOCUSED, ColorToInt(WHITE));
+        GuiSetStyle(TEXTBOX, TEXT_COLOR_PRESSED, ColorToInt(WHITE));
+        GuiSetStyle(TEXTBOX, TEXT_ALIGNMENT, TEXT_ALIGN_LEFT);
+
+        GuiSetStyle(SLIDER, BORDER_COLOR_NORMAL, ColorToInt(Color{160, 160, 160, 255}));
+        GuiSetStyle(SLIDER, BASE_COLOR_NORMAL, ColorToInt(Color{20, 20, 24, 220}));
+        GuiSetStyle(SLIDER, TEXT_COLOR_NORMAL, ColorToInt(Color{225, 225, 230, 255}));
+        GuiSetStyle(SLIDER, TEXT_COLOR_FOCUSED, ColorToInt(Color{255, 255, 160, 255}));
+        GuiSetStyle(SLIDER, TEXT_COLOR_PRESSED, ColorToInt(Color{255, 255, 160, 255}));
+    }
 
     float level_factor(int level)
     {
         // Level 1 is "Стандарт" - the UI's original, unscaled pixel size -
         // per spec ("1 - стандартный размер в оригинальном размере"), so it
-        // must map to exactly 1.0, not shrink everything by default.
-        constexpr float FACTORS[4] = {1.00f, 1.20f, 1.40f, 1.60f};
+        // must map to exactly 1.0, not shrink everything by default. Every
+        // level is a whole multiplier (matching real Minecraft's own GUI
+        // Scale: 1/2/3/4, not fractional in-between steps) - anything else
+        // makes pixel art (hearts, hotbar, nine-patch buttons - every
+        // pixel-snapped draw across the whole UI multiplies by this same
+        // factor) round its edges unevenly per-axis and look crooked, the
+        // same bug HOTBAR_SCALE had at 2.5x in InventoryHud.cpp.
+        constexpr float FACTORS[4] = {0.5f, 1.0f, 1.5f, 2.0f};
         return FACTORS[std::clamp(level, 1, 4) - 1];
     }
 
     std::string elide(const Font& font, std::string text, float width)
     {
         const float size = static_cast<float>(ui::text_size());
-        if (MeasureTextEx(font, text.c_str(), size, ui::scaled(TEXT_SPACING)).x <= width) return text;
+        if (MeasureTextEx(font, text.c_str(), size, ui::scaled(LABEL_SPACING)).x <= width) return text;
         while (!text.empty() &&
-               MeasureTextEx(font, (text + "...").c_str(), size, ui::scaled(TEXT_SPACING)).x > width) {
+               MeasureTextEx(font, (text + "...").c_str(), size, ui::scaled(LABEL_SPACING)).x > width) {
             utf8_pop_back(text);
         }
         return text.empty() ? "" : text + "...";
@@ -190,10 +241,15 @@ void set_scale_level(int level)
 int scale_level() { return current_scale_level; }
 float scale_factor()
 {
-    // Clamp the entire UI together when a resized window cannot fit the
-    // reference layout. Individual controls never choose their own scale.
-    const float fit = std::min(GetScreenWidth() / 800.0f, GetScreenHeight() / 600.0f);
-    return std::max(0.5f, std::min(level_factor(current_scale_level), fit));
+    // Every level is exactly its own whole multiplier (1/2/3/4), always -
+    // no window-size ceiling here anymore. That ceiling used to silently
+    // cap Large/Huge down to whatever a generic reference canvas allowed,
+    // which on an ordinary widescreen window made them indistinguishable
+    // from Medium. The one screen dense enough to actually overlap itself
+    // at x3/x4 (SettingsScreen's Section::Controls keybinding grid) now
+    // scrolls instead - see SettingsScreen.cpp - so nothing here needs to
+    // shrink the whole UI to protect it.
+    return level_factor(current_scale_level);
 }
 float scaled(float value) { return value * scale_factor(); }
 int scaled_font(int value) { return std::max(1, static_cast<int>(std::lround(value * scale_factor()))); }
@@ -202,7 +258,16 @@ void begin_frame()
 {
     if (!hovered_last_frame) hovered_button_id.clear();
     hovered_last_frame = false;
-    if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) active_slider_id.clear();
+
+    // raygui's own text-drawing controls (text_input(), slider_int()) need
+    // their font size/spacing kept in step with the current UI scale level,
+    // which can change frame-to-frame (Settings' UI-scale button, or the
+    // window being resized) - style properties are plain globals, so this
+    // is cheap to just re-set every frame rather than track a "did it
+    // change" flag.
+    init_raygui_style();
+    GuiSetStyle(DEFAULT, TEXT_SIZE, text_size());
+    GuiSetStyle(DEFAULT, TEXT_SPACING, std::max(1, static_cast<int>(std::lround(scaled(LABEL_SPACING)))));
 }
 void set_sound_callback(SoundCallback callback) { sound_callback = std::move(callback); }
 
@@ -226,7 +291,7 @@ void Tooltip::draw() const
     const Font& font = FontManager::get();
     const float font_size = static_cast<float>(ui::text_size());
     const float padding = scaled(TOOLTIP_PADDING);
-    Vector2 text_size = MeasureTextEx(font, text.c_str(), font_size, scaled(TEXT_SPACING));
+    Vector2 text_size = MeasureTextEx(font, text.c_str(), font_size, scaled(LABEL_SPACING));
     Rectangle bounds = {
         anchor.x + scaled(TOOLTIP_CURSOR_OFFSET),
         anchor.y + scaled(TOOLTIP_CURSOR_OFFSET),
@@ -331,7 +396,7 @@ void label(Rectangle bounds, const std::string& text, Color color, TextAlign ali
     const float size = static_cast<float>(text_size());
     const float padding = scaled(6.0f);
     const std::string visible = elide(font, text, std::max(0.0f, bounds.width - padding * 2.0f));
-    Vector2 measured = MeasureTextEx(font, visible.c_str(), size, scaled(TEXT_SPACING));
+    Vector2 measured = MeasureTextEx(font, visible.c_str(), size, scaled(LABEL_SPACING));
     Vector2 pos = {
         std::round(align == TextAlign::Left ? bounds.x + padding : bounds.x + (bounds.width - measured.x) * 0.5f),
         std::round(bounds.y + (bounds.height - measured.y) * 0.5f),
@@ -340,8 +405,8 @@ void label(Rectangle bounds, const std::string& text, Color color, TextAlign ali
     // needed here (world lists may have an outer clipping rectangle).
     const float shadow = std::max(1.0f, scaled(2.0f));
     DrawTextEx(font, visible.c_str(), {pos.x + shadow, pos.y + shadow}, size,
-               scaled(TEXT_SPACING), Color{0, 0, 0, color.a});
-    DrawTextEx(font, visible.c_str(), pos, size, scaled(TEXT_SPACING), color);
+               scaled(LABEL_SPACING), Color{0, 0, 0, color.a});
+    DrawTextEx(font, visible.c_str(), pos, size, scaled(LABEL_SPACING), color);
 }
 
 bool button(Rectangle bounds, const std::string& text, bool selected, bool enabled)
@@ -361,87 +426,67 @@ bool button(Rectangle bounds, const std::string& text, bool selected, bool enabl
     draw_nine_patch_texture(bounds, texture_path, hovered ? Color{185, 195, 255, 255} : WHITE);
     label(bounds, text, !enabled ? TEXT_DISABLED : hovered ? Color{255, 255, 160, 255} : WHITE);
 
-    bool clicked = hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+    // GuiButton() draws nothing visible (init_raygui_style() above made its
+    // whole style transparent) - it's called purely for raygui's own
+    // click-edge and disabled-state gating instead of hand-rolling both
+    // here. Its own convention is "pressed" on mouse release inside
+    // bounds, not on press.
+    GuiSetState(enabled ? STATE_NORMAL : STATE_DISABLED);
+    bool clicked = GuiButton(bounds, "") != 0;
+    GuiSetState(STATE_NORMAL);
     if (clicked && sound_callback) sound_callback(SoundEvent::Click);
     return clicked;
 }
 
 bool text_input(Rectangle bounds, TextInputState& state, bool focused)
 {
-    DrawRectangleRec(bounds, BLACK);
-    DrawRectangleLinesEx(bounds, std::max(1.0f, scaled(2.0f)),
-                         focused ? WHITE : Color{160, 160, 160, 255});
+    GuiSetStyle(TEXTBOX, BORDER_WIDTH, std::max(1, static_cast<int>(scaled(2.0f))));
+    GuiSetStyle(TEXTBOX, TEXT_PADDING, static_cast<int>(scaled(8.0f)));
 
-    if (focused) {
-        int codepoint = GetCharPressed();
-        while (codepoint != 0) {
-            if (utf8_length(state.text) < state.max_codepoints) {
-                int byte_count = 0;
-                const char* encoded = CodepointToUTF8(codepoint, &byte_count);
-                state.text.append(encoded, byte_count);
-            }
-            codepoint = GetCharPressed();
-        }
-        if (IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) {
-            utf8_pop_back(state.text);
-        }
-    }
+    // GuiTextBox edits a raw byte buffer in place, sized for the worst
+    // case - every one of the caller's codepoints spending the full 4
+    // UTF-8 bytes - plus the terminator.
+    std::vector<char> buffer(state.max_codepoints * 4 + 1, '\0');
+    std::snprintf(buffer.data(), buffer.size(), "%s", state.text.c_str());
 
-    const Font& font = FontManager::get();
-    const float font_size = static_cast<float>(text_size());
-    const float padding = scaled(8.0f);
-    const float text_width = MeasureTextEx(font, state.text.c_str(), font_size, TEXT_SPACING).x;
-    const float visible_width = std::max(1.0f, bounds.width - padding * 2.0f);
-    const float scroll = std::max(0.0f, text_width - visible_width);
-    Vector2 text_pos = {bounds.x + padding - scroll, bounds.y + (bounds.height - font_size) / 2.0f};
-    BeginScissorMode(static_cast<int>(bounds.x + padding), static_cast<int>(bounds.y + 2.0f),
-                     std::max(0, static_cast<int>(visible_width)),
-                     std::max(0, static_cast<int>(bounds.height - 4.0f)));
-    DrawTextEx(font, state.text.c_str(), text_pos, font_size, TEXT_SPACING, WHITE);
+    // `focused` is exactly raygui's own "edit mode": while true, GuiTextBox
+    // owns UTF-8 typing, backspace/delete, arrow/click-to-position caret
+    // and Ctrl+V paste; while false, a click just reports "pressed" (below)
+    // so the caller can hand this field focus, matching the old contract.
+    int result = GuiTextBox(bounds, buffer.data(), static_cast<int>(buffer.size()), focused);
 
-    if (focused && std::fmod(static_cast<float>(GetTime()), 1.0f) < 0.5f) {
-        DrawRectangle(static_cast<int>(text_pos.x + text_width + scaled(1)), static_cast<int>(text_pos.y),
-                      std::max(1, static_cast<int>(scaled(1))), static_cast<int>(font_size), WHITE);
-    }
-    EndScissorMode();
+    state.text.assign(buffer.data());
+    // GuiTextBox only enforces the byte-buffer size above, not the
+    // caller's codepoint budget (a Cyrillic name is 2 bytes/letter) - trim
+    // back the same way the old hand-rolled version capped it.
+    while (utf8_length(state.text) > state.max_codepoints) utf8_pop_back(state.text);
 
-    return CheckCollisionPointRec(GetMousePosition(), bounds) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+    return result == 1; // RESULT_PRESSED
 }
 
 bool slider_int(Rectangle bounds, const std::string& label_text, int& value, int min_value, int max_value)
 {
-    const Vector2 mouse = GetMousePosition();
-    const bool hovered = CheckCollisionPointRec(mouse, bounds);
-    const std::string id = label_text + "@" + std::to_string(bounds.x) + "," + std::to_string(bounds.y);
-    if (hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-        active_slider_id = id;
-        if (sound_callback) sound_callback(SoundEvent::Click);
-    }
-    const bool dragging = active_slider_id == id && IsMouseButtonDown(MOUSE_BUTTON_LEFT);
-    const float border = scaled(2.0f);
-    const float handle_width = scaled(14.0f);
-    const float travel = std::max(1.0f, bounds.width - border * 2.0f - handle_width);
-    bool changed = false;
-    if (dragging && max_value > min_value) {
-        const float t = std::clamp((mouse.x - bounds.x - border - handle_width * 0.5f) / travel, 0.0f, 1.0f);
-        const int next = min_value + static_cast<int>(std::lround(t * (max_value - min_value)));
-        changed = next != value;
-        value = next;
-    }
+    const bool hovered = CheckCollisionPointRec(GetMousePosition(), bounds);
+    if (hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && sound_callback) sound_callback(SoundEvent::Click);
 
-    // Minecraft slider: recessed full-height strip, full-height thumb,
-    // centered caption above both. The thumb never leaves the frame.
-    draw_nine_patch_texture(bounds, TEXTFIELD_TEXTURE_PATH);
-    const float t = max_value > min_value
-        ? std::clamp(static_cast<float>(value - min_value) / (max_value - min_value), 0.0f, 1.0f) : 0.0f;
-    Rectangle handle = {bounds.x + border + t * travel, bounds.y + border,
-                        handle_width, bounds.height - border * 2.0f};
-    const Texture2D& texture = TextureManager::get(
-        hovered || dragging ? SLIDER_HANDLE_ACTIVE_TEXTURE_PATH : SLIDER_HANDLE_TEXTURE_PATH);
-    DrawTexturePro(texture, {0, 0, static_cast<float>(texture.width), static_cast<float>(texture.height)},
-                   handle, {0, 0}, 0, WHITE);
+    GuiSetStyle(SLIDER, BORDER_WIDTH, std::max(1, static_cast<int>(scaled(2.0f))));
+    GuiSetStyle(SLIDER, SLIDER_WIDTH, static_cast<int>(scaled(14.0f)));
+
+    // GuiSlider() owns hover/press styling, and - unlike the old hand-rolled
+    // version's own `active_slider_id` bookkeeping - already keeps
+    // capturing the drag once started even if the pointer leaves `bounds`.
+    float float_value = static_cast<float>(value);
+    GuiSlider(bounds, nullptr, nullptr, &float_value, static_cast<float>(min_value), static_cast<float>(max_value));
+    const int next = min_value < max_value ? static_cast<int>(std::lround(float_value)) : value;
+    const bool changed = next != value;
+    value = next;
+
+    // No bespoke slider texture for raygui to skin with (init_raygui_style()
+    // above just restyles its flat track/knob to the game's dark theme), so
+    // the centered "Label: value" caption stays a custom label() draw on
+    // top, same as the old nine-patch version.
     label(bounds, label_text + ": " + std::to_string(value),
-          hovered || dragging ? Color{255, 255, 160, 255} : WHITE);
+          hovered ? Color{255, 255, 160, 255} : WHITE);
     return changed;
 }
 

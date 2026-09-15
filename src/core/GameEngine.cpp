@@ -36,11 +36,11 @@ namespace {
 
     // The hold-to-break progress bar, drawn just under the crosshair - see
     // GameEngine::draw() and the is_breaking/breaking_progress fields.
-    constexpr float BREAK_BAR_WIDTH = 60.0f;
-    constexpr float BREAK_BAR_HEIGHT = 6.0f;
+    constexpr float BREAK_BAR_WIDTH    = 60.0f;
+    constexpr float BREAK_BAR_HEIGHT   = 6.0f;
     constexpr float BREAK_BAR_OFFSET_Y = 28.0f; // below screen center
     constexpr Color BREAK_BAR_BACKGROUND = {0, 0, 0, 150};
-    constexpr Color BREAK_BAR_FILL = {255, 255, 255, 220};
+    constexpr Color BREAK_BAR_FILL       = {255, 255, 255, 220};
 
     // Subtle atmospheric haze over the whole scene - a constant, very low
     // blend toward the sky's own horizon color, independent of the chunk
@@ -56,8 +56,8 @@ namespace {
     // blocks/tick to match DroppedItem's own velocity unit, the same
     // forward-and-up toss real Minecraft gives a manually dropped item.
     constexpr float DROP_SPAWN_DISTANCE = 0.6f;
-    constexpr float DROP_LAUNCH_SPEED = 0.15f;
-    constexpr float DROP_LAUNCH_UP = 0.05f;
+    constexpr float DROP_LAUNCH_SPEED   = 0.15f;
+    constexpr float DROP_LAUNCH_UP      = 0.05f;
 
     // Dropped-item pickup: a small instant-collect radius. Anything a bit
     // further out but still within DroppedItem's own magnet range is
@@ -75,6 +75,39 @@ namespace {
     // same as it would visibly be anyway, but the game recovers in one
     // frame instead of never.
     constexpr int MAX_TICKS_PER_FRAME = 5;
+
+    // --- Environmental damage tuning (Survival only - see
+    // GameEngine::update_player_damage()) - half-heart units throughout,
+    // same as PlayerHealth itself, matching real Minecraft's own damage
+    // numbers directly (vanilla's damage points already *are* half-hearts).
+
+    // Real Minecraft's own fall-damage rule: the first 3 blocks are free,
+    // then 1 point (half a heart) per additional whole block fallen.
+    constexpr int FALL_DAMAGE_SAFE_BLOCKS = 3;
+
+    constexpr int LAVA_DAMAGE = 4; // per contact tick - lava is meant to kill fast
+    constexpr float FIRE_DURATION_FROM_LAVA_SECONDS = 15.0f; // vanilla's own lava burn duration
+    constexpr int FIRE_DAMAGE = 1;
+    constexpr float FIRE_TICK_INTERVAL_SECONDS = 1.0f;
+
+    constexpr float MAX_AIR_SECONDS = 15.0f; // vanilla's own breath meter length
+    constexpr int DROWN_DAMAGE = 2;
+    constexpr float DROWN_TICK_INTERVAL_SECONDS = 1.0f;
+
+    constexpr int SUFFOCATION_DAMAGE = 1;
+    constexpr float SUFFOCATION_TICK_INTERVAL_SECONDS = 1.0f;
+
+    constexpr int CACTUS_DAMAGE = 1; // per-frame attempt - player_health's own invulnerability window throttles this to ~2/second
+
+    // How far below the world's own floor (MIN_WORLD_Y - see Chunk.hpp) a
+    // fall counts as "into the void" - a safety net for however a player
+    // might end up under the terrain (bedrock should normally prevent it
+    // outright), not a feature meant to be reachable in ordinary play.
+    constexpr float VOID_DAMAGE_Y = static_cast<float>(MIN_WORLD_Y - 4);
+    constexpr int VOID_DAMAGE = 4; // same per-tick rate as lava - falling forever shouldn't take long to end
+
+    constexpr float DEATH_RESPAWN_SECONDS = 2.0f; // real Minecraft's own death-screen delay, just without the screen/button
+    constexpr float HURT_FLASH_SECONDS    = 0.3f;
 
     // Breaking with the wrong tool (or bare hands) still works, just at the
     // bare-hand multiplier (1x) below rather than refusing outright - no
@@ -271,6 +304,8 @@ void GameEngine::set_world(std::unique_ptr<World> new_world)
         camera.target = {camera.position.x, camera.position.y, camera.position.z - 10.0f};
         spawn_settle_frames = 3; // see its own comment - 2 measured, +1 margin
         player_controller.reset();
+        player_health.reset();
+        reset_life_timers();
         camera_view = CameraView::FirstPerson;
     }
 }
@@ -283,6 +318,11 @@ void GameEngine::tick()
     // scheduled block updates, random ticks) hooks in the same way, from
     // here.
     if (world) {
+        // Picks up a render/fog distance change made from the pause menu's
+        // Settings screen immediately, rather than only the next time a
+        // world is started (see World::set_view_distance's own comment) -
+        // a no-op most ticks, when neither value actually changed since.
+        world->set_view_distance(settings.render_distance_chunks, settings.fog_distance_blocks);
         world->update_chunk_states(camera.position);
         world->update_fluids();
         world->update_falling_blocks();
@@ -451,6 +491,146 @@ void GameEngine::check_grass_support_above(int x, int y, int z)
     }
 }
 
+void GameEngine::apply_damage(int amount, DamageSource source)
+{
+    if (player_health.damage(amount, source)) {
+        hurt_flash_seconds = HURT_FLASH_SECONDS;
+    }
+}
+
+void GameEngine::update_player_damage(float delta_time)
+{
+    // Fall damage - PlayerController reports this exactly once, the frame
+    // its feet actually land, regardless of whether that lands inside this
+    // function's own "already dead" early state below (apply_damage/
+    // player_health.damage() themselves no-op once dead, so it's harmless
+    // to still consume it here rather than leave it queued for a fall that
+    // already happened).
+    float landing_fall_distance = player_controller.consume_landing_fall_distance();
+    if (landing_fall_distance >= 0.0f) {
+        int fall_damage = static_cast<int>(std::floor(landing_fall_distance)) - FALL_DAMAGE_SAFE_BLOCKS;
+        if (fall_damage > 0) apply_damage(fall_damage, DamageSource::Fall);
+    }
+
+    // Lava: hurts every frame it's touched (player_health's own 0.5s
+    // invulnerability window is what actually paces this to real
+    // Minecraft's own per-half-second lava tick), and always re-arms the
+    // burn timer below to its full duration - a single instant of contact
+    // still burns for the whole FIRE_DURATION_FROM_LAVA_SECONDS afterward,
+    // same as vanilla.
+    if (player_controller.is_in_lava()) {
+        apply_damage(LAVA_DAMAGE, DamageSource::Lava);
+        fire_seconds_remaining = FIRE_DURATION_FROM_LAVA_SECONDS;
+    }
+
+    // Burning: water immediately extinguishes it (real Minecraft too),
+    // otherwise it counts down on its own and hurts once per
+    // FIRE_TICK_INTERVAL_SECONDS regardless of whether the player is still
+    // anywhere near the lava that started it.
+    if (player_controller.is_in_water()) fire_seconds_remaining = 0.0f;
+    if (fire_seconds_remaining > 0.0f) {
+        fire_seconds_remaining = std::max(0.0f, fire_seconds_remaining - delta_time);
+        fire_damage_timer += delta_time;
+        if (fire_damage_timer >= FIRE_TICK_INTERVAL_SECONDS) {
+            fire_damage_timer -= FIRE_TICK_INTERVAL_SECONDS;
+            apply_damage(FIRE_DAMAGE, DamageSource::Fire);
+        }
+    } else {
+        fire_damage_timer = 0.0f;
+    }
+
+    // Drowning: a breath meter that drains only while the eye position
+    // specifically is submerged (see PlayerController::is_head_submerged())
+    // and otherwise recovers - once it runs out, one hit every
+    // DROWN_TICK_INTERVAL_SECONDS for as long as the head stays under.
+    if (player_controller.is_head_submerged()) {
+        air_seconds = std::max(0.0f, air_seconds - delta_time);
+        if (air_seconds <= 0.0f) {
+            drown_damage_timer += delta_time;
+            if (drown_damage_timer >= DROWN_TICK_INTERVAL_SECONDS) {
+                drown_damage_timer -= DROWN_TICK_INTERVAL_SECONDS;
+                apply_damage(DROWN_DAMAGE, DamageSource::Drown);
+            }
+        }
+    } else {
+        air_seconds = MAX_AIR_SECONDS;
+        drown_damage_timer = 0.0f;
+    }
+
+    // Suffocation: a solid, opaque block clipped into the player's own eye
+    // position (see PlayerController::is_suffocating()) - typically a
+    // block placed where the player is standing.
+    if (player_controller.is_suffocating()) {
+        suffocation_damage_timer += delta_time;
+        if (suffocation_damage_timer >= SUFFOCATION_TICK_INTERVAL_SECONDS) {
+            suffocation_damage_timer -= SUFFOCATION_TICK_INTERVAL_SECONDS;
+            apply_damage(SUFFOCATION_DAMAGE, DamageSource::Suffocation);
+        }
+    } else {
+        suffocation_damage_timer = 0.0f;
+    }
+
+    // Cactus: same per-frame-attempt/invulnerability-throttled shape as
+    // lava above.
+    if (player_controller.is_touching_cactus()) {
+        apply_damage(CACTUS_DAMAGE, DamageSource::Cactus);
+    }
+
+    // Void: a safety net for ending up below the world's own floor (see
+    // VOID_DAMAGE_Y's own comment) - same throttling idea as lava/cactus.
+    if (camera.position.y < VOID_DAMAGE_Y) {
+        apply_damage(VOID_DAMAGE, DamageSource::Void);
+    }
+
+    player_health.update(delta_time);
+    hurt_flash_seconds = std::max(0.0f, hurt_flash_seconds - delta_time);
+
+    // Death/respawn: death_respawn_timer is armed exactly once, the frame
+    // health first reaches 0 (was_dead_last_frame catches that edge so a
+    // second frame of already being dead doesn't keep resetting the
+    // countdown back to full).
+    bool dead_now = player_health.is_dead();
+    if (dead_now && !was_dead_last_frame) {
+        death_respawn_timer = DEATH_RESPAWN_SECONDS;
+    }
+    was_dead_last_frame = dead_now;
+    if (dead_now) {
+        death_respawn_timer -= delta_time;
+        if (death_respawn_timer <= 0.0f) respawn_player();
+    }
+}
+
+void GameEngine::respawn_player()
+{
+    if (!world) return;
+
+    // Same fixed point set_world() itself spawns a brand-new session at -
+    // this project has no bed/respawn-anchor system, so death always
+    // returns here.
+    Vector3 spawn = world->find_spawn_position();
+    spawn.y += PlayerController::EYE_HEIGHT;
+    Vector3 shift = Vector3Subtract(spawn, camera.position);
+    camera.position = spawn;
+    camera.target = Vector3Add(camera.target, shift);
+
+    player_controller.reset();
+    player_health.reset();
+    reset_life_timers();
+    spawn_settle_frames = 3; // same rotation-jump guard set_world() itself uses right after a teleport
+}
+
+void GameEngine::reset_life_timers()
+{
+    fire_seconds_remaining = 0.0f;
+    fire_damage_timer = 0.0f;
+    air_seconds = MAX_AIR_SECONDS;
+    drown_damage_timer = 0.0f;
+    suffocation_damage_timer = 0.0f;
+    hurt_flash_seconds = 0.0f;
+    death_respawn_timer = 0.0f;
+    was_dead_last_frame = false;
+}
+
 Camera3D GameEngine::make_render_camera() const
 {
     if (camera_view == CameraView::FirstPerson) return camera;
@@ -510,6 +690,15 @@ void GameEngine::update(float delta_time)
     if (!inventory_hud.is_open()) {
         for (int slot = 0; slot < HOTBAR_SIZE; ++slot) {
             if (IsKeyPressed(KEY_ONE + slot)) inventory.selected_slot = slot;
+        }
+        // Mouse wheel also cycles the selected hotbar slot, same "scroll
+        // up/away subtracts" convention as every other scrollable list in
+        // this project (WorldListScreen, SettingsScreen's Controls grid,
+        // InventoryHud's own creative-page scroll) - and wraps around at
+        // either end instead of clamping, same as vanilla's hotbar.
+        int wheel_steps = static_cast<int>(std::round(GetMouseWheelMove()));
+        if (wheel_steps != 0) {
+            inventory.selected_slot = ((inventory.selected_slot - wheel_steps) % HOTBAR_SIZE + HOTBAR_SIZE) % HOTBAR_SIZE;
         }
         // Q: throw one item out of the selected hotbar slot. While the
         // inventory screen is open instead, the equivalent (Q over a
@@ -580,19 +769,28 @@ void GameEngine::update(float delta_time)
     Vector3 previous_camera_position = camera.position;
     const bool was_grounded = player_controller.is_grounded();
     UpdateCameraPro(&camera, {0.0f, 0.0f, 0.0f}, rotation, 0.0f);
+    // Dead: same "no longer takes input" freeze real Minecraft's own death
+    // screen imposes, just without the screen itself - see
+    // update_player_damage()'s automatic respawn_player() a couple seconds
+    // later. Physics (gravity, whatever residual velocity was left) still
+    // runs so the body doesn't hang frozen mid-air.
+    bool alive = !player_health.is_dead();
     if (world) {
         PlayerInput input;
-        input.forward = (is_action_down(GameAction::MoveForward) ? 1.0f : 0.0f) -
-                        (is_action_down(GameAction::MoveBackward) ? 1.0f : 0.0f);
-        input.right = (is_action_down(GameAction::MoveRight) ? 1.0f : 0.0f) -
-                      (is_action_down(GameAction::MoveLeft) ? 1.0f : 0.0f);
-        input.jump = is_action_down(GameAction::Jump);
-        input.sneak = is_action_down(GameAction::Sneak);
-        input.sprint = is_action_down(GameAction::Sprint);
+        if (alive) {
+            input.forward = (is_action_down(GameAction::MoveForward) ? 1.0f : 0.0f) -
+                            (is_action_down(GameAction::MoveBackward) ? 1.0f : 0.0f);
+            input.right = (is_action_down(GameAction::MoveRight) ? 1.0f : 0.0f) -
+                          (is_action_down(GameAction::MoveLeft) ? 1.0f : 0.0f);
+            input.jump = is_action_down(GameAction::Jump);
+            input.sneak = is_action_down(GameAction::Sneak);
+            input.sprint = is_action_down(GameAction::Sprint);
+        }
         player_controller.update(camera, *world, current_game_mode, input, delta_time);
         const Vector3 travelled = Vector3Subtract(camera.position, previous_camera_position);
         audio.update_water(delta_time, player_controller.is_in_water(),
                            Vector3LengthSqr(travelled) > 0.000025f);
+        if (current_game_mode == GameMode::Survival) update_player_damage(delta_time);
     }
 
     // Emit by travelled distance, and only near a solid top surface. This
@@ -650,6 +848,13 @@ void GameEngine::update(float delta_time)
     // the camera), so the aim direction needs normalizing before it's used
     // as a ray direction.
     Vector3 aim = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
+
+    if (!alive) {
+        // Dead: no aiming, no breaking/placing - see the input freeze above.
+        targeted_block = std::nullopt;
+        is_breaking = false;
+        breaking_progress = 0.0f;
+    } else {
 
     // Recomputed every frame (not just on click) so draw() can outline
     // whatever's targeted, out to the longer of the two reaches (place's)
@@ -776,16 +981,32 @@ void GameEngine::update(float delta_time)
             inventory_hud.open_container(*container_kind, targeted_block->x, targeted_block->y, targeted_block->z);
             EnableCursor();
         } else if (!container_kind) {
-            // Right-click-to-place only ever consumes a block stack - a
-            // selected tool has nothing to place (and isn't consumed by
-            // right-clicking with it either, same as vanilla: tools have
-            // no use-on-block action here yet beyond mining); a selected
-            // Material likewise has nothing to place (and critically must
-            // stay excluded here - selected.block reads as Air for one, so
-            // without this check place_block would be called with Air and
-            // silently clear out whatever was targeted).
             ItemStack& selected = inventory.hotbar[inventory.selected_slot];
-            if (targeted_block && !selected.empty() && !selected.holds_item()) {
+
+            // Eating: right-click with a food item selected (heal_amount >
+            // 0 - see ItemProperties/Item.cpp's define_food() calls),
+            // Survival only (Creative players have no need for it, same as
+            // they never take damage either) and only below full health -
+            // there's no hunger bar here to gate this on the way vanilla
+            // does (see PlayerHealth's own comment), so full health simply
+            // stands in for "not hungry". Doesn't need targeted_block at
+            // all - you can eat looking at open sky, same as vanilla.
+            const ItemProperties* held = selected.holds_item() ? &get_item_properties(selected.tool) : nullptr;
+            if (held && held->heal_amount > 0) {
+                if (current_game_mode == GameMode::Survival && player_health.health() < PlayerHealth::MAX_HEALTH) {
+                    player_health.heal(held->heal_amount);
+                    if (--selected.count <= 0) selected.clear();
+                }
+            } else if (targeted_block && !selected.empty() && !selected.holds_item()) {
+                // Right-click-to-place only ever consumes a block stack -
+                // a selected tool has nothing to place (and isn't consumed
+                // by right-clicking with it either, same as vanilla: tools
+                // have no use-on-block action here yet beyond mining); a
+                // selected Material likewise has nothing to place (and
+                // critically must stay excluded here - selected.block
+                // reads as Air for one, so without this check place_block
+                // would be called with Air and silently clear out whatever
+                // was targeted).
                 BlockType targeted_type = world->get_block(
                     targeted_block->x, targeted_block->y, targeted_block->z);
                 bool replace_target = get_block_properties(targeted_type).replaceable;
@@ -802,6 +1023,8 @@ void GameEngine::update(float delta_time)
             }
         }
     }
+
+    } // alive
 
     for (auto& object : objects) {
         if (object->is_active()) {
@@ -879,7 +1102,18 @@ void GameEngine::draw()
         pause_snapshot_pending = false;
     }
 
-    ui::crosshair();
+    // Hurt flash: a brief red pulse whenever apply_damage() actually lands
+    // a hit - the only feedback taking damage gets right now (no hurt
+    // sound/hit animation asset exists in this project yet). Faded by
+    // update_player_damage() counting hurt_flash_seconds back down to 0.
+    if (hurt_flash_seconds > 0.0f) {
+        unsigned char alpha = static_cast<unsigned char>(
+            90.0f * std::clamp(hurt_flash_seconds / HURT_FLASH_SECONDS, 0.0f, 1.0f));
+        DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Color{200, 0, 0, alpha});
+    }
+
+    bool show_death_screen = world && player_health.is_dead();
+    if (!show_death_screen) ui::crosshair();
 
     if (is_breaking) {
         const float bar_width = ui::scaled(BREAK_BAR_WIDTH);
@@ -895,6 +1129,12 @@ void GameEngine::draw()
 
     if (world) {
         inventory_hud.draw_hotbar(inventory);
+        // Creative hides its own health/hunger bars in real Minecraft too -
+        // Creative players are invulnerable, so there's nothing meaningful
+        // to show (player_health simply never leaves full health there).
+        if (current_game_mode == GameMode::Survival) {
+            inventory_hud.draw_hearts(player_health.health(), PlayerHealth::MAX_HEALTH);
+        }
         // Drawn and click-handled together here (not from update()) - the
         // same immediate-mode pattern every menu screen already uses, and
         // simplest since update() already returned early while it's open.
@@ -909,6 +1149,17 @@ void GameEngine::draw()
         ui::draw_debug_overlay(camera, *world,
             current_game_mode == GameMode::Creative ? CREATIVE_REACH : SURVIVAL_REACH,
             current_game_mode == GameMode::Creative ? camera_move_speed : player_controller.horizontal_speed(), game_tick);
+    }
+
+    // Death screen: no click-to-respawn button here (see respawn_player()'s
+    // own comment) - just the same dark-red overlay/title real Minecraft
+    // shows while its own timer runs out, drawn over everything else
+    // (hotbar included) the way its death screen does too.
+    if (show_death_screen) {
+        ui::panel({0.0f, 0.0f, static_cast<float>(GetScreenWidth()), static_cast<float>(GetScreenHeight())},
+                  Color{110, 0, 0, 140});
+        ui::label({0.0f, GetScreenHeight() * 0.35f, static_cast<float>(GetScreenWidth()), ui::scaled(60.0f)},
+                  ui::tr("death.title"), WHITE);
     }
 
     EndDrawing();
@@ -1116,6 +1367,9 @@ void GameEngine::start_singleplayer_world(const std::string& folder_name)
         inventory = saved->inventory;
         spawn_settle_frames = 3; // see its own comment on set_world()
         player_controller.reset();
+        player_health.reset();
+        player_health.set_health(saved->health);
+        reset_life_timers();
         camera_view = CameraView::FirstPerson;
         // Blocking: the world needs to actually be there around the
         // player's resumed position by the time Playing starts, not merely
@@ -1156,6 +1410,7 @@ void GameEngine::save_player_state()
     state.position = camera.position;
     state.forward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
     state.inventory = inventory;
+    state.health = player_health.health();
     WorldSave::save_player_state(current_world_folder, state);
 
     // Every item still on the ground, so it's there (and keeps counting

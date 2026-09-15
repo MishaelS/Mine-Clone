@@ -34,6 +34,7 @@ namespace {
         {"settings.language", "Язык"}, {"language.ru", "Русский"}, {"language.en", "English"},
         {"mode.survival", "выживание"}, {"mode.creative", "творческий"},
         {"inventory.creative", "Творческий инвентарь"}, {"inventory.pages", "Колесо: страницы"},
+        {"death.title", "Вы умерли"},
     };
 
     const Dictionary EN = {
@@ -62,6 +63,7 @@ namespace {
         {"settings.language", "Language"}, {"language.ru", "Русский"}, {"language.en", "English"},
         {"mode.survival", "survival"}, {"mode.creative", "creative"},
         {"inventory.creative", "Creative Inventory"}, {"inventory.pages", "Wheel: pages"},
+        {"death.title", "You died"},
     };
 
     // Names used by tooltips and crafting results. One row keeps RU/EN
@@ -175,6 +177,16 @@ namespace {
         {"item.sapling", {"Саженец", "Sapling"}},
         {"item.apple", {"Яблоко", "Apple"}},
         {"item.wheat_seeds", {"Семена пшеницы", "Wheat Seeds"}},
+        {"item.golden_apple", {"Золотое яблоко", "Golden Apple"}},
+        {"item.soup", {"Суп", "Soup"}},
+        {"item.raw_porkchop", {"Сырая свинина", "Raw Porkchop"}},
+        {"item.cooked_porkchop", {"Жареная свинина", "Cooked Porkchop"}},
+        {"item.raw_fish", {"Сырая рыба", "Raw Fish"}},
+        {"item.cooked_fish", {"Жареная рыба", "Cooked Fish"}},
+        {"item.bread", {"Хлеб", "Bread"}},
+        {"item.cookie", {"Печенье", "Cookie"}},
+        {"item.egg", {"Яйцо", "Egg"}},
+        {"item.milk_bucket", {"Ведро молока", "Bucket of Milk"}},
     };
 
     std::string display_name(const std::string& key, const std::string& id, bool english)

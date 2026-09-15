@@ -47,7 +47,7 @@ namespace {
     constexpr Vector2 FUEL_PROGRESS_ORIGIN     = {57.0f, 36.0f};
     constexpr Vector2 SMELTING_PROGRESS_ORIGIN = {79.0f, 34.0f};
 
-    constexpr float HOTBAR_SCALE    = 2.5f;
+    constexpr float HOTBAR_SCALE    = 2.0f;
     constexpr float INVENTORY_SCALE = 2.0f;
 
     constexpr float ITEM_SIZE_PX           = 16.0f;
@@ -66,12 +66,12 @@ namespace {
     // other slot. The output slot itself isn't part of either grid array -
     // it's not a real backing ItemStack, just whatever match_recipe()
     // currently reports for that grid, drawn/handled separately below.
-    constexpr Vector2 INVENTORY_CRAFT_ORIGIN = {98.0f, 18.0f};
-    constexpr Vector2 INVENTORY_CRAFT_OUTPUT_ORIGIN = {154.0f, 28.0f};
-    constexpr float INVENTORY_CRAFT_OUTPUT_SIZE_PX = 16.0f;
-    constexpr Vector2 WORKBENCH_CRAFT_ORIGIN = {30.0f, 17.0f};
-    constexpr Vector2 WORKBENCH_CRAFT_OUTPUT_ORIGIN = {120.0f, 31.0f};
-    constexpr float WORKBENCH_CRAFT_OUTPUT_SIZE_PX = 24.0f;
+    constexpr Vector2 INVENTORY_CRAFT_ORIGIN         = {98.0f, 18.0f};
+    constexpr Vector2 INVENTORY_CRAFT_OUTPUT_ORIGIN  = {154.0f, 28.0f};
+    constexpr float   INVENTORY_CRAFT_OUTPUT_SIZE_PX = 16.0f;
+    constexpr Vector2 WORKBENCH_CRAFT_ORIGIN         = {30.0f, 17.0f};
+    constexpr Vector2 WORKBENCH_CRAFT_OUTPUT_ORIGIN  = {120.0f, 31.0f};
+    constexpr float   WORKBENCH_CRAFT_OUTPUT_SIZE_PX = 24.0f;
 
     // Chest's own 27-slot grid (9x3, same column count/stride as
     // MAIN_GRID_ORIGIN below) - measured the same flood-fill way as every
@@ -138,6 +138,18 @@ namespace {
 
     constexpr float HOTBAR_BOTTOM_MARGIN = 18.0f;
 
+    // Health row, drawn just above the hotbar - see draw_hearts(). Vanilla's
+    // own 9x9 heart icons overlap by 1px at an 8px horizontal stride
+    // (rather than sitting edge-to-edge at 9px), which is what gives the
+    // row its slightly-tucked-together look instead of visibly separate
+    // squares.
+    const char* HEART_FULL_TEXTURE_PATH  = "sprites/gui/hearts/heart0.png";
+    const char* HEART_HALF_TEXTURE_PATH  = "sprites/gui/hearts/heart1.png";
+    const char* HEART_EMPTY_TEXTURE_PATH = "sprites/gui/hearts/heart2.png";
+    constexpr float HEART_ICON_PX = 9.0f;
+    constexpr float HEART_STRIDE_PX = 8.0f;
+    constexpr float HEART_ROW_GAP = 5.0f; // above the hotbar's own top edge
+
     constexpr Color SELECTION_HIGHLIGHT_COLOR = {255, 255, 255, 80};
     constexpr int STACK_COUNT_FONT_SIZE = 13;
 
@@ -148,7 +160,7 @@ namespace {
     Rectangle slot_bounds(Vector2 content_origin, float scale, float size_px = ITEM_SIZE_PX) {
         // Align both edges to the same framebuffer pixels as the atlas.
         const float left = std::round(content_origin.x);
-        const float top = std::round(content_origin.y);
+        const float top  = std::round(content_origin.y);
         return {left, top, std::round(content_origin.x + size_px * scale) - left,
                            std::round(content_origin.y + size_px * scale) - top};
     }
@@ -278,6 +290,44 @@ void InventoryHud::draw_hotbar(const Inventory& inventory) const
         DrawTexturePro(selector, selector_source,
             {selector_x, selector_y, selector_size, selector_size},
             {0.0f, 0.0f}, 0.0f, WHITE);
+    }
+}
+
+void InventoryHud::draw_hearts(int health, int max_health) const
+{
+    const Texture2D& full  = TextureManager::get(HEART_FULL_TEXTURE_PATH);
+    const Texture2D& half  = TextureManager::get(HEART_HALF_TEXTURE_PATH);
+    const Texture2D& empty = TextureManager::get(HEART_EMPTY_TEXTURE_PATH);
+
+    // Same on-screen position/scale math as draw_hotbar() uses for its own
+    // texture, so the row lines up flush with the hotbar's left edge.
+    const Texture2D& hotbar_texture = TextureManager::get(HOTBAR_TEXTURE_PATH);
+    const float hotbar_scale = HOTBAR_SCALE * ui::scale_factor();
+    float hotbar_w = static_cast<float>(hotbar_texture.width) * hotbar_scale;
+    float hotbar_h = static_cast<float>(hotbar_texture.height) * hotbar_scale;
+    float hotbar_x = std::round((GetScreenWidth() - hotbar_w) / 2.0f);
+    float hotbar_y = std::round(GetScreenHeight() - ui::scaled(HOTBAR_BOTTOM_MARGIN) - hotbar_h);
+
+    // Rounded once, like draw_hotbar()'s own hotbar_x/hotbar_y, so the gap
+    // above the hotbar comes out to a whole pixel too.
+    float heart_size = std::round(HEART_ICON_PX * hotbar_scale);
+    float stride = HEART_STRIDE_PX * hotbar_scale;
+    float row_y = hotbar_y - heart_size - ui::scaled(HEART_ROW_GAP);
+
+    Rectangle heart_source = {0.0f, 0.0f, HEART_ICON_PX, HEART_ICON_PX};
+    int heart_count = max_health / 2;
+    for (int i = 0; i < heart_count; ++i) {
+        int points = health - i * 2;
+        const Texture2D& texture = points >= 2 ? full : points == 1 ? half : empty;
+        // slot_bounds() (see draw_item_stack()'s own icons above) snaps
+        // both edges to whole pixels independently - at a non-integer
+        // hotbar_scale (2.5 by default), HEART_ICON_PX * hotbar_scale is
+        // itself fractional (22.5px), and handing that straight to
+        // DrawTexturePro() let the GPU round its left/right and top/bottom
+        // edges independently, occasionally 1px apart - a 9x9 heart
+        // rendering visibly non-square.
+        Rectangle destination = slot_bounds({hotbar_x + i * stride, row_y}, hotbar_scale, HEART_ICON_PX);
+        DrawTexturePro(texture, heart_source, destination, {0.0f, 0.0f}, 0.0f, WHITE);
     }
 }
 

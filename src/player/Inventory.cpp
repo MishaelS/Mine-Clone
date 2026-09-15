@@ -4,16 +4,10 @@
 
 Inventory default_inventory()
 {
-    Inventory inventory;
-    // No crafting system yet, so a fresh survival inventory starts with
-    // one basic tool per kind that actually benefits from mining speed -
-    // otherwise there would be no way to ever obtain one. Sword/Hoe are
-    // left out: neither does anything yet (no combat, no farming), so
-    // starting with one would just be inventory clutter.
-    inventory.add_tool(ItemType::WoodenPickaxe);
-    inventory.add_tool(ItemType::WoodenShovel);
-    inventory.add_tool(ItemType::WoodenAxe);
-    return inventory;
+    // No starting tools any more (removed by request) - a fresh survival
+    // inventory is just empty; everything from here on has to come from a
+    // world drop (or, once a crafting system exists, crafting).
+    return Inventory{};
 }
 
 std::vector<BlockType> all_placeable_blocks()

@@ -98,11 +98,18 @@ namespace {
     // FOG_END_FRACTION of config.loaded_radius_chunks's own distance at
     // the very latest, so a chunk unloading at the render-distance edge
     // does so already inside the fog, never visibly, no matter how far the
-    // player pushed the fog slider. FOG_START_FRACTION is relative to
-    // whichever end distance actually applies (the configured one, or this
-    // ceiling if that's nearer).
-    constexpr float FOG_END_FRACTION = 0.8f;
-    constexpr float FOG_START_FRACTION = 0.5f;
+    // player pushed the fog slider. Close to 1.0 rather than a generous
+    // margin below it - the margin's own job is only to absorb a chunk
+    // moving from "loaded" to "unloaded" between frames, not to leave a
+    // stretch of clear, unfogged terrain sitting right in front of the
+    // pop; too big a margin (previously 0.8) recreates exactly the hard
+    // edge fog exists to hide. FOG_START_FRACTION is relative to whichever
+    // end distance actually applies (the configured one, or this ceiling
+    // if that's nearer) - lower means fog starts closer to the camera and
+    // thickens over more of the visible distance instead of staying thin
+    // until close to the end.
+    constexpr float FOG_END_FRACTION = 0.95f;
+    constexpr float FOG_START_FRACTION = 0.35f;
 
     // Underwater fog: real Minecraft doesn't darken the water block's own
     // surface color by depth (it stays one plain color everywhere) -
@@ -322,22 +329,27 @@ std::vector<const Chunk*> World::compute_visible_chunks(const Camera3D& camera) 
 void World::draw_opaque(const Camera3D& camera) const
 {
     float fog_end, fog_start;
-    Color fog_color;
+    Color fog_color, fog_sky_color;
     if (auto depth = water_depth_at(camera.position)) {
         // Submerged: swap in underwater fog (see UNDERWATER_FOG_* above)
         // instead of the normal render-distance one - real Minecraft's own
         // approach, rather than darkening the water block's own color.
+        // No skybox visible underwater to blend toward, so both fog colors
+        // are the same flat tone - the shader's horizon/sky mix is then a
+        // no-op regardless of view angle.
         float t = std::clamp(static_cast<float>(*depth) / UNDERWATER_FOG_MAX_DEPTH, 0.0f, 1.0f);
         fog_end = UNDERWATER_FOG_END_SHALLOW + (UNDERWATER_FOG_END_DEEP - UNDERWATER_FOG_END_SHALLOW) * t;
         fog_start = fog_end * UNDERWATER_FOG_START_FRACTION;
         fog_color = ColorLerp(UNDERWATER_FOG_COLOR_SHALLOW, UNDERWATER_FOG_COLOR_DEEP, t);
+        fog_sky_color = fog_color;
     } else {
         float max_fog_end = config.loaded_radius_chunks * CHUNK_SIZE * FOG_END_FRACTION;
         fog_end = std::min(static_cast<float>(config.fog_distance_blocks), max_fog_end);
         fog_start = fog_end * FOG_START_FRACTION;
         fog_color = skybox_horizon_color();
+        fog_sky_color = skybox_sky_color();
     }
-    set_chunk_fog(camera.position, fog_color, fog_start, fog_end);
+    set_chunk_fog(camera.position, fog_color, fog_sky_color, fog_start, fog_end);
     set_chunk_water_time(static_cast<float>(GetTime()));
 
     // Opaque and alpha-cutout geometry only, world-wide - see
@@ -1120,6 +1132,28 @@ void World::update_chunk_states_blocking(Vector3 observer_position)
         auto [cx, cz] = unpack_chunk_key(key);
         rebuild_mesh(cx, cz);
     }
+}
+
+void World::set_view_distance(int loaded_radius_chunks, int fog_distance_blocks)
+{
+    if (config.loaded_radius_chunks == loaded_radius_chunks && config.fog_distance_blocks == fog_distance_blocks) {
+        return; // called unconditionally from GameEngine::tick() - nothing to do most ticks
+    }
+
+    if (config.loaded_radius_chunks != loaded_radius_chunks) {
+        config.loaded_radius_chunks = loaded_radius_chunks;
+        // Active must never exceed Loaded - same clamp the constructor
+        // applies once up front (see World::World()).
+        config.active_radius_chunks = std::min(config.active_radius_chunks, config.loaded_radius_chunks);
+        // update_chunk_states()'s own early-out only rescans once the
+        // observer enters a different chunk than last time - nothing else
+        // would otherwise notice this radius changed until the player next
+        // moved. Forcing that rescan here, immediately, is what makes a
+        // Settings change apply live instead of merely being remembered
+        // for the next chunk crossing.
+        last_observer_chunk.reset();
+    }
+    config.fog_distance_blocks = fog_distance_blocks; // draw_opaque() reads this fresh every frame - nothing else to nudge
 }
 
 void World::integrate_worker_results()

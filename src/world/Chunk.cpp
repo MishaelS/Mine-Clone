@@ -515,20 +515,23 @@ void load_chunk_shader()
     chunk_shader = LoadShader(ASSETS_PATH "shaders/chunk.vs", ASSETS_PATH "shaders/chunk.fs");
 }
 
-void set_chunk_fog(Vector3 camera_position, Color fog_color, float fog_start, float fog_end)
+void set_chunk_fog(Vector3 camera_position, Color fog_color, Color fog_sky_color, float fog_start, float fog_end)
 {
     // Looked up by name once, not on every call - GetShaderLocation() does
     // a string lookup each time, wasted work for a location that never
     // moves once the shader's compiled.
-    static int camera_loc = GetShaderLocation(chunk_shader, "cameraPosition");
-    static int color_loc  = GetShaderLocation(chunk_shader, "fogColor");
-    static int start_loc  = GetShaderLocation(chunk_shader, "fogStart");
-    static int end_loc    = GetShaderLocation(chunk_shader, "fogEnd");
+    static int camera_loc   = GetShaderLocation(chunk_shader, "cameraPosition");
+    static int color_loc    = GetShaderLocation(chunk_shader, "fogColor");
+    static int sky_color_loc = GetShaderLocation(chunk_shader, "fogSkyColor");
+    static int start_loc    = GetShaderLocation(chunk_shader, "fogStart");
+    static int end_loc      = GetShaderLocation(chunk_shader, "fogEnd");
 
     SetShaderValue(chunk_shader, camera_loc, &camera_position, SHADER_UNIFORM_VEC3);
 
     float color[3] = {fog_color.r / 255.0f, fog_color.g / 255.0f, fog_color.b / 255.0f};
     SetShaderValue(chunk_shader, color_loc, color, SHADER_UNIFORM_VEC3);
+    float sky_color[3] = {fog_sky_color.r / 255.0f, fog_sky_color.g / 255.0f, fog_sky_color.b / 255.0f};
+    SetShaderValue(chunk_shader, sky_color_loc, sky_color, SHADER_UNIFORM_VEC3);
     SetShaderValue(chunk_shader, start_loc, &fog_start, SHADER_UNIFORM_FLOAT);
     SetShaderValue(chunk_shader, end_loc, &fog_end, SHADER_UNIFORM_FLOAT);
 }
@@ -1024,13 +1027,32 @@ namespace {
         int max_vein_size;
     };
 
+    // veins_per_chunk/max_vein_size bumped up noticeably from Beta 1.7.3's
+    // own sparser numbers toward modern Minecraft's actual per-chunk ore
+    // counts/blob sizes - too sparse to reliably notice at this engine's
+    // per-chunk pace otherwise.
     constexpr OreVein ORE_VEINS[] = {
-        {BlockType::CoalOre,     0, 127, 5,  60, 12, 8},
-        {BlockType::IronOre,     0, 64,  10, 40, 8,  6},
-        {BlockType::GoldOre,     0, 32,  14, 28, 2,  6},
-        {BlockType::LapisOre,    0, 31,  10, 16, 1,  5},
-        {BlockType::RedstoneOre, 0, 16,  8,  12, 4,  6},
-        {BlockType::DiamondOre,  0, 16,  5,  12, 1,  4},
+        {BlockType::CoalOre,     0, 127,   5,  60,  60,  17},
+        {BlockType::IronOre,     0,  64,  10,  40,  40,   9},
+        {BlockType::GoldOre,     0,  32,  14,  28,   4,   9},
+        {BlockType::LapisOre,    0,  31,  10,  16,   3,   7},
+        {BlockType::RedstoneOre, 0,  16,   8,  12,   8,   8},
+        {BlockType::DiamondOre,  0,  16,   5,  12,   4,   6},
+
+        // Exposed outcrops: a second, much sparser pair of entries for the
+        // same two ore types, up in Hills' bare-stone peak band instead of
+        // their usual deep one - HILLS_STONE_LINE (world Y 95, local 159)
+        // is where generate_terrain() turns a Hills column's surface_block/
+        // subsurface_block to Stone all the way up, so a vein landing here
+        // can surface right at a peak's own visible top, the same way real
+        // Minecraft mountainsides show a coal seam in the cliff face
+        // itself rather than only ever appearing after digging down to the
+        // deep band above. Everywhere else this band simply finds no Stone
+        // to touch (ordinary grass/dirt land, or a Hills column below its
+        // own stone line) and is a no-op, same as any other vein attempt
+        // with nothing to land in.
+        {BlockType::CoalOre,     159, 182, 162, 176, 6, 6},
+        {BlockType::IronOre,     159, 182, 162, 176, 4, 5},
     };
 
     // Underground Dirt/Gravel patches - not ores, but generated the exact
@@ -1071,6 +1093,38 @@ namespace {
             z += cave_random_int(rng, 3) - 1;
         }
     }
+
+    // Round, ball-shaped cluster - a minority of vein attempts (see
+    // BLOB_VEIN_CHANCE) fill a small ellipsoid outright instead of walking
+    // place_vein()'s elongated random path, the same idea carve_ellipsoid()
+    // above already uses for cave rooms, just filling Stone with `type`
+    // rather than carving it to Air. Same Stone-only guard as place_vein().
+    void place_blob_vein(Chunk& chunk, std::mt19937_64& rng, BlockType type, int y_min, int y_max, int radius) {
+        int center_x = cave_random_int(rng, CHUNK_SIZE);
+        int center_y = std::clamp(y_min + cave_random_int(rng, std::max(1, y_max - y_min + 1)), 0, CHUNK_HEIGHT - 1);
+        int center_z = cave_random_int(rng, CHUNK_SIZE);
+        for (int dx = -radius; dx <= radius; ++dx) {
+            for (int dy = -radius; dy <= radius; ++dy) {
+                for (int dz = -radius; dz <= radius; ++dz) {
+                    // Ellipsoid membership test, not a cube: (dx/r)^2 + (dy/r)^2 + (dz/r)^2 <= 1.
+                    float nx = static_cast<float>(dx) / radius;
+                    float ny = static_cast<float>(dy) / radius;
+                    float nz = static_cast<float>(dz) / radius;
+                    if (nx * nx + ny * ny + nz * nz > 1.0f) continue;
+
+                    int x = center_x + dx, y = center_y + dy, z = center_z + dz;
+                    if (x >= 0 && x < CHUNK_SIZE && y >= 0 && y < CHUNK_HEIGHT && z >= 0 && z < CHUNK_SIZE &&
+                        chunk.get_block(x, y, z) == BlockType::Stone) {
+                        chunk.set_block(x, y, z, type);
+                    }
+                }
+            }
+        }
+    }
+
+    constexpr float BLOB_VEIN_CHANCE = 0.15f; // fraction of vein attempts that become a round blob instead of an elongated walk
+    constexpr int BLOB_RADIUS_MIN = 2;
+    constexpr int BLOB_RADIUS_MAX = 4;
 }
 
 void Chunk::generate_ores(uint32_t world_seed, int chunk_x, int chunk_z)
@@ -1082,8 +1136,13 @@ void Chunk::generate_ores(uint32_t world_seed, int chunk_x, int chunk_z)
             bool common_band = cave_random_double(rng) < ORE_COMMON_BAND_CHANCE;
             int y_min = common_band ? vein.y_common_min : vein.y_min;
             int y_max = common_band ? vein.y_common_max : vein.y_max;
-            int size = 1 + cave_random_int(rng, vein.max_vein_size);
-            place_vein(*this, rng, vein.type, y_min, y_max, size);
+            if (cave_random_double(rng) < BLOB_VEIN_CHANCE) {
+                int radius = BLOB_RADIUS_MIN + cave_random_int(rng, BLOB_RADIUS_MAX - BLOB_RADIUS_MIN + 1);
+                place_blob_vein(*this, rng, vein.type, y_min, y_max, radius);
+            } else {
+                int size = 1 + cave_random_int(rng, vein.max_vein_size);
+                place_vein(*this, rng, vein.type, y_min, y_max, size);
+            }
         }
     }
 
