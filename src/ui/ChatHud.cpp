@@ -5,15 +5,15 @@
 #include <algorithm>
 
 namespace {
-    constexpr size_t MAX_MESSAGES = 50;         // full scrollback cap - oldest lines fall off the front
-    constexpr size_t MAX_VISIBLE_MESSAGES = 10; // how many of the most recent are actually drawn at once
-    constexpr size_t MAX_CHAT_CODEPOINTS = 256;
+    constexpr size_t MAX_MESSAGES         = 50;  // full scrollback cap - oldest lines fall off the front
+    constexpr size_t MAX_VISIBLE_MESSAGES = 10;  // how many of the most recent are actually drawn at once
+    constexpr size_t MAX_CHAT_CODEPOINTS  = 256;
 
-    constexpr float CHAT_WIDTH = 480.0f;
-    constexpr float LINE_HEIGHT = 16.0f;
-    constexpr float INPUT_HEIGHT = 22.0f;
+    constexpr float CHAT_WIDTH    = 480.0f;
+    constexpr float LINE_HEIGHT   = 16.0f;
+    constexpr float INPUT_HEIGHT  = 22.0f;
     constexpr float BOTTOM_MARGIN = 4.0f;
-    constexpr float LEFT_MARGIN = 4.0f;
+    constexpr float LEFT_MARGIN   = 4.0f;
     constexpr Color LOG_BACKGROUND = {0, 0, 0, 140};
 }
 

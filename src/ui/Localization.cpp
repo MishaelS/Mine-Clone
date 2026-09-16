@@ -211,7 +211,6 @@ namespace {
 }
 
 namespace ui {
-
     void set_language(const std::string& language_code) {
         current_language = language_code == "en" ? "en" : "ru";
     }

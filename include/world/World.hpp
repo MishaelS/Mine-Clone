@@ -454,6 +454,14 @@ private:
     // geometry now has.
     void rebuild_mesh_neighborhood(int chunk_x, int chunk_z);
 
+    // Recomputes raw sky/block light for the union of each changed chunk
+    // plus its 8 neighbors, with propagation allowed across chunk borders.
+    // The outer edge is seeded from still-existing light just outside the
+    // relit area, so removing/placing a block near one border does not
+    // accidentally erase light arriving from an unrelated chunk beyond it.
+    void relight_chunks_around(const std::vector<std::pair<int, int>>& centers);
+    void relight_chunk_neighborhood(int chunk_x, int chunk_z);
+
     // True if every one of (chunk_x, chunk_z)'s own 3x3 neighborhood
     // (itself included) is either present in World::chunks or permanently
     // out of the loaded world (past WORLD_BORDER_CHUNKS, or simply outside

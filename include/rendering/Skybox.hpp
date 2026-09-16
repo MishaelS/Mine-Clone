@@ -6,13 +6,12 @@
 // colored (blue up top, lighter near the horizon, by day - see the .cpp's
 // own DAY_/NIGHT_/SUNSET_ colors) and depth-tested off so it always reads
 // as infinitely far away. No texture/cubemap - just vertex-colored
-// geometry. `sun_direction` (see core/DayNightCycle.hpp) blends the whole
-// gradient toward night's own darker colors as the sun sinks, plus a warm
-// glow at the horizon specifically while it's near the horizon line
-// (sunrise/sunset) - skybox_horizon_color()/skybox_sky_color() below
-// report back whatever this call actually drew, for anything else (fog)
-// that needs to match.
-void draw_skybox(Vector3 camera_position, Vector3 sun_direction);
+// geometry. `celestial_angle` (see core/DayNightCycle.hpp) drives the same
+// cosine day/night curve Minecraft uses for sky/fog color, plus a warm
+// horizon glow while the sun is near the horizon. skybox_horizon_color()/
+// skybox_sky_color() below report back whatever this call actually drew,
+// for anything else (fog) that needs to match.
+void draw_skybox(Vector3 camera_position, float celestial_angle);
 
 // Sun/moon billboards - two textured quads (assets/sprites/sky/sun.png,
 // moon.png) positioned along `sun_direction` and its exact opposite (see

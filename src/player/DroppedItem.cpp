@@ -39,13 +39,13 @@ namespace {
 
     constexpr float INITIAL_POP_VELOCITY = 0.11f; // blocks/tick, ~2.2 blocks/s - the old straight-up-pop speed
 
-    constexpr float ITEM_HALF_SIZE = 0.14f;
-    constexpr float BOB_HEIGHT = 0.04f;
-    constexpr float BOB_SPEED = 3.0f;
+    constexpr float ITEM_HALF_SIZE       = 0.14f;
+    constexpr float BOB_HEIGHT           = 0.04f;
+    constexpr float BOB_SPEED            = 3.0f;
     constexpr float BLOCK_ROTATION_SPEED = 45.0f;
 
-    constexpr float MERGE_RADIUS = 0.7f;
-    constexpr float MAGNET_RADIUS = 1.0f;
+    constexpr float MERGE_RADIUS      = 0.7f;
+    constexpr float MAGNET_RADIUS     = 1.0f;
     constexpr float MAGNET_PULL_SPEED = 3.0f; // blocks/second, at its strongest right at the pickup radius
 
     bool blocked(const World* world, Vector3 position) {
@@ -88,10 +88,10 @@ namespace {
     void draw_billboard_quad(const BillboardTexture& billboard)
     {
         const float half = billboard.size * 0.5f;
-        const float u0 = billboard.uv.x;
-        const float v0 = billboard.uv.y;
-        const float u1 = billboard.uv.x + billboard.uv.width;
-        const float v1 = billboard.uv.y + billboard.uv.height;
+        const float u0   = billboard.uv.x;
+        const float v0   = billboard.uv.y;
+        const float u1   = billboard.uv.x + billboard.uv.width;
+        const float v1   = billboard.uv.y + billboard.uv.height;
 
         rlSetTexture(billboard.texture->id);
         rlBegin(RL_QUADS);

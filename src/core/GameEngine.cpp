@@ -1593,10 +1593,11 @@ void GameEngine::draw()
         // `world` guard since drawing the sun/moon quads at all before a
         // world exists would be pointless.
         Vector3 sun_dir = DayNightCycle::sun_direction(game_tick);
+        float celestial_angle = DayNightCycle::celestial_angle(game_tick);
 
         Camera3D render_camera = make_render_camera();
         BeginMode3D(render_camera);
-        draw_skybox(render_camera.position, sun_dir);
+        draw_skybox(render_camera.position, celestial_angle);
         if (world) {
             // Sun/moon - drawn right after the sky's own gradient, still
             // well before any real terrain.

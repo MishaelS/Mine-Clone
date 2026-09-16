@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <limits>
 #include <mutex>
+#include <queue>
 #include <set>
 #include <shared_mutex>
 #include <utility>
@@ -313,6 +314,197 @@ void World::rebuild_mesh_neighborhood(int chunk_x, int chunk_z)
             request_remesh(chunk_x + dx, chunk_z + dz);
         }
     }
+}
+
+void World::relight_chunk_neighborhood(int chunk_x, int chunk_z)
+{
+    relight_chunks_around({{chunk_x, chunk_z}});
+}
+
+void World::relight_chunks_around(const std::vector<std::pair<int, int>>& centers)
+{
+    std::unordered_set<int64_t> area_keys;
+    for (auto [chunk_x, chunk_z] : centers) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            for (int dz = -1; dz <= 1; ++dz) {
+                int cx = chunk_x + dx;
+                int cz = chunk_z + dz;
+                if (chunk_at(cx, cz) != nullptr) {
+                    area_keys.insert(chunk_key(cx, cz));
+                }
+            }
+        }
+    }
+    if (area_keys.empty()) return;
+
+    struct AreaChunk {
+        int x, z;
+        Chunk* chunk;
+    };
+    std::vector<AreaChunk> area;
+    area.reserve(area_keys.size());
+    for (int64_t key : area_keys) {
+        auto [cx, cz] = unpack_chunk_key(key);
+        if (Chunk* chunk = chunk_at(cx, cz)) {
+            area.push_back({cx, cz, chunk});
+        }
+    }
+    if (area.empty()) return;
+
+    std::vector<Chunk*> lock_order;
+    lock_order.reserve(area.size());
+    for (const AreaChunk& entry : area) lock_order.push_back(entry.chunk);
+    std::sort(lock_order.begin(), lock_order.end());
+    lock_order.erase(std::unique(lock_order.begin(), lock_order.end()), lock_order.end());
+
+    std::vector<std::unique_lock<std::shared_mutex>> locks;
+    locks.reserve(lock_order.size());
+    for (Chunk* chunk : lock_order) locks.emplace_back(chunk->data_mutex());
+
+    auto area_contains = [&](int chunk_x, int chunk_z) {
+        return area_keys.count(chunk_key(chunk_x, chunk_z)) > 0;
+    };
+    auto resolve = [&](int x, int z, int& chunk_x, int& chunk_z, int& local_x, int& local_z) {
+        chunk_x = floor_div(x, CHUNK_SIZE);
+        chunk_z = floor_div(z, CHUNK_SIZE);
+        local_x = x - chunk_x * CHUNK_SIZE;
+        local_z = z - chunk_z * CHUNK_SIZE;
+    };
+    auto area_chunk_at_world = [&](int x, int z, int& local_x, int& local_z) -> Chunk* {
+        int chunk_x, chunk_z;
+        resolve(x, z, chunk_x, chunk_z, local_x, local_z);
+        if (!area_contains(chunk_x, chunk_z)) return nullptr;
+        return chunk_at(chunk_x, chunk_z);
+    };
+    auto transparent_at = [&](int x, int y, int z) {
+        if (y < MIN_WORLD_Y || y >= MIN_WORLD_Y + CHUNK_HEIGHT) return false;
+        return get_block_properties(get_block(x, y, z)).transparent;
+    };
+    auto set_sky = [&](int x, int y, int z, int value) {
+        int local_x, local_z;
+        Chunk* chunk = area_chunk_at_world(x, z, local_x, local_z);
+        if (chunk == nullptr || y < MIN_WORLD_Y || y >= MIN_WORLD_Y + CHUNK_HEIGHT) return;
+        chunk->set_sky_light(local_x, y - MIN_WORLD_Y, local_z, std::clamp(value, 0, MAX_LIGHT));
+    };
+    auto set_block = [&](int x, int y, int z, int value) {
+        int local_x, local_z;
+        Chunk* chunk = area_chunk_at_world(x, z, local_x, local_z);
+        if (chunk == nullptr || y < MIN_WORLD_Y || y >= MIN_WORLD_Y + CHUNK_HEIGHT) return;
+        chunk->set_block_light(local_x, y - MIN_WORLD_Y, local_z, std::clamp(value, 0, MAX_LIGHT));
+    };
+
+    for (const AreaChunk& entry : area) {
+        entry.chunk->clear_lighting();
+    }
+
+    using Cell = std::array<int, 3>;
+    std::queue<Cell> sky_queue;
+    std::queue<Cell> block_queue;
+
+    for (const AreaChunk& entry : area) {
+        int base_x = entry.x * CHUNK_SIZE;
+        int base_z = entry.z * CHUNK_SIZE;
+
+        for (int lx = 0; lx < CHUNK_SIZE; ++lx) {
+            for (int lz = 0; lz < CHUNK_SIZE; ++lz) {
+                int wx = base_x + lx;
+                int wz = base_z + lz;
+                for (int ly = entry.chunk->highest_lit_y(); ly >= 0; --ly) {
+                    if (!get_block_properties(entry.chunk->get_block(lx, ly, lz)).transparent) break;
+                    entry.chunk->set_sky_light(lx, ly, lz, MAX_LIGHT);
+                    sky_queue.push({wx, ly + MIN_WORLD_Y, wz});
+                }
+            }
+        }
+
+        for (int lx = 0; lx < CHUNK_SIZE; ++lx) {
+            for (int ly = 0; ly <= entry.chunk->highest_lit_y(); ++ly) {
+                for (int lz = 0; lz < CHUNK_SIZE; ++lz) {
+                    int luminance = get_block_properties(entry.chunk->get_block(lx, ly, lz)).luminance;
+                    if (luminance <= 0) continue;
+                    entry.chunk->set_block_light(lx, ly, lz, luminance);
+                    block_queue.push({base_x + lx, ly + MIN_WORLD_Y, base_z + lz});
+                }
+            }
+        }
+    }
+
+    constexpr int OFFSETS[6][3] = {{1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1}};
+
+    auto seed_from_outside = [&](int inside_x, int y, int inside_z, int outside_x, int outside_z) {
+        if (!transparent_at(inside_x, y, inside_z)) return;
+
+        int sky_level = get_sky_light(outside_x, y, outside_z) - 1;
+        if (sky_level > get_sky_light(inside_x, y, inside_z)) {
+            set_sky(inside_x, y, inside_z, sky_level);
+            if (sky_level > 0) sky_queue.push({inside_x, y, inside_z});
+        }
+
+        int block_level = get_block_light(outside_x, y, outside_z) - 1;
+        if (block_level > get_block_light(inside_x, y, inside_z)) {
+            set_block(inside_x, y, inside_z, block_level);
+            if (block_level > 0) block_queue.push({inside_x, y, inside_z});
+        }
+    };
+
+    for (const AreaChunk& entry : area) {
+        int min_x = entry.x * CHUNK_SIZE;
+        int max_x = min_x + CHUNK_SIZE - 1;
+        int min_z = entry.z * CHUNK_SIZE;
+        int max_z = min_z + CHUNK_SIZE - 1;
+
+        for (int y = MIN_WORLD_Y; y < MIN_WORLD_Y + CHUNK_HEIGHT; ++y) {
+            if (!area_contains(entry.x - 1, entry.z)) {
+                for (int z = min_z; z <= max_z; ++z) seed_from_outside(min_x, y, z, min_x - 1, z);
+            }
+            if (!area_contains(entry.x + 1, entry.z)) {
+                for (int z = min_z; z <= max_z; ++z) seed_from_outside(max_x, y, z, max_x + 1, z);
+            }
+            if (!area_contains(entry.x, entry.z - 1)) {
+                for (int x = min_x; x <= max_x; ++x) seed_from_outside(x, y, min_z, x, min_z - 1);
+            }
+            if (!area_contains(entry.x, entry.z + 1)) {
+                for (int x = min_x; x <= max_x; ++x) seed_from_outside(x, y, max_z, x, max_z + 1);
+            }
+        }
+    }
+
+    auto propagate = [&](std::queue<Cell>& queue, bool sky) {
+        while (!queue.empty()) {
+            Cell cell = queue.front();
+            queue.pop();
+            int level = sky ? get_sky_light(cell[0], cell[1], cell[2])
+                            : get_block_light(cell[0], cell[1], cell[2]);
+            int new_level = level - 1;
+            if (new_level <= 0) continue;
+
+            for (const auto& offset : OFFSETS) {
+                int nx = cell[0] + offset[0];
+                int ny = cell[1] + offset[1];
+                int nz = cell[2] + offset[2];
+                if (ny < MIN_WORLD_Y || ny >= MIN_WORLD_Y + CHUNK_HEIGHT) continue;
+
+                int local_x, local_z;
+                Chunk* chunk = area_chunk_at_world(nx, nz, local_x, local_z);
+                if (chunk == nullptr) continue;
+                int local_y = ny - MIN_WORLD_Y;
+                if (!get_block_properties(chunk->get_block(local_x, local_y, local_z)).transparent) continue;
+
+                int current = sky ? chunk->get_sky_light(local_x, local_y, local_z)
+                                  : chunk->get_block_light(local_x, local_y, local_z);
+                if (new_level <= current) continue;
+
+                if (sky) {
+                    chunk->set_sky_light(local_x, local_y, local_z, new_level);
+                } else {
+                    chunk->set_block_light(local_x, local_y, local_z, new_level);
+                }
+                queue.push({nx, ny, nz});
+            }
+        }
+    };
+    propagate(sky_queue, true);
+    propagate(block_queue, false);
 }
 
 std::vector<const Chunk*> World::compute_visible_chunks(const Camera3D& camera) const
@@ -715,13 +907,9 @@ int World::command_fill_region(int min_x, int min_y, int min_z, int max_x, int m
             touched_chunks.insert({chunk_x, chunk_z});
         }
     }
+    std::vector<std::pair<int, int>> relight_centers(touched_chunks.begin(), touched_chunks.end());
+    relight_chunks_around(relight_centers);
     for (const auto& [chunk_x, chunk_z] : touched_chunks) {
-        Chunk* chunk = chunk_at(chunk_x, chunk_z);
-        if (chunk == nullptr) continue;
-        {
-            std::unique_lock<std::shared_mutex> lock(chunk->data_mutex());
-            chunk->compute_lighting();
-        }
         rebuild_mesh_neighborhood(chunk_x, chunk_z);
     }
     return placed;
@@ -771,13 +959,9 @@ int World::command_clone_region(int min_x, int min_y, int min_z, int max_x, int 
             }
         }
     }
+    std::vector<std::pair<int, int>> relight_centers(touched_chunks.begin(), touched_chunks.end());
+    relight_chunks_around(relight_centers);
     for (const auto& [chunk_x, chunk_z] : touched_chunks) {
-        Chunk* chunk = chunk_at(chunk_x, chunk_z);
-        if (chunk == nullptr) continue;
-        {
-            std::unique_lock<std::shared_mutex> lock(chunk->data_mutex());
-            chunk->compute_lighting();
-        }
         rebuild_mesh_neighborhood(chunk_x, chunk_z);
     }
     return placed;
@@ -808,9 +992,9 @@ void World::set_block_and_rebuild(int x, int y, int z, BlockType type)
         std::unique_lock<std::shared_mutex> lock(chunk->data_mutex());
         chunk->set_block(local_x, y - MIN_WORLD_Y, local_z, type);
         chunk->mark_modified();
-        chunk->compute_lighting();
     }
 
+    relight_chunk_neighborhood(chunk_x, chunk_z);
     rebuild_mesh_neighborhood(chunk_x, chunk_z);
 }
 
@@ -948,14 +1132,10 @@ void World::update_fluids()
     }
     pending_fluid_updates = std::move(still_pending);
 
-    for (int64_t key : relit_chunks) {
-        auto [cx, cz] = unpack_chunk_key(key);
-        Chunk* chunk = chunk_at(cx, cz);
-        if (chunk != nullptr) {
-            std::unique_lock<std::shared_mutex> lock(chunk->data_mutex());
-            chunk->compute_lighting();
-        }
-    }
+    std::vector<std::pair<int, int>> relight_centers;
+    relight_centers.reserve(relit_chunks.size());
+    for (int64_t key : relit_chunks) relight_centers.push_back(unpack_chunk_key(key));
+    relight_chunks_around(relight_centers);
     for (int64_t key : needs_mesh) {
         auto [cx, cz] = unpack_chunk_key(key);
         request_remesh(cx, cz);
@@ -1084,14 +1264,10 @@ void World::update_falling_blocks()
         it = falling_blocks.erase(it);
     }
 
-    for (int64_t key : relit_chunks) {
-        auto [cx, cz] = unpack_chunk_key(key);
-        Chunk* chunk = chunk_at(cx, cz);
-        if (chunk != nullptr) {
-            std::unique_lock<std::shared_mutex> lock(chunk->data_mutex());
-            chunk->compute_lighting();
-        }
-    }
+    std::vector<std::pair<int, int>> relight_centers;
+    relight_centers.reserve(relit_chunks.size());
+    for (int64_t key : relit_chunks) relight_centers.push_back(unpack_chunk_key(key));
+    relight_chunks_around(relight_centers);
     for (int64_t key : needs_mesh) {
         auto [cx, cz] = unpack_chunk_key(key);
         request_remesh(cx, cz);
@@ -1211,6 +1387,7 @@ void World::update_chunk_states(Vector3 observer_position)
     }
     for (auto [cx, cz] : out_of_range) {
         unload_chunk(cx, cz);
+        relight_chunk_neighborhood(cx, cz);
         // A departed neighbor changes how its still-loaded neighbors' own
         // border faces should read (stale AO/light baked in against a
         // chunk that's no longer there) - schedule those for a background
@@ -1244,6 +1421,7 @@ void World::update_chunk_states_blocking(Vector3 observer_position)
     // chunks' worth of initial world generation before this batching, ~4.6x
     // more than the 289 actually needed.
     std::unordered_set<int64_t> needs_mesh;
+    std::vector<std::pair<int, int>> needs_relight;
     auto mark_dirty = [&needs_mesh](int chunk_x, int chunk_z) {
         for (int dx = -1; dx <= 1; ++dx) {
             for (int dz = -1; dz <= 1; ++dz) {
@@ -1268,6 +1446,7 @@ void World::update_chunk_states_blocking(Vector3 observer_position)
                 generate_chunk(cx, cz);
                 chunk = chunk_at(cx, cz);
                 mark_dirty(cx, cz);
+                needs_relight.emplace_back(cx, cz);
             }
             chunk->set_state(desired_state_for(cx, cz, observer_chunk));
         }
@@ -1287,7 +1466,10 @@ void World::update_chunk_states_blocking(Vector3 observer_position)
     for (auto [cx, cz] : out_of_range) {
         unload_chunk(cx, cz);
         mark_dirty(cx, cz);
+        needs_relight.emplace_back(cx, cz);
     }
+
+    relight_chunks_around(needs_relight);
 
     for (int64_t key : needs_mesh) {
         auto [cx, cz] = unpack_chunk_key(key);
@@ -1339,6 +1521,8 @@ void World::integrate_worker_results()
         if (last_observer_chunk) {
             chunk_ptr->set_state(desired_state_for(result.chunk_x, result.chunk_z, *last_observer_chunk));
         }
+
+        relight_chunk_neighborhood(result.chunk_x, result.chunk_z);
 
         // Cascade: this chunk's own coordinate, and every neighbor that may
         // have been waiting on it to exist before its own mesh job could

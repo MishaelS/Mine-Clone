@@ -20,15 +20,17 @@ namespace {
     // Night's own look - a dark, slightly blue-tinted sky rather than pure
     // black, same "still legible, not a void" spirit as MIN_LIGHT_FRACTION
     // keeps terrain from ever reading as flat black either.
-    constexpr Color NIGHT_SKY_COLOR = {8, 10, 26, 255};
-    constexpr Color NIGHT_HORIZON_COLOR = {20, 22, 40, 255};
+    constexpr Color NIGHT_SKY_COLOR = {3, 5, 14, 255};
+    constexpr Color NIGHT_HORIZON_COLOR = {7, 9, 22, 255};
 
     // The warm horizon band real Minecraft shows right at sunrise/sunset -
     // blended in only near the horizon (see draw_skybox()'s own glow
     // calculation), not the whole sky, and only when the sun is actually
     // near the horizon line.
-    constexpr Color SUNSET_HORIZON_COLOR = {255, 130, 60, 255};
-    constexpr float SUNSET_GLOW_STRENGTH = 0.55f; // how much the glow color takes over at its strongest, 0..1
+    constexpr Color SUNSET_HORIZON_COLOR = {255, 126, 48, 255};
+    constexpr Color SUNSET_SKY_COLOR = {104, 62, 132, 255};
+    constexpr float SUNSET_HORIZON_STRENGTH = 0.78f; // how much the glow color takes over at its strongest, 0..1
+    constexpr float SUNSET_SKY_STRENGTH = 0.18f;
 
     // Current, time-of-day-blended colors - what draw_skybox() actually
     // draws with this frame, recomputed by it every call (see its own
@@ -88,28 +90,27 @@ namespace {
     }
 }
 
-void draw_skybox(Vector3 camera_position, Vector3 sun_direction)
+void draw_skybox(Vector3 camera_position, float celestial_angle)
 {
-    // Blend day's own look toward night's, following the sun's own height
-    // above the horizon (sun_direction.y) - the same value DayNightCycle::
-    // sky_light_factor() itself follows for the actual light level, just
-    // remapped to 0..1 first (that one only cares about "day or not", this
-    // one needs the full night<->day range) and smoothstepped so the
-    // transition eases in/out around dawn/dusk rather than moving at a
-    // constant rate the whole cycle through.
-    float day_factor = std::clamp((sun_direction.y + 1.0f) * 0.5f, 0.0f, 1.0f);
+    // Minecraft-style celestial curve: with DayNightCycle::celestial_angle()
+    // 0 is noon and 0.5 is midnight, so cos(angle * 2PI) gives sun height
+    // directly. Mapping that through a smooth threshold keeps true night
+    // dark, instead of blending halfway toward day exactly at the horizon.
+    float sun_height = std::cos(celestial_angle * 2.0f * PI);
+    float brightness = std::clamp(sun_height * 0.5f + 0.5f, 0.0f, 1.0f);
+    float day_factor = std::clamp((brightness - 0.35f) / 0.60f, 0.0f, 1.0f);
     day_factor = day_factor * day_factor * (3.0f - 2.0f * day_factor); // smoothstep
     Color sky = ColorLerp(NIGHT_SKY_COLOR, DAY_SKY_COLOR, day_factor);
     Color horizon = ColorLerp(NIGHT_HORIZON_COLOR, DAY_HORIZON_COLOR, day_factor);
 
-    // Sunrise/sunset glow: strongest exactly at the horizon (sun_direction.y
-    // == 0) and fades out within a fairly narrow band either side of it, so
-    // it reads as a brief, distinct event rather than half the day/night
-    // cycle. Only tints the horizon color - the zenith stays whatever
-    // night/day blend it already was, same as real Minecraft's own glow
-    // never actually reaching straight up.
-    float glow = std::clamp(1.0f - std::fabs(sun_direction.y) * 5.0f, 0.0f, 1.0f);
-    horizon = ColorLerp(horizon, SUNSET_HORIZON_COLOR, glow * SUNSET_GLOW_STRENGTH);
+    // Sunrise/sunset glow: strongest exactly when the cosine-derived sun
+    // height crosses the horizon and gone shortly after. It paints mostly
+    // the horizon, with a much weaker purple lift overhead so the sky has
+    // an actual sunset gradient rather than one flat orange strip.
+    float glow = std::clamp(1.0f - std::fabs(sun_height) * 4.8f, 0.0f, 1.0f);
+    glow = glow * glow * (3.0f - 2.0f * glow);
+    horizon = ColorLerp(horizon, SUNSET_HORIZON_COLOR, glow * SUNSET_HORIZON_STRENGTH);
+    sky = ColorLerp(sky, SUNSET_SKY_COLOR, glow * SUNSET_SKY_STRENGTH);
 
     current_sky_color = sky;
     current_horizon_color = horizon;

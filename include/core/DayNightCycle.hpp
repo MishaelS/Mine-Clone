@@ -11,13 +11,11 @@
 // than off wall-clock time (pausing the accumulator - a stall, a frozen
 // background tab - pauses them too).
 //
-// Nothing reads sun_direction() for actual lighting yet - Chunk's own sky/
-// block light stays exactly as static as before ("open air always reads as
-// fully lit"). This only drives the visible sun/moon sprites for now (see
-// rendering/Skybox.hpp's draw_celestial_bodies()), but exposes the one
-// value any future ambient-lighting work would need first, computed the
-// same authoritative way the visuals already do - so that work starts from
-// a single source of truth instead of re-deriving its own angle.
+// The stored sky/block light grid remains time-invariant, like Minecraft:
+// day/night only changes how strongly raw sky light is rendered right now.
+// This namespace is the single source for both visual sky phase and that
+// current sky-light factor, so sun/moon, skybox, fog and terrain dimming
+// stay synchronized.
 namespace DayNightCycle {
     // One full day, in ticks - real Minecraft's own length: 24000 ticks at
     // 20 ticks/second is exactly 20 real-world minutes.
@@ -27,6 +25,13 @@ namespace DayNightCycle {
     // at first light rather than midnight, same as vanilla - 0.25 noon, 0.5
     // dusk, 0.75 midnight, wrapping back to 1.0 == 0.0.
     float time_of_day(uint64_t game_tick);
+
+    // Minecraft-style sky phase used by the cosine curves below: 0.0 at
+    // noon, 0.25 at dusk, 0.5 at midnight, 0.75 at dawn. Keeping this
+    // separate from time_of_day() lets the simulation keep its dawn-based
+    // clock while rendering can use the familiar cos(angle * 2PI) shape
+    // where +1 means full day and -1 means full night.
+    float celestial_angle(uint64_t game_tick);
 
     // Normalized world-space direction from the player toward the sun -
     // arcs east to west through the zenith along one fixed vertical plane
@@ -44,9 +49,9 @@ namespace DayNightCycle {
     // get_sky_light() - passes through unchanged), MIN_NIGHT_SKY_LIGHT_FACTOR
     // at full night (real Minecraft's own "internal sky light" floor: a
     // fully sky-exposed cell reads as roughly 4 out of 15, not 0 - night
-    // outdoors is dim, not pitch black), following the sun's own height
-    // above the horizon (sun_direction().y) in between so dawn/dusk fade
-    // gradually instead of snapping. Block light (torches, lava) is never
+    // outdoors is dim, not pitch black), following a cosine celestial
+    // curve in between so dawn/dusk fade gradually instead of snapping.
+    // Block light (torches, lava) is never
     // touched by this at all - matches real Minecraft's own "only sky
     // light dims at night" rule. Multiply this into a cell's raw sky light
     // to get its actual current brightness contribution; the chunk mesh

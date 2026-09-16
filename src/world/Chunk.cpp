@@ -1463,6 +1463,11 @@ int Chunk::get_light(int x, int y, int z) const
     return sky > block ? sky : block;
 }
 
+void Chunk::clear_lighting()
+{
+    light.fill(uint8_t{0});
+}
+
 void Chunk::compute_lighting()
 {
     // Only y <= highest_block_y is ever read back (get_sky_light() reports

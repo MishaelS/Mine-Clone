@@ -426,6 +426,15 @@ public:
     int get_sky_light(int x, int y, int z) const;
     int get_block_light(int x, int y, int z) const;
 
+    // World-level relighting needs to flood-fill across several loaded
+    // chunks at once. Chunk still owns the packed storage, but World owns
+    // cross-border propagation and uses these narrow mutators under
+    // data_mutex() to update the raw channels.
+    void clear_lighting();
+    void set_sky_light(int x, int y, int z, int value);
+    void set_block_light(int x, int y, int z, int value);
+    int highest_lit_y() const { return highest_block_y; }
+
     // Guards blocks/light/fluid_level/column biome tints/highest_block_y
     // once this chunk is live in World::chunks and so reachable from more
     // than one thread (ChunkWorkerPool's background workers, alongside the
@@ -484,9 +493,6 @@ private:
     // Chunk-local opacity check for light propagation (transparent blocks,
     // including air, let light pass through). Out-of-range counts as open.
     bool is_opaque(int x, int y, int z) const;
-
-    void set_sky_light(int x, int y, int z, int value);
-    void set_block_light(int x, int y, int z, int value);
 
     std::array<BlockType, CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE> blocks;
 

@@ -12,7 +12,7 @@
 #include <cstdio>
 
 namespace {
-    constexpr int FONT_SIZE    = 18;
+    constexpr int FONT_SIZE = 18;
     constexpr float TEXT_SPACING = 1.0f; // pixels between glyphs, DrawTextEx-style
     constexpr int LINE_SPACING = 4;
     constexpr int PADDING      = 6;
@@ -22,8 +22,7 @@ namespace {
     // Compass name for a (normalized) look direction, clockwise from North -
     // matches the world's own North = -Z / East = +X convention (see
     // Chunk.cpp's CUBE_FACES comment).
-    const char* cardinal_direction(Vector3 forward)
-    {
+    const char* cardinal_direction(Vector3 forward) {
         float angle_deg = atan2f(forward.x, -forward.z) * RAD2DEG;
         if (angle_deg < 0.0f) angle_deg += 360.0f;
 
@@ -49,10 +48,10 @@ void ui::draw_debug_overlay(const Camera3D& camera, const World& world, float ai
     // World::get_effective_light()'s own comment) - not get_light() alone,
     // which only ever reports the raw, always-fully-lit-by-day potential.
     float sky_factor = DayNightCycle::sky_light_factor(game_tick);
-    int block_light = world.get_block_light(block_x, block_y, block_z);
+    int block_light   = world.get_block_light(block_x, block_y, block_z);
     int raw_sky_light = world.get_sky_light(block_x, block_y, block_z);
     int effective_sky_light = static_cast<int>(std::round(raw_sky_light * sky_factor));
-    int light = world.get_effective_light(block_x, block_y, block_z, sky_factor);
+    int light   = world.get_effective_light(block_x, block_y, block_z, sky_factor);
     Biome biome = world.get_biome(block_x, block_z);
 
     // Position within the chunk itself, not just which chunk (world-space
