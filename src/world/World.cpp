@@ -265,6 +265,47 @@ namespace {
         }
         return false;
     }
+
+    bool has_centered_side_support(const World& world, int x, int y, int z, HorizontalDirection side)
+    {
+        constexpr float SUPPORT_EPSILON = 0.001f;
+        DirectionOffset step = horizontal_direction_offset(side);
+        const float plane_x = step.dx > 0 ? static_cast<float>(x + 1) : static_cast<float>(x);
+        const float plane_z = step.dz > 0 ? static_cast<float>(z + 1) : static_cast<float>(z);
+        const float center_y = static_cast<float>(y) + 0.5f;
+        const float center_x = static_cast<float>(x) + 0.5f;
+        const float center_z = static_cast<float>(z) + 0.5f;
+        BlockShapeBoxes boxes = world.collision_boxes_at(x, y, z);
+        for (int i = 0; i < boxes.count; ++i) {
+            const BoundingBox& box = boxes.boxes[i];
+            if (center_y + SUPPORT_EPSILON < box.min.y || center_y - SUPPORT_EPSILON > box.max.y) continue;
+            if (step.dx != 0) {
+                float face_x = step.dx > 0 ? box.max.x : box.min.x;
+                if (std::fabs(face_x - plane_x) > SUPPORT_EPSILON) continue;
+                if (center_z + SUPPORT_EPSILON < box.min.z || center_z - SUPPORT_EPSILON > box.max.z) continue;
+                return true;
+            }
+            float face_z = step.dz > 0 ? box.max.z : box.min.z;
+            if (std::fabs(face_z - plane_z) > SUPPORT_EPSILON) continue;
+            if (center_x + SUPPORT_EPSILON < box.min.x || center_x - SUPPORT_EPSILON > box.max.x) continue;
+            return true;
+        }
+        return false;
+    }
+
+    bool is_torch_block(BlockType type)
+    {
+        return type == BlockType::Torch || type == BlockType::RedstoneTorch || type == BlockType::LitRedstoneTorch;
+    }
+
+    std::optional<HorizontalDirection> side_from_normal(Vector3 normal)
+    {
+        if (normal.x > 0.5f) return HorizontalDirection::East;
+        if (normal.x < -0.5f) return HorizontalDirection::West;
+        if (normal.z > 0.5f) return HorizontalDirection::South;
+        if (normal.z < -0.5f) return HorizontalDirection::North;
+        return std::nullopt;
+    }
 }
 
 World::World(WorldConfig config)
@@ -1054,10 +1095,9 @@ bool World::place_block(int x, int y, int z, BlockType type)
         BlockType below = get_block(x, y - 1, z);
         if (below != BlockType::Grass && below != BlockType::Dirt) return false;
     }
-    // Floor-mounted only (no wall-mounted torches yet) - needs an actual
-    // centered top face directly underneath. Full cubes pass through their
-    // normal collision cube; top slabs/trapdoors/stairs pass through their
-    // shaped collision boxes when they reach this cell's floor height.
+    // Generic placement only handles floor-mounted torches; player
+    // placement uses place_torch() so side-clicks can become wall torches.
+    // Floor torches need an actual centered top face directly underneath.
     if ((type == BlockType::Torch || type == BlockType::RedstoneTorch || type == BlockType::LitRedstoneTorch) &&
         !has_centered_top_support(*this, x, y - 1, z)) {
         return false;
@@ -1066,6 +1106,48 @@ bool World::place_block(int x, int y, int z, BlockType type)
     schedule_fluid_neighbors(x, y, z);
     schedule_falling_check(x, y, z);
     return true;
+}
+
+bool World::place_torch(int x, int y, int z, BlockType type, Vector3 hit_normal)
+{
+    if (!is_torch_block(type)) return false;
+    if (y < MIN_WORLD_Y || y >= MIN_WORLD_Y + CHUNK_HEIGHT) return false;
+    if (chunk_at(floor_div(x, CHUNK_SIZE), floor_div(z, CHUNK_SIZE)) == nullptr) return false;
+    if (!get_block_properties(get_block(x, y, z)).replaceable) return false;
+
+    if (std::optional<HorizontalDirection> side = side_from_normal(hit_normal)) {
+        DirectionOffset step = horizontal_direction_offset(*side);
+        if (!has_centered_side_support(*this, x - step.dx, y, z - step.dz, *side)) return false;
+
+        set_block_and_rebuild(x, y, z, type);
+        set_block_orientation(x, y, z, *side);
+        set_block_state(x, y, z, BlockStateBits::TOP_HALF);
+        schedule_fluid_neighbors(x, y, z);
+        schedule_falling_check(x, y, z);
+        return true;
+    }
+
+    if (hit_normal.y < 0.5f || !has_centered_top_support(*this, x, y - 1, z)) return false;
+    set_block_and_rebuild(x, y, z, type);
+    set_block_state(x, y, z, 0);
+    schedule_fluid_neighbors(x, y, z);
+    schedule_falling_check(x, y, z);
+    return true;
+}
+
+bool World::torch_has_support(int x, int y, int z) const
+{
+    BlockType type = get_block(x, y, z);
+    if (!is_torch_block(type)) return true;
+
+    uint16_t packed = get_block_state(x, y, z);
+    if ((packed & BlockStateBits::TOP_HALF) == 0) {
+        return has_centered_top_support(*this, x, y - 1, z);
+    }
+
+    HorizontalDirection side = get_block_orientation(x, y, z);
+    DirectionOffset step = horizontal_direction_offset(side);
+    return has_centered_side_support(*this, x - step.dx, y, z - step.dz, side);
 }
 
 bool World::combine_oak_slab(int x, int y, int z)

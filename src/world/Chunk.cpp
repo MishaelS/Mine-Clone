@@ -457,6 +457,58 @@ namespace {
                (WATER_MIN_FLOW_SURFACE_HEIGHT - WATER_SOURCE_SURFACE_HEIGHT) * t;
     }
 
+    bool is_torch_block(BlockType type)
+    {
+        return type == BlockType::Torch || type == BlockType::RedstoneTorch || type == BlockType::LitRedstoneTorch;
+    }
+
+    BlockShapeBoxes upright_torch_shape()
+    {
+        constexpr float TORCH_NEAR   =  7.0f / 16.0f;
+        constexpr float TORCH_FAR    =  9.0f / 16.0f;
+        constexpr float TORCH_HEIGHT = 10.0f / 16.0f;
+
+        BlockShapeBoxes result;
+        result.count = 3;
+        result.boxes[0] = {{TORCH_NEAR, 0.0f, TORCH_NEAR}, {TORCH_FAR, TORCH_HEIGHT, TORCH_FAR}};
+        result.boxes[1] = {{TORCH_NEAR, 0.0f,       0.0f}, {TORCH_FAR,         1.0f,      1.0f}};
+        result.boxes[2] = {{      0.0f, 0.0f, TORCH_NEAR}, {     1.0f,         1.0f, TORCH_FAR}};
+        return result;
+    }
+
+    Vector3 wall_torch_transform(Vector3 local, HorizontalDirection facing)
+    {
+        DirectionOffset step = horizontal_direction_offset(facing);
+        Vector3 outward = {static_cast<float>(step.dx), 0.0f, static_cast<float>(step.dz)};
+        Vector3 lateral = {-outward.z, 0.0f, outward.x};
+        Vector3 up = {0.0f, 1.0f, 0.0f};
+        Vector3 axis = Vector3Normalize(Vector3Add(Vector3Scale(outward, 0.38f), Vector3Scale(up, 0.92f)));
+        Vector3 vertical_plane = Vector3Normalize(Vector3Subtract(Vector3Scale(up, 0.38f), Vector3Scale(outward, 0.92f)));
+        Vector3 base = {-outward.x * HALF, -0.35f, -outward.z * HALF};
+
+        float height = local.y + HALF;
+        float side   = local.x * lateral.x + local.z * lateral.z;
+        float depth  = local.x * outward.x + local.z * outward.z;
+        return Vector3Add(base, Vector3Add(Vector3Scale(axis, height),
+                          Vector3Add(Vector3Scale(lateral, side), Vector3Scale(vertical_plane, depth))));
+    }
+
+    Vector3 wall_torch_normal(Vector3 normal, HorizontalDirection facing)
+    {
+        DirectionOffset step = horizontal_direction_offset(facing);
+        Vector3 outward = {static_cast<float>(step.dx), 0.0f, static_cast<float>(step.dz)};
+        Vector3 lateral = {-outward.z, 0.0f, outward.x};
+        Vector3 up = {0.0f, 1.0f, 0.0f};
+        Vector3 axis = Vector3Normalize(Vector3Add(Vector3Scale(outward, 0.38f), Vector3Scale(up, 0.92f)));
+        Vector3 vertical_plane = Vector3Normalize(Vector3Subtract(Vector3Scale(up, 0.38f), Vector3Scale(outward, 0.92f)));
+
+        float side = normal.x * lateral.x + normal.z * lateral.z;
+        float depth = normal.x * outward.x + normal.z * outward.z;
+        Vector3 transformed = Vector3Add(Vector3Scale(axis, normal.y),
+                              Vector3Add(Vector3Scale(lateral, side), Vector3Scale(vertical_plane, depth)));
+        return Vector3LengthSqr(transformed) > 0.000001f ? Vector3Normalize(transformed) : normal;
+    }
+
     BoundingBox face_rect_for_box(const BoundingBox& box, BlockFace face)
     {
         switch (face) {
@@ -1797,7 +1849,8 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                     // and visible corners get the same AO/smooth-lighting
                     // sampling ordinary cube faces use.
                     BlockInstanceState state = unpack_block_state(get_orientation(x, y, z), get_block_state(x, y, z));
-                    BlockShapeBoxes shape = get_block_shape(type, state);
+                    const bool wall_torch = is_torch_block(type) && state.top_half;
+                    BlockShapeBoxes shape = wall_torch ? upright_torch_shape() : get_block_shape(type, state);
 
                     for (int b = 0; b < shape.count; ++b) {
                         const BoundingBox& box = shape.boxes[b];
@@ -1816,6 +1869,11 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                             center.x + (box.min.x + box.max.x) * 0.5f - 0.5f,
                             center.y + (box.min.y + box.max.y) * 0.5f - 0.5f,
                             center.z + (box.min.z + box.max.z) * 0.5f - 0.5f,
+                        };
+                        Vector3 local_box_center = {
+                            (box.min.x + box.max.x) * 0.5f - 0.5f,
+                            (box.min.y + box.max.y) * 0.5f - 0.5f,
+                            (box.min.z + box.max.z) * 0.5f - 0.5f,
                         };
                         std::array<Face, 6> box_faces = unit_cube_faces(half);
                         for (int face = 0; face < 6; ++face) {
@@ -1850,6 +1908,16 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                                 textured_face.v3 = textured_face.v4;
                                 textured_face.v4 = first;
                             }
+                            if (wall_torch) {
+                                Vector3 corners_before[4] = {textured_face.v1, textured_face.v2, textured_face.v3, textured_face.v4};
+                                textured_face.v1 = wall_torch_transform(Vector3Add(local_box_center, corners_before[0]), state.facing);
+                                textured_face.v2 = wall_torch_transform(Vector3Add(local_box_center, corners_before[1]), state.facing);
+                                textured_face.v3 = wall_torch_transform(Vector3Add(local_box_center, corners_before[2]), state.facing);
+                                textured_face.v4 = wall_torch_transform(Vector3Add(local_box_center, corners_before[3]), state.facing);
+                                std::swap(textured_face.v2, textured_face.v4);
+                                textured_face.normal = Vector3Negate(wall_torch_normal(textured_face.normal, state.facing));
+                                face_center = center;
+                            }
 
                             Vector3 corners[4] = {textured_face.v1, textured_face.v2, textured_face.v3, textured_face.v4};
                             float shade[4];
@@ -1864,8 +1932,20 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                                 sky_fraction[i] = light.sky;
                                 block_fraction[i] = light.block;
                             }
-                            append_face(mesh_data, textured_face, face_center, texture.uv,
-                                shade, sky_fraction, block_fraction, ao, properties.texture_tints[face]);
+                            if (wall_torch) {
+                                Rectangle uv = get_sample_safe_block_uv(texture.uv);
+                                float u[4] = {uv.x, uv.x, uv.x + uv.width, uv.x + uv.width};
+                                float v[4] = {uv.y, uv.y + uv.height, uv.y + uv.height, uv.y};
+                                Vector3 corners_for_uv[4] = {
+                                    textured_face.v1, textured_face.v2, textured_face.v3, textured_face.v4
+                                };
+                                append_custom_face(mesh_data, corners_for_uv, textured_face.normal, face_center,
+                                                   u, v, shade, sky_fraction, block_fraction, ao,
+                                                   properties.texture_tints[face]);
+                            } else {
+                                append_face(mesh_data, textured_face, face_center, texture.uv,
+                                    shade, sky_fraction, block_fraction, ao, properties.texture_tints[face]);
+                            }
                         }
                     }
                     continue;

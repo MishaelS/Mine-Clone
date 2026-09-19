@@ -214,6 +214,8 @@ public:
     // space.
     // True only when the block was actually placed.
     bool place_block(int x, int y, int z, BlockType type);
+    bool place_torch(int x, int y, int z, BlockType type, Vector3 hit_normal);
+    bool torch_has_support(int x, int y, int z) const;
 
     // Replaces an existing oak slab with its full-block material. Used by
     // placement when the player adds the missing slab half to the same

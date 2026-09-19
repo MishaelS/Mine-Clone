@@ -151,6 +151,7 @@ private:
     // instant in vanilla too), dropping through the same
     // resolve_block_drops() table a manual break would (bare-handed).
     void check_grass_support_above(int x, int y, int z);
+    void check_torch_support_near(int x, int y, int z);
 
     // Survival-only environmental damage - fall, drowning, lava/fire,
     // cactus, suffocation and the void safety net - checked every frame

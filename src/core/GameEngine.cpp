@@ -784,6 +784,41 @@ void GameEngine::check_grass_support_above(int x, int y, int z)
     }
 }
 
+void GameEngine::check_torch_support_near(int x, int y, int z)
+{
+    if (!world) return;
+
+    constexpr int OFFSETS[6][3] = {
+        {0, 1, 0}, {0, -1, 0},
+        {1, 0, 0}, {-1, 0, 0},
+        {0, 0, 1}, {0, 0, -1},
+    };
+    auto is_torch = [](BlockType type) {
+        return type == BlockType::Torch || type == BlockType::RedstoneTorch || type == BlockType::LitRedstoneTorch;
+    };
+
+    for (const auto& offset : OFFSETS) {
+        int tx = x + offset[0];
+        int ty = y + offset[1];
+        int tz = z + offset[2];
+        BlockType type = world->get_block(tx, ty, tz);
+        if (!is_torch(type) || world->torch_has_support(tx, ty, tz)) continue;
+
+        if (std::optional<BlockType> broken = world->break_block(tx, ty, tz)) {
+            Vector3 center = {tx + 0.5f, ty + 0.5f, tz + 0.5f};
+            particles.spawn_destroy(*broken, center);
+            audio.play_break(*broken, center, camera.position);
+            for (const DropRoll& drop : resolve_block_drops(*broken, ItemStack{})) {
+                ItemStack drop_stack;
+                if (drop.is_item) drop_stack.tool = drop.item; else drop_stack.block = drop.block;
+                drop_stack.count = drop.count;
+                dropped_items.push_back(std::make_unique<DroppedItem>(
+                    center, drop_stack, Vector3{0.0f, 0.02f, 0.0f}, DroppedItemOrigin::Natural));
+            }
+        }
+    }
+}
+
 void GameEngine::apply_damage(int amount, DamageSource source)
 {
     if (player_health.damage(amount, source)) {
@@ -1624,6 +1659,7 @@ void GameEngine::update(float delta_time)
                 audio.play_break(*broken, center, camera.position);
                 if (is_log_block(*broken)) check_leaf_decay_near(hit->x, hit->y, hit->z);
                 check_grass_support_above(hit->x, hit->y, hit->z);
+                check_torch_support_near(hit->x, hit->y, hit->z);
                 if (*broken == BlockType::Chest) spill_chest_if_any(hit->x, hit->y, hit->z);
                 if (*broken == BlockType::Furnace || *broken == BlockType::LitFurnace) spill_furnace_if_any(hit->x, hit->y, hit->z);
             }
@@ -1699,6 +1735,7 @@ void GameEngine::update(float delta_time)
                     }
                     if (is_log_block(*broken)) check_leaf_decay_near(breaking_x, breaking_y, breaking_z);
                     check_grass_support_above(breaking_x, breaking_y, breaking_z);
+                    check_torch_support_near(breaking_x, breaking_y, breaking_z);
                     if (*broken == BlockType::Chest) spill_chest_if_any(breaking_x, breaking_y, breaking_z);
                     if (*broken == BlockType::Furnace || *broken == BlockType::LitFurnace) {
                         spill_furnace_if_any(breaking_x, breaking_y, breaking_z);
@@ -1834,6 +1871,9 @@ void GameEngine::update(float delta_time)
                             // neighbor when possible - see World::place_chest()'s
                             // own comment for the diagonal-conflict rule.
                             placed = world->place_chest(place_x, place_y, place_z, facing);
+                        } else if (selected.block == BlockType::Torch || selected.block == BlockType::RedstoneTorch ||
+                                   selected.block == BlockType::LitRedstoneTorch) {
+                            placed = world->place_torch(place_x, place_y, place_z, selected.block, targeted_block->normal);
                         } else if (world->place_block(place_x, place_y, place_z, selected.block)) {
                             placed = true;
                             if (block_needs_facing(selected.block)) {

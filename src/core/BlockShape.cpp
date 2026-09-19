@@ -118,17 +118,43 @@ namespace {
     // lands on the same 2x2 footprint on all four, forming a solid-looking
     // column - plus a 2x2 cap on top and bottom at the stick's 10px height.
     // Only some faces of each box are drawn - see shaped_face_texture().
-    constexpr float TORCH_NEAR = 7.0f / 16.0f;
-    constexpr float TORCH_FAR = 9.0f / 16.0f;
+    constexpr float TORCH_NEAR   = 7.0f / 16.0f;
+    constexpr float TORCH_FAR    = 9.0f / 16.0f;
     constexpr float TORCH_HEIGHT = 10.0f / 16.0f;
 
-    BlockShapeBoxes torch_shape()
+    BlockShapeBoxes torch_shape(const BlockInstanceState& state)
     {
         BlockShapeBoxes result;
         result.count = 3;
         result.boxes[0] = {{TORCH_NEAR, 0.0f, TORCH_NEAR}, {TORCH_FAR, TORCH_HEIGHT, TORCH_FAR}}; // caps
         result.boxes[1] = {{TORCH_NEAR, 0.0f, 0.0f}, {TORCH_FAR, 1.0f, 1.0f}};                    // West/East planes
         result.boxes[2] = {{0.0f, 0.0f, TORCH_NEAR}, {1.0f, 1.0f, TORCH_FAR}};                    // North/South planes
+        if (!state.top_half) return result;
+
+        DirectionOffset support_to_torch = horizontal_direction_offset(state.facing);
+        constexpr float WALL_LOW  =  3.0f / 16.0f;
+        constexpr float WALL_HIGH = 13.0f / 16.0f;
+        constexpr float WALL_NEAR =  1.0f / 16.0f;
+        constexpr float WALL_FAR  =  9.0f / 16.0f;
+        constexpr float WALL_CENTER_MIN = 7.0f / 16.0f;
+        constexpr float WALL_CENTER_MAX = 9.0f / 16.0f;
+        constexpr float WALL_WIDE_MIN =  6.0f / 16.0f;
+        constexpr float WALL_WIDE_MAX = 10.0f / 16.0f;
+        if (support_to_torch.dx != 0) {
+            float min_x = support_to_torch.dx > 0 ? WALL_NEAR : 1.0f - WALL_FAR;
+            float max_x = support_to_torch.dx > 0 ? WALL_FAR : 1.0f - WALL_NEAR;
+            result.boxes[0] = {{max_x - 2.0f / 16.0f, WALL_HIGH - 2.0f / 16.0f, WALL_CENTER_MIN},
+                               {max_x,                WALL_HIGH,                WALL_CENTER_MAX}};
+            result.boxes[1] = {{min_x, WALL_LOW, WALL_CENTER_MIN}, {max_x, WALL_HIGH, WALL_CENTER_MAX}};
+            result.boxes[2] = {{min_x, WALL_LOW, WALL_WIDE_MIN},   {max_x, WALL_HIGH, WALL_WIDE_MAX}};
+        } else {
+            float min_z = support_to_torch.dz > 0 ? WALL_NEAR : 1.0f - WALL_FAR;
+            float max_z = support_to_torch.dz > 0 ? WALL_FAR : 1.0f - WALL_NEAR;
+            result.boxes[0] = {{WALL_CENTER_MIN, WALL_HIGH - 2.0f / 16.0f, max_z - 2.0f / 16.0f},
+                               {WALL_CENTER_MAX, WALL_HIGH,                max_z}};
+            result.boxes[1] = {{WALL_CENTER_MIN, WALL_LOW, min_z}, {WALL_CENTER_MAX, WALL_HIGH, max_z}};
+            result.boxes[2] = {{WALL_WIDE_MIN,   WALL_LOW, min_z}, {WALL_WIDE_MAX,   WALL_HIGH, max_z}};
+        }
         return result;
     }
 
@@ -377,7 +403,7 @@ BlockShapeBoxes get_block_shape(BlockType type, const BlockInstanceState& state)
         case BlockType::Torch:
         case BlockType::RedstoneTorch:
         case BlockType::LitRedstoneTorch:
-            return torch_shape();
+            return torch_shape(state);
         default:
             return BlockShapeBoxes{};
     }
@@ -391,9 +417,30 @@ BlockShapeBoxes get_outline_shape(BlockType type, const BlockInstanceState& stat
     if (type == BlockType::ShortGrass || type == BlockType::OakSapling) return plant_outline_shape();
     if (type == BlockType::Cactus) return cactus_outline_shape();
     if (is_torch(type)) {
+        if (state.top_half) {
+            DirectionOffset support_to_torch = horizontal_direction_offset(state.facing);
+            constexpr float WALL_LOW  =  3.0f / 16.0f;
+            constexpr float WALL_HIGH = 14.0f / 16.0f;
+            constexpr float WALL_NEAR =  1.0f / 16.0f;
+            constexpr float WALL_FAR  =  7.0f / 16.0f;
+            constexpr float WALL_SIDE_MIN =  5.0f / 16.0f;
+            constexpr float WALL_SIDE_MAX = 11.0f / 16.0f;
+            BlockShapeBoxes result;
+            result.count = 1;
+            if (support_to_torch.dx != 0) {
+                float min_x = support_to_torch.dx > 0 ? WALL_NEAR : 1.0f - WALL_FAR;
+                float max_x = support_to_torch.dx > 0 ? WALL_FAR  : 1.0f - WALL_NEAR;
+                result.boxes[0] = {{min_x, WALL_LOW, WALL_SIDE_MIN}, {max_x, WALL_HIGH, WALL_SIDE_MAX}};
+            } else {
+                float min_z = support_to_torch.dz > 0 ? WALL_NEAR : 1.0f - WALL_FAR;
+                float max_z = support_to_torch.dz > 0 ? WALL_FAR  : 1.0f - WALL_NEAR;
+                result.boxes[0] = {{WALL_SIDE_MIN, WALL_LOW, min_z}, {WALL_SIDE_MAX, WALL_HIGH, max_z}};
+            }
+            return result;
+        }
         BlockShapeBoxes result;
         result.count = 1;
-        result.boxes[0] = {{6.0f / 16.0f, 0.0f, 6.0f / 16.0f},
+        result.boxes[0] = {{ 6.0f / 16.0f,          0.0f,  6.0f / 16.0f},
                            {10.0f / 16.0f, 10.0f / 16.0f, 10.0f / 16.0f}};
         return result;
     }
