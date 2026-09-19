@@ -25,16 +25,17 @@ struct Settings {
     // level at all. Same "current look is the ceiling" mapping a lot of
     // games use for this slider rather than vanilla Minecraft's own
     // Moody/Bright wording.
-    int brightness = 100;
-    int target_fps = 60;
-    int window_width = 1280;
+    int brightness    = 100;
+    int cloud_volume  = 2;             // 1=flat, 5=thick layered clouds
+    int target_fps    = 60;
+    int window_width  = 1280;
     int window_height = 720;
     int ui_scale = 1;                 // 1=standard, 2=medium, 3=large, 4=huge
     std::string language = "ru";      // assets/translations/<code>.json file name
-    int master_volume = 100;
+    int master_volume  = 100;
     int effects_volume = 100;
     int ambient_volume = 70;
-    int music_volume = 60;
+    int music_volume   = 60;
 };
 
 namespace SettingsIO {

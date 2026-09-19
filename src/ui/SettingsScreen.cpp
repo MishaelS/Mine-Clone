@@ -87,6 +87,7 @@ SettingsScreen::Action SettingsScreen::update(Settings& settings)
         // see Settings::brightness's own comment and Chunk.hpp's
         // set_chunk_brightness().
         changed |= ui::slider_int(cell(0, 3), ui::tr("settings.brightness"), settings.brightness, 10, 100);
+        changed |= ui::slider_int(cell(1, 3), ui::tr("settings.cloud_volume"), settings.cloud_volume, 1, 5);
     } else if (section == Section::Sound) {
         changed |= ui::slider_int(cell(0, 0), ui::tr("settings.master"), settings.master_volume, 0, 100);
         changed |= ui::slider_int(cell(1, 0), ui::tr("settings.music"), settings.music_volume, 0, 100);

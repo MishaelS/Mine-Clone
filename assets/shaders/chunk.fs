@@ -83,6 +83,8 @@ uniform bool isWaterPass;
 // duplicated here since a shader can't include a C++ header; if one
 // changes, so must the other.
 const float TILE_UV_SIZE = 1.0 / 16.0;
+const vec3 WATER_DISTANCE_FOG_COLOR = vec3(0.12, 0.36, 0.90);
+const float WATER_DISTANCE_FOG_STRENGTH = 0.72;
 
 void main()
 {
@@ -152,5 +154,15 @@ void main()
     vec3 viewDir = normalize(fragWorldPosition - cameraPosition);
     vec3 skyTintedFogColor = mix(fogColor, fogSkyColor, clamp(viewDir.y, 0.0, 1.0));
 
-    finalColor.rgb = mix(finalColor.rgb, skyTintedFogColor, fogFactor);
+    vec3 fogTarget = skyTintedFogColor;
+    float fogStrength = fogFactor;
+    if (isWaterPass) {
+        // Water is already translucent over the sky/terrain behind it, so
+        // blending it all the way into the bright horizon color makes lakes
+        // read as white at medium distance. Keep the render-distance fade,
+        // but bias that fade back toward Minecraft-like blue water.
+        fogTarget = mix(skyTintedFogColor, WATER_DISTANCE_FOG_COLOR, 0.65);
+        fogStrength *= WATER_DISTANCE_FOG_STRENGTH;
+    }
+    finalColor.rgb = mix(finalColor.rgb, fogTarget, fogStrength);
 }

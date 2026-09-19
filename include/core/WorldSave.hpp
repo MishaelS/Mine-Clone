@@ -22,6 +22,7 @@ struct WorldInfo {
     std::string display_name; // the name as typed, shown in the world list
     uint32_t seed = 0;
     GameMode game_mode = GameMode::Creative;
+    bool allow_commands = true;
 };
 
 // Where the player was and what their hotbar held, last time they left this
@@ -84,6 +85,11 @@ namespace WorldSave {
     // it. `info.folder_name` must already be a sanitized, available name -
     // see next_available_folder_name().
     bool create_world(const WorldInfo& info);
+
+    // Rewrites saves/<folder_name>/world.json with updated metadata while
+    // keeping chunks/player/items untouched. Used for persistent world
+    // rules that can change after creation, such as /gamemode.
+    bool save_world_info(const WorldInfo& info);
 
     // Deletes saves/<folder_name>/ and everything under it.
     bool delete_world(const std::string& folder_name);

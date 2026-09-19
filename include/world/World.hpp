@@ -75,6 +75,8 @@ public:
     // a World some other way.
     ~World();
 
+    uint32_t seed() const { return config.seed; }
+
     // Opaque terrain only: every loaded chunk that's actually in view
     // (skips anything the camera clearly isn't looking toward - an
     // approximate cone test, not exact frustum culling, see the .cpp),

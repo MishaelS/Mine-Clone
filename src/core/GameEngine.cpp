@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <iterator>
 #include <sstream>
 #include <unordered_set>
 
@@ -57,6 +58,16 @@ namespace {
     // sense of depth/atmosphere instead of reading perfectly crisp right
     // up against the camera; deliberately subtle (~7%), not real fog.
     constexpr unsigned char CAMERA_HAZE_ALPHA = 18;
+    constexpr Color IN_GAME_MENU_OVERLAY = {0, 0, 0, 105};
+
+    constexpr uint64_t SLEEP_ALLOWED_START_TICK = 12542; // roughly 18:30, vanilla's night-sleep threshold
+    constexpr float SLEEP_RAMP_SECONDS = 1.6f;
+    constexpr float SLEEP_SLOWDOWN_TICKS = 1800.0f;
+    constexpr float SLEEP_MIN_TICKS_PER_SECOND = 80.0f;
+    constexpr float SLEEP_MAX_TICKS_PER_SECOND = 1800.0f;
+    constexpr int SLEEP_MAX_TICKS_PER_FRAME = 260;
+    constexpr unsigned char SLEEP_OVERLAY_ALPHA = 170;
+    constexpr unsigned char SLEEP_PANEL_ALPHA = 175;
 
     // How much darker shadow gets at the brightness slider's own minimum
     // (settings.brightness == 10) - see set_chunk_brightness()'s own
@@ -213,6 +224,17 @@ namespace {
         return away_z > 0.0f ? HorizontalDirection::South : HorizontalDirection::North;
     }
 
+    HorizontalDirection opposite_direction(HorizontalDirection direction)
+    {
+        switch (direction) {
+            case HorizontalDirection::North: return HorizontalDirection::South;
+            case HorizontalDirection::South: return HorizontalDirection::North;
+            case HorizontalDirection::East:  return HorizontalDirection::West;
+            case HorizontalDirection::West:  return HorizontalDirection::East;
+        }
+        return HorizontalDirection::South;
+    }
+
     bool slab_click_adds_missing_half(const World& world, const World::RaycastHit& hit)
     {
         uint16_t packed = world.get_block_state(hit.x, hit.y, hit.z);
@@ -247,6 +269,12 @@ namespace {
             }
         }
         return false;
+    }
+
+    float smoothstep01(float t)
+    {
+        t = std::clamp(t, 0.0f, 1.0f);
+        return t * t * (3.0f - 2.0f * t);
     }
 
     // A felled tree's leaves don't vanish in the same frame the log comes
@@ -339,6 +367,10 @@ namespace {
         "/kill - убить себя",
         "/say текст - сообщение в чат",
     };
+
+    std::vector<std::string> chat_command_suggestion_lines() {
+        return std::vector<std::string>(std::begin(CHAT_HELP_LINES) + 1, std::end(CHAT_HELP_LINES));
+    }
 }
 
 GameEngine::GameEngine(int screen_width, int screen_height, const char* title)
@@ -386,6 +418,7 @@ GameEngine::GameEngine(int screen_width, int screen_height, const char* title)
         if (event == ui::SoundEvent::Click) audio.play_ui_click();
         else if (event == ui::SoundEvent::Hover) audio.play_ui_hover();
     });
+    chat_hud.set_command_suggestions(chat_command_suggestion_lines());
     SetTextureFilter(get_block_atlas_texture(),
                       settings.texture_filter == TextureFilterMode::Bilinear ? TEXTURE_FILTER_BILINEAR : TEXTURE_FILTER_POINT);
     FontManager::get(); // load the game's text font up front, same reason
@@ -880,6 +913,121 @@ void GameEngine::respawn_player()
     spawn_settle_frames = 3; // same rotation-jump guard set_world() itself uses right after a teleport
 }
 
+void GameEngine::start_sleeping(const World::RaycastHit& bed_hit)
+{
+    if (!world || sleeping || player_health.is_dead()) return;
+
+    uint64_t tick_of_day = game_tick % DayNightCycle::DAY_LENGTH_TICKS;
+    if (tick_of_day < SLEEP_ALLOWED_START_TICK) {
+        chat_hud.push_message(ui::tr("sleep.only_night"));
+        return;
+    }
+
+    sleeping = true;
+    sleep_target_tick = (game_tick / DayNightCycle::DAY_LENGTH_TICKS + 1) * DayNightCycle::DAY_LENGTH_TICKS;
+    sleep_elapsed_seconds = 0.0f;
+    sleep_tick_rate = SLEEP_MIN_TICKS_PER_SECOND;
+    sleep_tick_budget = 0.0f;
+    sleep_return_position = camera.position;
+    sleep_return_target = camera.target;
+    sleep_return_up = camera.up;
+    sleep_start_forward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
+
+    int head_x = bed_hit.x;
+    int head_y = bed_hit.y;
+    int head_z = bed_hit.z;
+    HorizontalDirection bed_facing = world->get_block_orientation(bed_hit.x, bed_hit.y, bed_hit.z);
+    DirectionOffset head_step = horizontal_direction_offset(bed_facing);
+    if (world->get_block(bed_hit.x, bed_hit.y, bed_hit.z) == BlockType::BedFoot) {
+        head_x += head_step.dx;
+        head_z += head_step.dz;
+    }
+
+    sleep_pose_position = {
+        static_cast<float>(head_x) + 0.5f - static_cast<float>(head_step.dx) * 0.12f,
+        static_cast<float>(head_y) + 0.72f,
+        static_cast<float>(head_z) + 0.5f - static_cast<float>(head_step.dz) * 0.12f,
+    };
+    Vector3 head_forward = sleep_start_forward;
+    head_forward.y = 0.0f;
+    if (Vector3LengthSqr(head_forward) < 0.0001f) {
+        head_forward = {
+            static_cast<float>(head_step.dx),
+            0.0f,
+            static_cast<float>(head_step.dz),
+        };
+    }
+    head_forward = Vector3Normalize(head_forward);
+    sleep_pose_forward = Vector3Normalize(Vector3Add(
+        Vector3Scale({0.0f, 1.0f, 0.0f}, 0.92f),
+        Vector3Scale(head_forward, 0.24f)));
+    sleep_pose_up = Vector3Normalize(Vector3Scale(head_forward, -1.0f));
+
+    is_breaking = false;
+    breaking_progress = 0.0f;
+    targeted_block = std::nullopt;
+    inventory_hud.close(inventory);
+    chat_hud.close();
+    EnableCursor();
+}
+
+void GameEngine::update_sleep_fast_forward(float delta_time)
+{
+    const float target_overlay = sleeping ? 1.0f : 0.0f;
+    sleep_overlay += (target_overlay - sleep_overlay) * std::min(1.0f, delta_time * 3.0f);
+    if (!sleeping) {
+        if (sleep_overlay < 0.01f) sleep_overlay = 0.0f;
+        return;
+    }
+
+    if (game_tick >= sleep_target_tick) {
+        finish_sleeping();
+        return;
+    }
+
+    sleep_elapsed_seconds += delta_time;
+    float pose_t = smoothstep01(sleep_elapsed_seconds / SLEEP_RAMP_SECONDS);
+    camera.position = Vector3Lerp(sleep_return_position, sleep_pose_position, pose_t);
+    camera.target = Vector3Add(camera.position, Vector3Normalize(Vector3Lerp(sleep_start_forward, sleep_pose_forward, pose_t)));
+    camera.up = Vector3Normalize(Vector3Lerp(sleep_return_up, sleep_pose_up, pose_t));
+
+    uint64_t remaining_ticks = sleep_target_tick - game_tick;
+    float ramp_in = smoothstep01(sleep_elapsed_seconds / SLEEP_RAMP_SECONDS);
+    float ramp_out = smoothstep01(static_cast<float>(remaining_ticks) / SLEEP_SLOWDOWN_TICKS);
+    float speed_factor = std::min(ramp_in, ramp_out);
+    float target_rate = SLEEP_MIN_TICKS_PER_SECOND +
+        (SLEEP_MAX_TICKS_PER_SECOND - SLEEP_MIN_TICKS_PER_SECOND) * speed_factor;
+    sleep_tick_rate += (target_rate - sleep_tick_rate) * std::min(1.0f, delta_time * 4.0f);
+
+    sleep_tick_budget += sleep_tick_rate * delta_time;
+    int ticks_to_run = std::min(SLEEP_MAX_TICKS_PER_FRAME, static_cast<int>(sleep_tick_budget));
+    ticks_to_run = std::min<int>(ticks_to_run, static_cast<int>(std::min<uint64_t>(remaining_ticks, SLEEP_MAX_TICKS_PER_FRAME)));
+    if (ticks_to_run <= 0) return;
+
+    sleep_tick_budget -= static_cast<float>(ticks_to_run);
+    for (int i = 0; i < ticks_to_run; ++i) tick();
+    if (game_tick >= sleep_target_tick) finish_sleeping();
+}
+
+void GameEngine::finish_sleeping()
+{
+    sleeping = false;
+    sleep_target_tick = 0;
+    sleep_elapsed_seconds = 0.0f;
+    sleep_tick_rate = 0.0f;
+    sleep_tick_budget = 0.0f;
+    camera.position = sleep_return_position;
+    camera.target = sleep_return_target;
+    camera.up = sleep_return_up;
+    DisableCursor();
+    spawn_settle_frames = 2;
+}
+
+void GameEngine::leave_bed()
+{
+    finish_sleeping();
+}
+
 void GameEngine::reset_life_timers()
 {
     fire_seconds_remaining = 0.0f;
@@ -890,6 +1038,19 @@ void GameEngine::reset_life_timers()
     hurt_flash_seconds = 0.0f;
     death_respawn_timer = 0.0f;
     was_dead_last_frame = false;
+    sleeping = false;
+    sleep_target_tick = 0;
+    sleep_elapsed_seconds = 0.0f;
+    sleep_tick_rate = 0.0f;
+    sleep_tick_budget = 0.0f;
+    sleep_overlay = 0.0f;
+    sleep_return_position = {0.0f, 0.0f, 0.0f};
+    sleep_return_target = {0.0f, 0.0f, -1.0f};
+    sleep_return_up = {0.0f, 1.0f, 0.0f};
+    sleep_start_forward = {0.0f, 0.0f, -1.0f};
+    sleep_pose_position = {0.0f, 0.0f, 0.0f};
+    sleep_pose_forward = {0.0f, 0.0f, -1.0f};
+    sleep_pose_up = {0.0f, 1.0f, 0.0f};
 }
 
 void GameEngine::handle_chat_submit(const std::string& text)
@@ -909,6 +1070,11 @@ void GameEngine::execute_chat_command(const std::string& command)
     std::vector<std::string> tokens = split_whitespace(command);
     if (tokens.empty()) {
         chat_hud.push_message("Пустая команда.");
+        return;
+    }
+
+    if (!current_world_allows_commands) {
+        chat_hud.push_message("Команды отключены в настройках этого мира.");
         return;
     }
 
@@ -1019,9 +1185,13 @@ void GameEngine::execute_chat_command(const std::string& command)
         if (args.empty()) { push("Использование: /gamemode survival|creative"); return; }
         if (args[0] == "survival") {
             current_game_mode = GameMode::Survival;
+            current_world_info.game_mode = current_game_mode;
+            WorldSave::save_world_info(current_world_info);
             push("Режим игры: выживание.");
         } else if (args[0] == "creative") {
             current_game_mode = GameMode::Creative;
+            current_world_info.game_mode = current_game_mode;
+            WorldSave::save_world_info(current_world_info);
             push("Режим игры: творческий.");
         } else if (args[0] == "adventure" || args[0] == "spectator") {
             push("Режим \"" + args[0] + "\" пока не реализован (нет соответствующей игровой системы).");
@@ -1293,7 +1463,7 @@ void GameEngine::update(float delta_time)
     // way tick()'s own world-simulation clock never gated on this at all.
     // Only look (camera rotation) and interaction (raycasting needs the
     // crosshair, which a UI screen doesn't move) actually need suppressing.
-    bool ui_captured = inventory_hud.is_open() || chat_open;
+    bool ui_captured = inventory_hud.is_open() || chat_open || sleeping;
 
     // Free-look camera: rebindable keys (Settings) to move, mouse to look.
     // Today's defaults are still W/A/S/D + Space to jump - see
@@ -1560,10 +1730,13 @@ void GameEngine::update(float delta_time)
             : BlockType::Air;
         bool targeted_is_door = targeted_type == BlockType::OakDoorLower || targeted_type == BlockType::OakDoorUpper ||
                                  targeted_type == BlockType::IronDoorLower || targeted_type == BlockType::IronDoorUpper;
+        bool targeted_is_bed = targeted_type == BlockType::BedHead || targeted_type == BlockType::BedFoot;
 
         if (container_kind && !chest_blocked_above) {
             inventory_hud.open_container(*container_kind, targeted_block->x, targeted_block->y, targeted_block->z);
             EnableCursor();
+        } else if (!container_kind && targeted_block && targeted_is_bed) {
+            start_sleeping(*targeted_block);
         } else if (!container_kind && targeted_block && (targeted_is_door || targeted_type == BlockType::OakTrapdoor)) {
             // Right-click toggles open/closed instead of placing - same
             // priority tier as the chest-container-open branch above. A
@@ -1631,7 +1804,10 @@ void GameEngine::update(float delta_time)
                 // would be called with Air and silently clear out whatever
                 // was targeted).
                 bool placed = false;
-                HorizontalDirection facing = direction_facing_player(aim);
+                HorizontalDirection player_facing = direction_facing_player(aim);
+                HorizontalDirection facing = selected.block == BlockType::OakStairs
+                    ? opposite_direction(player_facing)
+                    : player_facing;
 
                 if (selected.block == BlockType::OakSlab && targeted_type == BlockType::OakSlab &&
                     slab_click_adds_missing_half(*world, *targeted_block)) {
@@ -1735,9 +1911,13 @@ void GameEngine::draw()
         BeginMode3D(render_camera);
         draw_skybox(render_camera.position, celestial_angle);
         if (world) {
+            draw_seeded_stars(render_camera.position, world->seed(), celestial_angle);
+
             // Sun/moon - drawn right after the sky's own gradient, still
             // well before any real terrain.
             draw_celestial_bodies(render_camera.position, sun_dir);
+            draw_seeded_clouds(render_camera.position, world->seed(), game_tick, celestial_angle,
+                               settings.render_distance_chunks * CHUNK_SIZE, settings.cloud_volume);
 
             // Day/night sky-light dimming - one shared value (block light
             // never changes with time, only how much of a cell's sky light
@@ -1809,6 +1989,9 @@ void GameEngine::draw()
         DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), haze_color);
     }
     if (blur_world) ui::end_blurred_background();
+    if (inventory_hud.is_open()) {
+        DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), IN_GAME_MENU_OVERLAY);
+    }
 
     if (pause_snapshot_pending) {
         if (IsTextureValid(pause_snapshot)) UnloadTexture(pause_snapshot);
@@ -1827,7 +2010,7 @@ void GameEngine::draw()
     }
 
     bool show_death_screen = world && player_health.is_dead();
-    if (!show_death_screen && !inventory_hud.is_open()) ui::crosshair();
+    if (!show_death_screen && !inventory_hud.is_open() && sleep_overlay <= 0.0f) ui::crosshair();
 
     if (is_breaking) {
         const float bar_width = ui::scaled(BREAK_BAR_WIDTH);
@@ -1872,6 +2055,30 @@ void GameEngine::draw()
             current_game_mode == GameMode::Creative ? camera_move_speed : player_controller.horizontal_speed(), game_tick);
     }
 
+    if (sleep_overlay > 0.0f) {
+        float fade = std::clamp(sleep_overlay, 0.0f, 1.0f);
+        unsigned char alpha = static_cast<unsigned char>(static_cast<float>(SLEEP_OVERLAY_ALPHA) * fade);
+        DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Color{0, 0, 0, alpha});
+
+        if (sleeping) {
+            const float width = ui::scaled(420.0f);
+            const float height = ui::scaled(ui::BUTTON_HEIGHT);
+            const float gap = ui::scaled(ui::BUTTON_GAP);
+            const float half = (width - gap) * 0.5f;
+            const float x = (GetScreenWidth() - width) * 0.5f;
+            const float y = GetScreenHeight() - ui::scaled(92.0f);
+            ui::panel({x - ui::scaled(10.0f), y - ui::scaled(10.0f),
+                       width + ui::scaled(20.0f), height + ui::scaled(20.0f)},
+                      Color{0, 0, 0, static_cast<unsigned char>(SLEEP_PANEL_ALPHA * fade)});
+            if (ui::button({x, y, half, height}, ui::tr("sleep.leave_bed"))) {
+                leave_bed();
+            }
+            if (ui::button({x + half + gap, y, half, height}, ui::tr("sleep.open_menu"))) {
+                enter_state(GameState::Paused);
+            }
+        }
+    }
+
     // Death screen: no click-to-respawn button here (see respawn_player()'s
     // own comment) - just the same dark-red overlay/title real Minecraft
     // shows while its own timer runs out, drawn over everything else
@@ -1904,20 +2111,27 @@ void GameEngine::run()
             continue;
         }
 
-        // Fixed-timestep tick loop: run as many 50ms ticks as delta_time
-        // has accumulated (usually 0 or 1 at 60+ FPS, more only after a
-        // stall), each one always the same fixed size - game logic that
-        // reads game_tick sees a steady 20/second clock no matter the
-        // frame rate. See MAX_TICKS_PER_FRAME for the catch-up cap.
-        tick_accumulator += delta_time;
-        int ticks_this_frame = 0;
-        while (tick_accumulator >= TICK_DURATION && ticks_this_frame < MAX_TICKS_PER_FRAME) {
-            tick();
-            tick_accumulator -= TICK_DURATION;
-            ++ticks_this_frame;
-        }
-        if (ticks_this_frame == MAX_TICKS_PER_FRAME) {
-            tick_accumulator = 0.0f; // drop the rest of the backlog instead of chasing it forever
+        if (sleeping) {
+            tick_accumulator = 0.0f;
+            update_sleep_fast_forward(delta_time);
+        } else {
+            update_sleep_fast_forward(delta_time);
+
+            // Fixed-timestep tick loop: run as many 50ms ticks as delta_time
+            // has accumulated (usually 0 or 1 at 60+ FPS, more only after a
+            // stall), each one always the same fixed size - game logic that
+            // reads game_tick sees a steady 20/second clock no matter the
+            // frame rate. See MAX_TICKS_PER_FRAME for the catch-up cap.
+            tick_accumulator += delta_time;
+            int ticks_this_frame = 0;
+            while (tick_accumulator >= TICK_DURATION && ticks_this_frame < MAX_TICKS_PER_FRAME) {
+                tick();
+                tick_accumulator -= TICK_DURATION;
+                ++ticks_this_frame;
+            }
+            if (ticks_this_frame == MAX_TICKS_PER_FRAME) {
+                tick_accumulator = 0.0f; // drop the rest of the backlog instead of chasing it forever
+            }
         }
 
         // Exactly once per rendered frame, never from inside tick() (which
@@ -2071,7 +2285,9 @@ void GameEngine::start_singleplayer_world(const std::string& folder_name)
     // distance and fog distance are user-configurable.
 
     current_world_folder = folder_name;
-    current_game_mode = info->game_mode;
+    current_world_info = *info;
+    current_game_mode = current_world_info.game_mode;
+    current_world_allows_commands = current_world_info.allow_commands;
 
     // A world with no player.json yet has never been played - it's being
     // generated from scratch, not loaded back.
@@ -2180,6 +2396,9 @@ void GameEngine::save_player_state()
 {
     if (!world) return;
 
+    current_world_info.game_mode = current_game_mode;
+    WorldSave::save_world_info(current_world_info);
+
     PlayerSaveState state;
     state.position = camera.position;
     state.forward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
@@ -2229,6 +2448,8 @@ void GameEngine::return_to_main_menu()
     particles.clear();
     footstep_particle_distance = 0.0f;
     current_world_folder.clear();
+    current_world_info = {};
+    current_world_allows_commands = true;
     inventory_hud.close(inventory);
     chat_hud.close(); // otherwise its is_open() would leak into the next world's very first frame
     world_spawn_override.reset(); // session-only override - see its own comment

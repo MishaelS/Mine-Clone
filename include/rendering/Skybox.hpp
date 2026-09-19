@@ -2,6 +2,8 @@
 
 #include "raylib.h"
 
+#include <cstdint>
+
 // Rendering module: draws a giant cube centered on the camera, gradient-
 // colored (blue up top, lighter near the horizon, by day - see the .cpp's
 // own DAY_/NIGHT_/SUNSET_ colors) and depth-tested off so it always reads
@@ -22,6 +24,16 @@ void draw_skybox(Vector3 camera_position, float celestial_angle);
 // literally DayNightCycle::sun_direction() - any unit vector works - but
 // that's the intended source.
 void draw_celestial_bodies(Vector3 camera_position, Vector3 sun_direction);
+
+// Seed-bound sky details. Stars and clouds both sample the same small
+// deterministic sky-noise stream so a world's seed owns its whole sky
+// pattern the same way it already owns terrain. `celestial_angle` fades
+// stars in at night; `game_tick` scrolls the cloud sheet. Cloud visibility
+// tracks render distance with a small extra margin, while `cloud_volume`
+// controls how many soft layers make up the sheet.
+void draw_seeded_stars(Vector3 camera_position, uint32_t world_seed, float celestial_angle);
+void draw_seeded_clouds(Vector3 camera_position, uint32_t world_seed, uint64_t game_tick, float celestial_angle,
+                        int render_distance_blocks, int cloud_volume);
 
 // The color the skybox itself is *currently* fading to at the horizon -
 // i.e. whatever the last draw_skybox() call actually drew with, day/night

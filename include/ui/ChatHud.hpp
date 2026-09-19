@@ -35,16 +35,17 @@ public:
     // Escape - discards whatever was typed without submitting it.
     void close();
 
-    // Draws the scrollback log (only while open - there's no lingering
-    // fade-out once closed the way vanilla's own chat has) and the entry
-    // box, and drains this frame's typed characters/Enter/click-away into
-    // it - called from GameEngine::draw(), the same immediate-mode spot
-    // InventoryHud's own update_grid() is called from. Returns the
-    // submitted line once Enter or a click away confirms it (chat already
-    // closed by then), std::nullopt every other frame - including the
-    // frame a blank box gets confirmed, which just closes with nothing to
-    // process.
+    // Draws the visible chat history even when the entry box is closed:
+    // recent lines linger and fade out like vanilla Minecraft's HUD, while
+    // the full latest scrollback stays opaque whenever chat is open. While
+    // open it also owns typed characters/Enter/click-away and returns the
+    // submitted line once confirmed.
     std::optional<std::string> update_and_draw();
+
+    // Commands shown as vanilla-like suggestions while the user types a
+    // "/" line. Each string may include usage/description after the first
+    // token; matching and Tab completion use that first command token.
+    void set_command_suggestions(std::vector<std::string> suggestions);
 
     // Appends one already-formatted line to the scrollback, trimming the
     // oldest past a fixed cap - used for the player's own echoed messages
@@ -52,7 +53,18 @@ public:
     void push_message(const std::string& text);
 
 private:
+    struct Message {
+        std::string text;
+        double created_at = 0.0;
+    };
+
+    std::vector<std::string> matching_command_suggestions() const;
+    void draw_messages(float x, float bottom_y, float width, float line_height) const;
+    void draw_command_suggestions(float x, float input_y, float width, float line_height,
+                                  const std::vector<std::string>& suggestions) const;
+
     bool open = false;
     ui::TextInputState input;
-    std::vector<std::string> messages;
+    std::vector<Message> messages;
+    std::vector<std::string> command_suggestions;
 };

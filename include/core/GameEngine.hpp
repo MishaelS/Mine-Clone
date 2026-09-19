@@ -168,6 +168,11 @@ private:
     // off the red hurt-flash overlay (see hurt_flash_seconds/draw()).
     void apply_damage(int amount, DamageSource source);
 
+    void start_sleeping(const World::RaycastHit& bed_hit);
+    void update_sleep_fast_forward(float delta_time);
+    void finish_sleeping();
+    void leave_bed();
+
     // Teleports the camera back to World::find_spawn_position() (the same
     // fixed point a brand-new session on this world starts at - this
     // project has no bed/respawn-anchor system) and resets every piece of
@@ -296,6 +301,8 @@ private:
     // save_player_state().
     std::string current_world_folder;
     GameMode current_game_mode = GameMode::Creative;
+    WorldInfo current_world_info;
+    bool current_world_allows_commands = true;
 
     // The physical eye camera. Third-person cameras are derived only for
     // rendering, so they never move the PlayerController hitbox.
@@ -334,6 +341,20 @@ private:
     // animation asset in this project yet). Counts down to 0 in draw().
     float hurt_flash_seconds = 0.0f;
 
+    bool sleeping = false;
+    uint64_t sleep_target_tick = 0;
+    float sleep_elapsed_seconds = 0.0f;
+    float sleep_tick_rate       = 0.0f;
+    float sleep_tick_budget     = 0.0f;
+    float sleep_overlay         = 0.0f;
+    Vector3 sleep_return_position = {0.0f, 0.0f, 0.0f};
+    Vector3 sleep_return_target   = {0.0f, 0.0f, -1.0f};
+    Vector3 sleep_return_up       = {0.0f, 1.0f, 0.0f};
+    Vector3 sleep_start_forward   = {0.0f, 0.0f, -1.0f};
+    Vector3 sleep_pose_position   = {0.0f, 0.0f, 0.0f};
+    Vector3 sleep_pose_forward    = {0.0f, 0.0f, -1.0f};
+    Vector3 sleep_pose_up         = {0.0f, 1.0f, 0.0f};
+
 
     enum class CameraView : uint8_t { FirstPerson, ThirdPersonBack, ThirdPersonFront };
     CameraView camera_view = CameraView::FirstPerson;
@@ -341,7 +362,7 @@ private:
     std::unique_ptr<World> world;
     bool show_debug_overlay = false; // toggled by F3, Minecraft-style
     bool show_chunk_borders = false; // toggled by F4 - World::draw_chunk_borders()
-    bool show_wireframe = false;     // toggled by F6; F5 cycles camera views
+    bool show_wireframe     = false; // toggled by F6; F5 cycles camera views
     float camera_move_speed;         // world units/second; mouse wheel adjusts this
 
     // Survival-style stacks collected from broken-block drops. E toggles

@@ -47,6 +47,7 @@ Settings load() {
         settings.fog_distance_blocks    = static_cast<int>(root["fog_distance_blocks"].as_number(settings.fog_distance_blocks));
         settings.texture_filter         = filter_from_json_value(root["texture_filter"].as_string(filter_json_value(settings.texture_filter)));
         settings.brightness             = std::clamp(static_cast<int>(root["brightness"].as_number(settings.brightness)), 10, 100);
+        settings.cloud_volume           = std::clamp(static_cast<int>(root["cloud_volume"].as_number(settings.cloud_volume)), 1, 5);
         settings.target_fps             = static_cast<int>(root["target_fps"].as_number(settings.target_fps));
         settings.window_width           = std::clamp(static_cast<int>(root["window_width"].as_number(settings.window_width)), 960, 3840);
         settings.window_height          = std::clamp(static_cast<int>(root["window_height"].as_number(settings.window_height)), 540, 2160);
@@ -84,6 +85,7 @@ bool save(const Settings& settings)
     out << "  \"fog_distance_blocks\": " << settings.fog_distance_blocks << ",\n";
     out << "  \"texture_filter\": \"" << filter_json_value(settings.texture_filter) << "\",\n";
     out << "  \"brightness\": " << settings.brightness << ",\n";
+    out << "  \"cloud_volume\": " << settings.cloud_volume << ",\n";
     out << "  \"target_fps\": " << settings.target_fps << ",\n";
     out << "  \"window_width\": " << settings.window_width << ",\n";
     out << "  \"window_height\": " << settings.window_height << ",\n";

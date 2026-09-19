@@ -248,6 +248,23 @@ namespace {
     // draw_chunk_borders(): magenta doesn't occur naturally in terrain, so
     // it reads clearly as a debug overlay against any biome.
     constexpr Color CHUNK_BORDER_COLOR = {255, 0, 255, 255};
+
+    bool has_centered_top_support(const World& world, int x, int y, int z)
+    {
+        constexpr float SUPPORT_EPSILON = 0.001f;
+        const float support_y = static_cast<float>(y) + 1.0f;
+        const float center_x = static_cast<float>(x) + 0.5f;
+        const float center_z = static_cast<float>(z) + 0.5f;
+        BlockShapeBoxes boxes = world.collision_boxes_at(x, y, z);
+        for (int i = 0; i < boxes.count; ++i) {
+            const BoundingBox& box = boxes.boxes[i];
+            if (std::fabs(box.max.y - support_y) > SUPPORT_EPSILON) continue;
+            if (center_x + SUPPORT_EPSILON < box.min.x || center_x - SUPPORT_EPSILON > box.max.x) continue;
+            if (center_z + SUPPORT_EPSILON < box.min.z || center_z - SUPPORT_EPSILON > box.max.z) continue;
+            return true;
+        }
+        return false;
+    }
 }
 
 World::World(WorldConfig config)
@@ -1037,11 +1054,12 @@ bool World::place_block(int x, int y, int z, BlockType type)
         BlockType below = get_block(x, y - 1, z);
         if (below != BlockType::Grass && below != BlockType::Dirt) return false;
     }
-    // Floor-mounted only (no wall-mounted torches yet) - needs a solid
-    // block directly underneath, any kind, unlike OakSapling's narrower
-    // Grass/Dirt requirement above.
+    // Floor-mounted only (no wall-mounted torches yet) - needs an actual
+    // centered top face directly underneath. Full cubes pass through their
+    // normal collision cube; top slabs/trapdoors/stairs pass through their
+    // shaped collision boxes when they reach this cell's floor height.
     if ((type == BlockType::Torch || type == BlockType::RedstoneTorch || type == BlockType::LitRedstoneTorch) &&
-        !get_block_properties(get_block(x, y - 1, z)).solid) {
+        !has_centered_top_support(*this, x, y - 1, z)) {
         return false;
     }
     set_block_and_rebuild(x, y, z, type);

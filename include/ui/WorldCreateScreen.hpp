@@ -25,6 +25,7 @@ private:
     ui::TextInputState name_field;
     ui::TextInputState seed_field;
     GameMode selected_mode = GameMode::Creative;
+    bool allow_commands = false;
     int focused_field = 0; // 0 = name, 1 = seed
     std::string error_message;
 };

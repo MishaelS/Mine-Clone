@@ -178,22 +178,34 @@ namespace WorldSave {
         return fnv1a(trimmed);
     }
 
-    bool create_world(const WorldInfo& info) {
+    bool write_world_info_file(const WorldInfo& info) {
         std::string dir = world_directory(info.folder_name);
-        std::error_code ec;
-        fs::create_directories(dir + "/chunks", ec);
-        if (ec) return false;
-
         std::ofstream out(dir + "/world.json", std::ios::binary | std::ios::trunc);
         if (!out) return false;
 
         out << "{\n";
         out << "  \"display_name\": \"" << json_escape(info.display_name) << "\",\n";
         out << "  \"seed\": " << info.seed << ",\n";
-        out << "  \"game_mode\": \"" << game_mode_json_value(info.game_mode) << "\"\n";
+        out << "  \"game_mode\": \"" << game_mode_json_value(info.game_mode) << "\",\n";
+        out << "  \"allow_commands\": " << (info.allow_commands ? "true" : "false") << "\n";
         out << "}\n";
 
         return static_cast<bool>(out);
+    }
+
+    bool create_world(const WorldInfo& info) {
+        std::string dir = world_directory(info.folder_name);
+        std::error_code ec;
+        fs::create_directories(dir + "/chunks", ec);
+        if (ec) return false;
+
+        return write_world_info_file(info);
+    }
+
+    bool save_world_info(const WorldInfo& info) {
+        if (info.folder_name.empty()) return false;
+        if (!fs::exists(world_directory(info.folder_name))) return false;
+        return write_world_info_file(info);
     }
 
     bool delete_world(const std::string& folder_name) {
@@ -213,6 +225,7 @@ namespace WorldSave {
             info.display_name = root["display_name"].as_string(folder_name);
             info.seed = static_cast<uint32_t>(root["seed"].as_number(0));
             info.game_mode = game_mode_from_json_value(root["game_mode"].as_string("creative"));
+            info.allow_commands = root["allow_commands"].as_bool(true);
             return info;
         } catch (const std::exception&) {
             return std::nullopt;
