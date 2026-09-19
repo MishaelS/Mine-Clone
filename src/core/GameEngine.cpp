@@ -1,5 +1,6 @@
 #include "core/GameEngine.hpp"
 #include "core/Block.hpp"
+#include "core/BlockShape.hpp"
 #include "core/TextureManager.hpp"
 #include "core/Tick.hpp"
 #include "player/Item.hpp"
@@ -101,6 +102,14 @@ namespace {
     constexpr float FIRE_DURATION_FROM_LAVA_SECONDS = 15.0f; // vanilla's own lava burn duration
     constexpr int FIRE_DAMAGE = 1;
     constexpr float FIRE_TICK_INTERVAL_SECONDS = 1.0f;
+
+    // HP restored per cake slice eaten - there's no hunger/saturation
+    // system here (see PlayerHealth's own comment) for a bite to restore
+    // the way vanilla's own cake does, so this substitutes a flat direct
+    // heal instead. A placeholder balance number, not derived from any
+    // existing precedent - adjust freely.
+    constexpr int CAKE_HEAL_PER_BITE = 2;
+    constexpr uint8_t CAKE_MAX_BITES = 6; // vanilla's own count - the 7th bite consumes the block
 
     constexpr float MAX_AIR_SECONDS = 15.0f; // vanilla's own breath meter length
     constexpr int DROWN_DAMAGE = 2;
@@ -1473,19 +1482,65 @@ void GameEngine::update(float delta_time)
         // real Minecraft gives it (you can't place a block onto one of
         // these by right-clicking any of their faces either).
         std::optional<InventoryHud::ContainerKind> container_kind = targeted_block
-            ? container_kind_for_block(world->get_block(targeted_block->x, targeted_block->y, targeted_block->z))
+            ? resolve_container_kind(*world, targeted_block->x, targeted_block->y, targeted_block->z)
             : std::nullopt;
         // A Chest needs its lid to actually swing open - a solid block
         // sitting directly on top blocks that, same as real Minecraft (it
         // still can't be opened even though right-clicking it doesn't do
         // anything else either, so this just leaves the click a no-op
         // rather than falling through to block placement).
-        bool chest_blocked_above = container_kind && *container_kind == InventoryHud::ContainerKind::Chest &&
+        bool chest_blocked_above = container_kind &&
+            (*container_kind == InventoryHud::ContainerKind::Chest || *container_kind == InventoryHud::ContainerKind::LargeChest) &&
             targeted_block && get_block_properties(world->get_block(
                 targeted_block->x, targeted_block->y + 1, targeted_block->z)).solid;
+        BlockType targeted_type = targeted_block
+            ? world->get_block(targeted_block->x, targeted_block->y, targeted_block->z)
+            : BlockType::Air;
+        bool targeted_is_door = targeted_type == BlockType::OakDoorLower || targeted_type == BlockType::OakDoorUpper ||
+                                 targeted_type == BlockType::IronDoorLower || targeted_type == BlockType::IronDoorUpper;
+
         if (container_kind && !chest_blocked_above) {
             inventory_hud.open_container(*container_kind, targeted_block->x, targeted_block->y, targeted_block->z);
             EnableCursor();
+        } else if (!container_kind && targeted_block && (targeted_is_door || targeted_type == BlockType::OakTrapdoor)) {
+            // Right-click toggles open/closed instead of placing - same
+            // priority tier as the chest-container-open branch above. A
+            // door's two halves stay in sync: whichever half was clicked,
+            // flip both (matches iron doors too - no redstone system
+            // exists here to open them any other way, so they open by hand
+            // like wood doors rather than being permanently unusable).
+            int x = targeted_block->x, y = targeted_block->y, z = targeted_block->z;
+            uint16_t packed = world->get_block_state(x, y, z) ^ BlockStateBits::OPEN;
+            world->set_block_state(x, y, z, packed);
+            if (targeted_is_door) {
+                bool is_lower = targeted_type == BlockType::OakDoorLower || targeted_type == BlockType::IronDoorLower;
+                int partner_y = is_lower ? y + 1 : y - 1;
+                uint16_t partner_packed = world->get_block_state(x, partner_y, z);
+                partner_packed = static_cast<uint16_t>((partner_packed & ~BlockStateBits::OPEN) | (packed & BlockStateBits::OPEN));
+                world->set_block_state(x, partner_y, z, partner_packed);
+            }
+        } else if (!container_kind && targeted_block && targeted_type == BlockType::Cake &&
+                   current_game_mode == GameMode::Survival && player_health.health() < PlayerHealth::MAX_HEALTH) {
+            // Eating restores HP directly (see CAKE_HEAL_PER_BITE's own
+            // comment) instead of vanilla's hunger/saturation restore. No
+            // inventory consumption - the cake block itself is what's
+            // being consumed down to nothing.
+            int x = targeted_block->x, y = targeted_block->y, z = targeted_block->z;
+            uint16_t packed = world->get_block_state(x, y, z);
+            uint8_t bite_count = static_cast<uint8_t>((packed & BlockStateBits::BITE_COUNT_MASK) >> BlockStateBits::BITE_COUNT_SHIFT);
+            player_health.heal(CAKE_HEAL_PER_BITE);
+            if (bite_count >= CAKE_MAX_BITES) {
+                world->break_block(x, y, z);
+            } else {
+                // The cut direction is fixed on the first bite (this
+                // block's own facing), from whichever way the player was
+                // looking - a deliberate simplification vs. vanilla's own
+                // fixed world direction, not a functional gap.
+                if (bite_count == 0) world->set_block_orientation(x, y, z, direction_facing_player(aim));
+                uint16_t new_packed = static_cast<uint16_t>((packed & ~BlockStateBits::BITE_COUNT_MASK) |
+                    (static_cast<uint16_t>(bite_count + 1) << BlockStateBits::BITE_COUNT_SHIFT));
+                world->set_block_state(x, y, z, new_packed);
+            }
         } else if (!container_kind) {
             ItemStack& selected = inventory.hotbar[inventory.selected_slot];
 
@@ -1513,22 +1568,48 @@ void GameEngine::update(float delta_time)
                 // reads as Air for one, so without this check place_block
                 // would be called with Air and silently clear out whatever
                 // was targeted).
-                BlockType targeted_type = world->get_block(
-                    targeted_block->x, targeted_block->y, targeted_block->z);
                 bool replace_target = get_block_properties(targeted_type).replaceable;
                 int place_x = targeted_block->x + (replace_target ? 0 : static_cast<int>(targeted_block->normal.x));
                 int place_y = targeted_block->y + (replace_target ? 0 : static_cast<int>(targeted_block->normal.y));
                 int place_z = targeted_block->z + (replace_target ? 0 : static_cast<int>(targeted_block->normal.z));
-                if (!player_controller.intersects_block(camera, place_x, place_y, place_z) &&
-                    world->place_block(place_x, place_y, place_z, selected.block)) {
-                    if (block_is_directional(selected.block)) {
-                        world->set_block_orientation(place_x, place_y, place_z, direction_facing_player(aim));
+                if (!player_controller.intersects_block(camera, place_x, place_y, place_z)) {
+                    bool placed = false;
+                    HorizontalDirection facing = direction_facing_player(aim);
+                    // Door/bed are placed as one atomic pair (World::
+                    // place_door()/place_bed()) rather than through the
+                    // generic single-cell path below - see their own
+                    // comments for why (support check, rollback on a
+                    // blocked second half).
+                    if (selected.block == BlockType::OakDoorLower || selected.block == BlockType::IronDoorLower) {
+                        placed = world->place_door(place_x, place_y, place_z, selected.block, facing);
+                    } else if (selected.block == BlockType::BedHead) {
+                        placed = world->place_bed(place_x, place_y, place_z, facing);
+                    } else if (selected.block == BlockType::Chest) {
+                        // Merges into a large/double chest with a matching
+                        // neighbor when possible - see World::place_chest()'s
+                        // own comment for the diagonal-conflict rule.
+                        placed = world->place_chest(place_x, place_y, place_z, facing);
+                    } else if (world->place_block(place_x, place_y, place_z, selected.block)) {
+                        placed = true;
+                        if (block_needs_facing(selected.block)) {
+                            world->set_block_orientation(place_x, place_y, place_z, facing);
+                            if (selected.block == BlockType::OakTrapdoor) {
+                                // Half-detection from the original raycast
+                                // hit (the face actually clicked), not the
+                                // new cell - see RaycastHit::hit_point's
+                                // own comment.
+                                bool top_half = targeted_block->normal.y != 0.0f
+                                    ? targeted_block->normal.y < 0.0f
+                                    : (targeted_block->hit_point.y - std::floor(targeted_block->hit_point.y)) < 0.5f;
+                                if (top_half) world->set_block_state(place_x, place_y, place_z, BlockStateBits::TOP_HALF);
+                            }
+                        }
                     }
                     // No explicit queueing needed for a freshly placed
                     // sapling any more - it's just a regular block in a
                     // loaded chunk now, so update_random_ticks() will find
                     // it on its own on some future random tick.
-                    if (current_game_mode == GameMode::Survival && --selected.count <= 0) selected.clear();
+                    if (placed && current_game_mode == GameMode::Survival && --selected.count <= 0) selected.clear();
                 }
             }
         }

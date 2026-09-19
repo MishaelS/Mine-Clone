@@ -25,6 +25,7 @@ namespace {
             case InventoryHud::ContainerKind::Workbench: return "sprites/gui/container/container1.png";
             case InventoryHud::ContainerKind::Furnace:   return "sprites/gui/container/container2.png";
             case InventoryHud::ContainerKind::Chest:     return "sprites/gui/container/container3.png";
+            case InventoryHud::ContainerKind::LargeChest: return "sprites/gui/container/container4.png";
             case InventoryHud::ContainerKind::Inventory:
             default:
                 return "sprites/gui/container/container0.png";
@@ -77,6 +78,16 @@ namespace {
     // MAIN_GRID_ORIGIN below) - measured the same flood-fill way as every
     // other slot grid in this file.
     constexpr Vector2 CHEST_GRID_ORIGIN = {8.0f, 18.0f};
+
+    // container4.png (large/double chest, 176x222px) is container3.png's
+    // own 176x166px art with 3 extra storage rows inserted above the same
+    // bottom player-storage+hotbar section, which is why it's exactly 56px
+    // (3 rows x CONTAINER_SLOT_STRIDE_PX) taller - its own storage grid
+    // starts at the same CHEST_GRID_ORIGIN but spans 6 rows (54 slots)
+    // instead of 3, and the player-storage/hotbar section shifts down by
+    // that same 56px from MAIN_GRID_ORIGIN/INVENTORY_HOTBAR_ORIGIN below.
+    constexpr Vector2 LARGE_CHEST_MAIN_GRID_ORIGIN = {8.0f, 140.0f};
+    constexpr Vector2 LARGE_CHEST_HOTBAR_ORIGIN = {8.0f, 198.0f};
 
     // The player-model preview box - container0.png's own art leaves this
     // rectangle solid black (flood-filled to find these exact bounds),
@@ -395,11 +406,33 @@ std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory, GameMod
     Rectangle full_source = {0.0f, 0.0f, static_cast<float>(texture.width), static_cast<float>(texture.height)};
     DrawTexturePro(texture, full_source, {panel_x, panel_y, panel_w, panel_h}, {0.0f, 0.0f}, 0.0f, WHITE);
 
-    // Null whenever kind isn't Chest (or, defensively, if world somehow
-    // isn't loaded) - every chest-specific block below checks this instead
-    // of re-deriving the same condition.
-    std::array<ItemStack, INVENTORY_STORAGE_SIZE>* chest =
-        (kind == ContainerKind::Chest && world) ? &world->chest_inventory(chest_x, chest_y, chest_z) : nullptr;
+    // Null whenever kind isn't Chest/LargeChest (or, defensively, if world
+    // somehow isn't loaded) - every chest-specific block below checks this
+    // instead of re-deriving the same condition. LargeChest additionally
+    // fills `chest_secondary` - `chest_x/y/z` is whichever half was
+    // actually clicked (open_container()'s own comment), so this resolves
+    // its stored ChestPart/facing to figure out which position is primary
+    // (top 27 slots) vs. secondary (bottom 27) for a stable layout
+    // regardless of which half the player opened it from. Never moves or
+    // copies either chest's own storage - both stay independently keyed by
+    // World::chest_inventory(), exactly like a lone Chest.
+    std::array<ItemStack, INVENTORY_STORAGE_SIZE>* chest = nullptr;
+    std::array<ItemStack, INVENTORY_STORAGE_SIZE>* chest_secondary = nullptr;
+    if (kind == ContainerKind::Chest && world) {
+        chest = &world->chest_inventory(chest_x, chest_y, chest_z);
+    } else if (kind == ContainerKind::LargeChest && world) {
+        uint16_t packed = world->get_block_state(chest_x, chest_y, chest_z);
+        ChestPart part = static_cast<ChestPart>((packed & BlockStateBits::MULTIBLOCK_PART_MASK) >> BlockStateBits::MULTIBLOCK_PART_SHIFT);
+        HorizontalDirection facing = world->get_block_orientation(chest_x, chest_y, chest_z);
+        DirectionOffset right_step = horizontal_direction_offset(horizontal_direction_right_of(facing));
+        int sign = part == ChestPart::Primary ? 1 : -1;
+        int partner_x = chest_x + right_step.dx * sign;
+        int partner_z = chest_z + right_step.dz * sign;
+        std::array<ItemStack, INVENTORY_STORAGE_SIZE>* this_half = &world->chest_inventory(chest_x, chest_y, chest_z);
+        std::array<ItemStack, INVENTORY_STORAGE_SIZE>* partner_half = &world->chest_inventory(partner_x, chest_y, partner_z);
+        chest = part == ChestPart::Primary ? this_half : partner_half;
+        chest_secondary = part == ChestPart::Primary ? partner_half : this_half;
+    }
 
     if (kind == ContainerKind::Inventory) {
         Rectangle preview_destination = {
@@ -445,6 +478,11 @@ std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory, GameMod
     };
 
     if (chest) {
+        // A lone Chest draws its 27 slots at row 0-2 of CHEST_GRID_ORIGIN;
+        // LargeChest draws the primary's 27 at rows 0-2 and the
+        // secondary's 27 directly below at rows 3-5, same origin/stride -
+        // container4.png's own art is exactly this single 9x6 grid with no
+        // internal divider between the two halves.
         for (int i = 0; i < INVENTORY_STORAGE_SIZE; ++i) {
             int col = i % MAIN_GRID_COLUMNS;
             int row = i / MAIN_GRID_COLUMNS;
@@ -454,14 +492,34 @@ std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory, GameMod
             };
             process_slot((*chest)[i], slot_origin, false, true);
         }
+        if (chest_secondary) {
+            constexpr int SECONDARY_ROW_OFFSET = INVENTORY_STORAGE_SIZE / MAIN_GRID_COLUMNS; // 3
+            for (int i = 0; i < INVENTORY_STORAGE_SIZE; ++i) {
+                int col = i % MAIN_GRID_COLUMNS;
+                int row = SECONDARY_ROW_OFFSET + i / MAIN_GRID_COLUMNS;
+                Vector2 slot_origin = {
+                    panel_x + (CHEST_GRID_ORIGIN.x + col * CONTAINER_SLOT_STRIDE_PX) * inventory_scale,
+                    panel_y + (CHEST_GRID_ORIGIN.y + row * CONTAINER_SLOT_STRIDE_PX) * inventory_scale,
+                };
+                process_slot((*chest_secondary)[i], slot_origin, false, true);
+            }
+        }
     }
+
+    // LargeChest's own container4.png is taller (LARGE_CHEST_GRID_ROWS
+    // storage rows instead of Chest's 3), so its player-storage/hotbar
+    // section sits at its own shifted origin - see LARGE_CHEST_MAIN_GRID_
+    // ORIGIN/LARGE_CHEST_HOTBAR_ORIGIN's own comment. Every other kind
+    // keeps the plain, shared origin.
+    Vector2 main_grid_origin = kind == ContainerKind::LargeChest ? LARGE_CHEST_MAIN_GRID_ORIGIN : MAIN_GRID_ORIGIN;
+    Vector2 hotbar_origin = kind == ContainerKind::LargeChest ? LARGE_CHEST_HOTBAR_ORIGIN : INVENTORY_HOTBAR_ORIGIN;
 
     for (int i = 0; i < INVENTORY_STORAGE_SIZE; ++i) {
         int col = i % MAIN_GRID_COLUMNS;
         int row = i / MAIN_GRID_COLUMNS;
         Vector2 slot_origin = {
-            panel_x + (MAIN_GRID_ORIGIN.x + col * CONTAINER_SLOT_STRIDE_PX) * inventory_scale,
-            panel_y + (MAIN_GRID_ORIGIN.y + row * CONTAINER_SLOT_STRIDE_PX) * inventory_scale,
+            panel_x + (main_grid_origin.x + col * CONTAINER_SLOT_STRIDE_PX) * inventory_scale,
+            panel_y + (main_grid_origin.y + row * CONTAINER_SLOT_STRIDE_PX) * inventory_scale,
         };
         process_slot(inventory.storage[i], slot_origin, false);
     }
@@ -469,8 +527,8 @@ std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory, GameMod
     // This is the same data as the always-visible hotbar, not a copy.
     for (int i = 0; i < HOTBAR_SIZE; ++i) {
         Vector2 slot_origin = {
-            panel_x + (INVENTORY_HOTBAR_ORIGIN.x + i * CONTAINER_SLOT_STRIDE_PX) * inventory_scale,
-            panel_y + INVENTORY_HOTBAR_ORIGIN.y * inventory_scale,
+            panel_x + (hotbar_origin.x + i * CONTAINER_SLOT_STRIDE_PX) * inventory_scale,
+            panel_y + hotbar_origin.y * inventory_scale,
         };
         process_slot(inventory.hotbar[i], slot_origin, true);
     }
@@ -542,8 +600,10 @@ std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory, GameMod
         } else if (chest) {
             // A chest is open and this shift-click came from the player's
             // own side (storage/hotbar/craft grid) - send it into the
-            // chest instead of just shuffling storage<->hotbar.
+            // chest instead of just shuffling storage<->hotbar. LargeChest
+            // overflows into its secondary half once the primary is full.
             transfer_to(*chest);
+            if (chest_secondary && !source.empty()) transfer_to(*chest_secondary);
         } else if (from_hotbar) {
             transfer_to(inventory.storage);
         } else {
@@ -577,6 +637,7 @@ std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory, GameMod
             gather(inventory.storage);
             if (carried_stack.count < MAX_ITEM_STACK) gather(inventory.hotbar);
             if (chest && carried_stack.count < MAX_ITEM_STACK) gather(*chest);
+            if (chest_secondary && carried_stack.count < MAX_ITEM_STACK) gather(*chest_secondary);
         } else if (hovered_slot->empty()) {
             *hovered_slot = carried_stack;
             carried_stack.clear();
@@ -719,4 +780,14 @@ std::optional<InventoryHud::ContainerKind> container_kind_for_block(BlockType ty
         case BlockType::Chest: return InventoryHud::ContainerKind::Chest;
         default: return std::nullopt;
     }
+}
+
+std::optional<InventoryHud::ContainerKind> resolve_container_kind(const World& world, int x, int y, int z)
+{
+    BlockType type = world.get_block(x, y, z);
+    if (type != BlockType::Chest) return container_kind_for_block(type);
+
+    uint16_t packed = world.get_block_state(x, y, z);
+    ChestPart part = static_cast<ChestPart>((packed & BlockStateBits::MULTIBLOCK_PART_MASK) >> BlockStateBits::MULTIBLOCK_PART_SHIFT);
+    return part == ChestPart::Single ? InventoryHud::ContainerKind::Chest : InventoryHud::ContainerKind::LargeChest;
 }

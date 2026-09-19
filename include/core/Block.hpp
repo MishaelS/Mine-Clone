@@ -105,6 +105,19 @@ enum class BlockType : uint8_t {
     Torch,
     RedstoneTorch,
     LitRedstoneTorch,
+
+    // Shaped blocks (BlockRenderShape::Shaped, core/BlockShape.hpp's
+    // get_block_shape()) - partial-cube collision/geometry instead of a
+    // plain full-cube-or-nothing block.
+    OakStairs,
+    OakTrapdoor,
+    OakDoorLower,
+    OakDoorUpper,
+    IronDoorLower,
+    IronDoorUpper,
+    BedHead,
+    BedFoot,
+    Cake,
     Count, // not a real block; sentinel for table/array sizing
 };
 
@@ -147,6 +160,20 @@ enum class HorizontalDirection : uint8_t {
     West,
 };
 
+// The (dx, dz) unit step for walking one cell in this direction - North/
+// South are -Z/+Z, East/West are +X/-X, same convention CUBE_FACES (Chunk.cpp)
+// and this enum's own comment use. Used anywhere a stored facing needs to
+// become an actual neighbor offset: a stair/trapdoor's own shape geometry
+// (core/BlockShape.hpp), and a door/bed's paired second half (World::
+// place_door()/place_bed()).
+struct DirectionOffset { int dx, dz; };
+DirectionOffset horizontal_direction_offset(HorizontalDirection direction);
+
+// 90 degrees clockwise as seen from above (North->East->South->West->North) -
+// the large/double chest's own primary/secondary pairing rule (World::
+// place_chest()) is expressed relative to this, not to the pair's own axis.
+HorizontalDirection horizontal_direction_right_of(HorizontalDirection direction);
+
 // Minecraft's own fixed per-face directional shading: a flat multiplier per
 // cube face direction, independent of any actual light source or AO - it's
 // what makes a uniformly-lit cube still read as three-dimensional (see
@@ -166,7 +193,11 @@ enum class ToolKind : uint8_t { None, Sword, Pickaxe, Shovel, Axe, Hoe };
 
 // Physical cubes use the normal six-face mesh. Cross blocks (grass and
 // future flowers) are two intersecting, double-sided vertical quads.
-enum class BlockRenderShape : uint8_t { Cube, Cross };
+// Shaped blocks (stairs, trapdoors, doors, beds, cake) draw whatever box
+// list core/BlockShape.hpp's get_block_shape() reports for this instance,
+// each box rendered as its own mini six-face cube - see
+// Chunk::build_mesh_data()'s own Shaped branch.
+enum class BlockRenderShape : uint8_t { Cube, Cross, Shaped };
 
 // Everything Mesh Generation needs to know about a BlockType, looked up once
 // per face while building a chunk's mesh (not stored per-block). Loaded from
@@ -218,6 +249,21 @@ struct BlockProperties {
     // addition.
     float density;
 
+    // True for a block whose collision/render geometry isn't just "solid ?
+    // one full unit cube : nothing" - stairs, trapdoors, doors, beds, cake
+    // (see core/BlockShape.hpp's get_block_shape()). False for the
+    // overwhelming majority of blocks, which never pay for a BlockShape
+    // lookup at all - see World::collision_boxes_at()'s own fast path and
+    // Chunk::build_mesh_data()'s BlockRenderShape::Shaped branch.
+    bool has_custom_shape;
+
+    // True for a block that damages on contact regardless of whether it
+    // blocks movement (cactus) - generalizes what used to be a single
+    // hardcoded BlockType::Cactus check in PlayerController.cpp's
+    // box_touches_cactus() into a data-driven one any future block can opt
+    // into by name alone.
+    bool damages_on_touch;
+
     // UV rectangle (0..1) within get_block_atlas_texture(), indexed by
     // BlockFace - every block's faces share one atlas texture, so a whole
     // chunk mesh draws with a single bound texture.
@@ -248,6 +294,15 @@ const BlockProperties& get_block_properties(BlockType type);
 // shows that front texture) and block-placement code (whether it's worth
 // calling World::set_block_orientation() at all).
 bool block_is_directional(BlockType type);
+
+// True for block_is_directional()'s 7 types, plus OakStairs/OakTrapdoor -
+// blocks that need a stored HorizontalDirection for their own shape
+// geometry (get_block_shape()) rather than a front-texture remap.
+// Door/Bed/Chest are deliberately excluded: each sets orientation on both
+// of its paired cells itself, as part of one atomic placement (World::
+// place_door()/place_bed()/place_chest()), not as a GameEngine follow-up
+// step the way this predicate drives for every other directional block.
+bool block_needs_facing(BlockType type);
 
 // The blocks.json "name" a BlockType was loaded from (e.g. "oak_planks"),
 // for display purposes (the debug overlay's "Looking at" line). "air" for

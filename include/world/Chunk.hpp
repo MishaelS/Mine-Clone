@@ -387,6 +387,18 @@ public:
     HorizontalDirection get_orientation(int x, int y, int z) const;
     void set_orientation(int x, int y, int z, HorizontalDirection direction);
 
+    // Extra per-instance state a shaped/multi-block BlockType needs beyond
+    // a facing (door/trapdoor open, trapdoor top/bottom half, door hinge
+    // side, chest multiblock pairing, cake bites eaten) - see core/
+    // BlockShape.hpp's BlockInstanceState and BlockStateBits (Chunk.cpp) for
+    // the bit layout. Same sparse-map shape and same "0 means never set"
+    // default as get_orientation() above, kept as its own map since not
+    // every shaped block needs a facing *and* this - mixing them would
+    // force every reader to unpack bits meaningless to its own BlockType.
+    // Persisted by save_to_file()/load_from_file() (chunk file version 4+).
+    uint16_t get_block_state(int x, int y, int z) const;
+    void set_block_state(int x, int y, int z, uint16_t packed);
+
     // Exact biome-blended foliage color generated for this local (x, z)
     // column. Used by a broken foliage block so its dropped-item cube keeps
     // the same color instead of reverting to the atlas' gray tint mask.
@@ -499,6 +511,9 @@ private:
     // See get_orientation()/set_orientation() above - keyed by the same
     // flat local index() every other per-block array uses.
     std::unordered_map<int, HorizontalDirection> orientation;
+
+    // See get_block_state()/set_block_state() above.
+    std::unordered_map<int, uint16_t> block_state;
 
     // Packed per-cell light: upper nibble = sky light, lower nibble = block
     // light, each 0-15.

@@ -21,12 +21,15 @@ class World;
 class InventoryHud {
 public:
     // Which container GUI panel is currently showing -
-    // assets/sprites/gui/container/container<N>.png. All four share the
-    // exact same player storage+hotbar grid position (verified against
-    // each texture's own art - see MAIN_GRID_ORIGIN/INVENTORY_HOTBAR_ORIGIN
-    // in the .cpp), so only the background texture (and, for Furnace, the
-    // two progress icons) actually varies by kind.
-    enum class ContainerKind { Inventory, Workbench, Furnace, Chest };
+    // assets/sprites/gui/container/container<N>.png. Inventory/Workbench/
+    // Furnace/Chest share the exact same player storage+hotbar grid
+    // position (verified against each texture's own art - see
+    // MAIN_GRID_ORIGIN/INVENTORY_HOTBAR_ORIGIN in the .cpp), so only the
+    // background texture (and, for Furnace, the two progress icons)
+    // actually varies by kind. LargeChest's own container4.png is taller
+    // (a 9x6 storage grid instead of 9x3) and so uses its own shifted
+    // player storage+hotbar origin - see the .cpp's LARGE_CHEST_* constants.
+    enum class ContainerKind { Inventory, Workbench, Furnace, Chest, LargeChest };
 
     bool is_open() const { return open; }
 
@@ -101,3 +104,13 @@ private:
 // (including Air, i.e. nothing targeted), meaning "not a container, handle
 // the click as a normal block placement instead".
 std::optional<InventoryHud::ContainerKind> container_kind_for_block(BlockType type);
+
+// Same as container_kind_for_block(), but for a Chest specifically checks
+// this exact position's own large-chest pairing (World::place_chest()'s
+// ChestPart, see core/BlockShape.hpp) - a lone Chest still opens
+// ContainerKind::Chest, one that's merged into a large/double chest opens
+// ContainerKind::LargeChest instead. Every other block defers straight to
+// container_kind_for_block(). GameEngine's right-click dispatch calls this
+// instead of container_kind_for_block() directly, since only it has the
+// World access needed to tell the two chest cases apart.
+std::optional<InventoryHud::ContainerKind> resolve_container_kind(const World& world, int x, int y, int z);

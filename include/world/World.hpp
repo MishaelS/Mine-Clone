@@ -4,6 +4,7 @@
 #include "world/Chunk.hpp"
 #include "world/ChunkWorkerPool.hpp"
 #include "core/Block.hpp"
+#include "core/BlockShape.hpp"
 #include "core/TickMotion.hpp"
 #include "player/Inventory.hpp"
 
@@ -165,6 +166,12 @@ public:
         int x, y, z;
         Vector3 normal; // outward-facing normal of the face the ray entered through
         float distance = 0.0f;
+        // Exact world-space point the ray hit, on that same entry face -
+        // used to tell which half of a cell was clicked (e.g. a trapdoor's
+        // own top/bottom-of-block mount side) when the entry face alone
+        // (normal) isn't enough. {0,0,0} default only matters for whatever
+        // never got a real raycast() result in the first place.
+        Vector3 hit_point{};
     };
     std::optional<RaycastHit> raycast(Vector3 origin, Vector3 direction, float max_distance) const;
 
@@ -194,6 +201,31 @@ public:
     // space.
     // True only when the block was actually placed.
     bool place_block(int x, int y, int z, BlockType type);
+
+    // Atomically places both halves of a door: `lower_type` (OakDoorLower
+    // or IronDoorLower) at (x, y, z), its matching upper half directly
+    // above. Requires a solid block below (same "needs support" class as
+    // Torch/OakSapling in place_block()'s own precondition chain). Rolls
+    // the lower half back via break_block() if the upper half can't be
+    // placed (blocked, out of range, ...), so a door can never end up
+    // half-placed. Both halves are given the same `facing`; hinge side is
+    // fixed left for now (see BlockInstanceState's own comment).
+    bool place_door(int x, int y, int z, BlockType lower_type, HorizontalDirection facing);
+
+    // Atomically places a bed: BedHead at (x, y, z), BedFoot one cell away
+    // in `facing`'s direction (head-to-foot, same Y) - rolled back via
+    // break_block() if the foot cell can't be placed.
+    bool place_bed(int x, int y, int z, HorizontalDirection facing);
+
+    // Places a single Chest at (x, y, z), then checks its 4 horizontal
+    // neighbors for another single Chest with matching facing to merge
+    // into a large/double chest - refused (this chest stays single) if
+    // either diagonal neighbor of the resulting pair is already part of a
+    // different large chest. See core/BlockShape.hpp's ChestPart/
+    // BlockStateBits::MULTIBLOCK_PART_MASK for how the pairing itself is
+    // stored; inventories are never moved (World::chest_inventory() stays
+    // keyed per-position), only the pairing flag changes.
+    bool place_chest(int x, int y, int z, HorizontalDirection facing);
 
     // Unconditionally overwrites every cell in the box from (min_x, min_y,
     // min_z) to (max_x, max_y, max_z) inclusive with `type` - for chat
@@ -358,6 +390,27 @@ public:
     // chunk.
     HorizontalDirection get_block_orientation(int x, int y, int z) const;
     void set_block_orientation(int x, int y, int z, HorizontalDirection direction);
+
+    // Extra per-instance state for a shaped/multi-block BlockType (door/
+    // trapdoor open, trapdoor half, door hinge, chest pairing, cake bites) -
+    // see Chunk::get_block_state()'s own comment and core/BlockShape.hpp's
+    // BlockStateBits. 0 (every field's "nothing special" value) for any
+    // position that was never explicitly set, including one in an unloaded
+    // chunk.
+    uint16_t get_block_state(int x, int y, int z) const;
+    void set_block_state(int x, int y, int z, uint16_t packed);
+
+    // This cell's current collision box list, in WORLD space (already
+    // offset by x,y,z). Fast path: an ordinary solid, non-custom-shape
+    // block (the overwhelming majority) returns one full unit-cube box
+    // computed inline, at the same cost as a plain BlockProperties::solid
+    // check - no BlockShape lookup, no orientation/block_state read. Empty
+    // for a non-solid, non-custom-shape cell (air, torch, rail). The real
+    // per-shape list, built from this cell's own facing/block_state, only
+    // for a block_has_custom_shape() type - see core/BlockShape.hpp. Used
+    // by PlayerController's collision resolution and (in future shaped-
+    // mesh work) Chunk::build_mesh_data().
+    BlockShapeBoxes collision_boxes_at(int x, int y, int z) const;
 
     // A Chest block's own 27-slot storage, keyed by its world position -
     // created empty the first time a given position is looked up (opening

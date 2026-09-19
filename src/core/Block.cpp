@@ -190,6 +190,15 @@ namespace {
         {"torch"            , BlockType::Torch           },
         {"redstone_torch"   , BlockType::RedstoneTorch   },
         {"lit_redstone_torch", BlockType::LitRedstoneTorch},
+        {"oak_stairs"       , BlockType::OakStairs       },
+        {"oak_trapdoor"     , BlockType::OakTrapdoor     },
+        {"oak_door_lower"   , BlockType::OakDoorLower    },
+        {"oak_door_upper"   , BlockType::OakDoorUpper    },
+        {"iron_door_lower"  , BlockType::IronDoorLower   },
+        {"iron_door_upper"  , BlockType::IronDoorUpper   },
+        {"bed_head"         , BlockType::BedHead         },
+        {"bed_foot"         , BlockType::BedFoot         },
+        {"cake"             , BlockType::Cake            },
     };
 
     BlockSoundGroup sound_group_from_name(const std::string& name) {
@@ -273,8 +282,10 @@ void Load_block_definitions()
         properties.transparent     = entry["transparent"].as_bool(false);
         properties.selectable      = entry["selectable"].as_bool(true);
         properties.replaceable     = entry["replaceable"].as_bool(!properties.solid);
-        properties.render_shape    = entry["render_shape"].as_string() == "cross"
-            ? BlockRenderShape::Cross : BlockRenderShape::Cube;
+        std::string render_shape_name = entry["render_shape"].as_string();
+        properties.render_shape = render_shape_name == "cross" ? BlockRenderShape::Cross
+            : render_shape_name == "shaped" ? BlockRenderShape::Shaped
+            : BlockRenderShape::Cube;
         properties.translucent     = entry["translucent"].as_bool(false);
         properties.cutout          = entry["cutout"].as_bool(false);
         properties.cull_same_faces = entry["cull_same_faces"].as_bool(true);
@@ -286,6 +297,8 @@ void Load_block_definitions()
         properties.effective_tool = entry["tool"].get_type() == Json::Type::String
             ? tool_kind_from_name(entry["tool"].as_string()) : physical_defaults.tool;
         properties.density = static_cast<float>(entry["density"].as_number(physical_defaults.density));
+        properties.has_custom_shape = entry["custom_shape"].as_bool(false);
+        properties.damages_on_touch = entry["damages_on_touch"].as_bool(false);
         // Order: Top, Bottom, North, South, East, West.
         properties.texture_uvs[0] = top.uv;
         properties.texture_uvs[1] = bottom.uv;
@@ -321,6 +334,33 @@ bool block_is_directional(BlockType type)
     return type == BlockType::Chest     || type == BlockType::Furnace || type == BlockType::LitFurnace ||
            type == BlockType::Workbench || type == BlockType::Dispenser ||
            type == BlockType::Pumpkin || type == BlockType::JackOLantern;
+}
+
+bool block_needs_facing(BlockType type)
+{
+    return block_is_directional(type) || type == BlockType::OakStairs || type == BlockType::OakTrapdoor;
+}
+
+DirectionOffset horizontal_direction_offset(HorizontalDirection direction)
+{
+    switch (direction) {
+        case HorizontalDirection::North: return {0, -1};
+        case HorizontalDirection::South: return {0, 1};
+        case HorizontalDirection::East:  return {1, 0};
+        case HorizontalDirection::West:  return {-1, 0};
+    }
+    return {0, 1};
+}
+
+HorizontalDirection horizontal_direction_right_of(HorizontalDirection direction)
+{
+    switch (direction) {
+        case HorizontalDirection::North: return HorizontalDirection::East;
+        case HorizontalDirection::East:  return HorizontalDirection::South;
+        case HorizontalDirection::South: return HorizontalDirection::West;
+        case HorizontalDirection::West:  return HorizontalDirection::North;
+    }
+    return HorizontalDirection::East;
 }
 
 const std::string& get_block_name(BlockType type)

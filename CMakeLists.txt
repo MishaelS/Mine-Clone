@@ -33,6 +33,7 @@ add_executable(${PROJECT_NAME}
     src/core/GameEngine.cpp
     src/core/Json.cpp
     src/core/Block.cpp
+    src/core/BlockShape.cpp
     src/core/TextureManager.cpp
     src/core/PerlinNoise.cpp
     src/core/TerrainNoise.cpp

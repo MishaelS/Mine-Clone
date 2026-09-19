@@ -697,6 +697,75 @@ void World::set_block_orientation(int x, int y, int z, HorizontalDirection direc
     request_remesh(chunk_x, chunk_z);
 }
 
+uint16_t World::get_block_state(int x, int y, int z) const
+{
+    if (y < MIN_WORLD_Y || y >= MIN_WORLD_Y + CHUNK_HEIGHT) return 0u;
+
+    int chunk_x = floor_div(x, CHUNK_SIZE);
+    int chunk_z = floor_div(z, CHUNK_SIZE);
+    const Chunk* chunk = chunk_at(chunk_x, chunk_z);
+    if (chunk == nullptr) return 0u;
+
+    return chunk->get_block_state(x - chunk_x * CHUNK_SIZE, y - MIN_WORLD_Y, z - chunk_z * CHUNK_SIZE);
+}
+
+void World::set_block_state(int x, int y, int z, uint16_t packed)
+{
+    if (y < MIN_WORLD_Y || y >= MIN_WORLD_Y + CHUNK_HEIGHT) return;
+
+    int chunk_x = floor_div(x, CHUNK_SIZE);
+    int chunk_z = floor_div(z, CHUNK_SIZE);
+    Chunk* chunk = chunk_at(chunk_x, chunk_z);
+    if (chunk == nullptr) return;
+
+    int local_x = x - chunk_x * CHUNK_SIZE;
+    int local_z = z - chunk_z * CHUNK_SIZE;
+    {
+        // Same locking discipline as set_block_orientation() - a background
+        // mesh job could be reading this chunk's data right now.
+        std::unique_lock<std::shared_mutex> lock(chunk->data_mutex());
+        chunk->set_block_state(local_x, y - MIN_WORLD_Y, local_z, packed);
+        chunk->mark_modified();
+    }
+    request_remesh(chunk_x, chunk_z);
+}
+
+BlockShapeBoxes World::collision_boxes_at(int x, int y, int z) const
+{
+    BlockType type = get_block(x, y, z);
+    const BlockProperties& properties = get_block_properties(type);
+
+    BlockShapeBoxes result;
+    if (!properties.has_custom_shape) {
+        // Fast path - the overwhelming majority of blocks: a plain full
+        // unit cube if solid, nothing at all otherwise. No BlockShape
+        // lookup, no orientation/block_state read.
+        if (properties.solid) {
+            result.boxes[0] = {
+                {static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)},
+                {static_cast<float>(x) + 1.0f, static_cast<float>(y) + 1.0f, static_cast<float>(z) + 1.0f},
+            };
+            result.count = 1;
+        }
+        return result;
+    }
+
+    BlockInstanceState state;
+    state.facing = get_block_orientation(x, y, z);
+    uint16_t packed = get_block_state(x, y, z);
+    state.open        = (packed & BlockStateBits::OPEN) != 0;
+    state.top_half    = (packed & BlockStateBits::TOP_HALF) != 0;
+    state.hinge_right = (packed & BlockStateBits::HINGE_RIGHT) != 0;
+    state.bite_count  = static_cast<uint8_t>((packed & BlockStateBits::BITE_COUNT_MASK) >> BlockStateBits::BITE_COUNT_SHIFT);
+
+    result = get_block_shape(type, state);
+    for (int i = 0; i < result.count; ++i) {
+        result.boxes[i].min = Vector3Add(result.boxes[i].min, {static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)});
+        result.boxes[i].max = Vector3Add(result.boxes[i].max, {static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)});
+    }
+    return result;
+}
+
 int World::get_light(int x, int y, int z) const
 {
     if (y < MIN_WORLD_Y || y >= MIN_WORLD_Y + CHUNK_HEIGHT) return MAX_LIGHT; // above/below the world
@@ -819,7 +888,8 @@ std::optional<World::RaycastHit> World::raycast(Vector3 origin, Vector3 directio
 
     while (traveled <= max_distance) {
         if (get_block_properties(get_block(x, y, z)).selectable) {
-            return RaycastHit{x, y, z, normal, traveled};
+            Vector3 hit_point = Vector3Add(origin, Vector3Scale(dir, traveled));
+            return RaycastHit{x, y, z, normal, traveled, hit_point};
         }
 
         if (t_max_x < t_max_y && t_max_x < t_max_z) {
@@ -843,10 +913,44 @@ std::optional<World::RaycastHit> World::raycast(Vector3 origin, Vector3 directio
     return std::nullopt;
 }
 
+namespace {
+    ChestPart chest_part_at(const World& world, int x, int y, int z) {
+        uint16_t packed = world.get_block_state(x, y, z);
+        return static_cast<ChestPart>((packed & BlockStateBits::MULTIBLOCK_PART_MASK) >> BlockStateBits::MULTIBLOCK_PART_SHIFT);
+    }
+}
+
 std::optional<BlockType> World::break_block(int x, int y, int z)
 {
     BlockType broken = get_block(x, y, z);
     if (broken == BlockType::Bedrock || !get_block_properties(broken).selectable) return std::nullopt;
+
+    // Door/bed are two-cell objects - breaking either half silently
+    // removes both (only the half the player actually targeted goes
+    // through resolve_block_drops(), so exactly one drop happens either
+    // way). A large chest's halves demote to independent single chests
+    // instead - their own inventories are untouched, never merged/moved.
+    if (broken == BlockType::OakDoorLower || broken == BlockType::IronDoorLower) {
+        set_block_and_rebuild(x, y + 1, z, BlockType::Air);
+    } else if (broken == BlockType::OakDoorUpper || broken == BlockType::IronDoorUpper) {
+        set_block_and_rebuild(x, y - 1, z, BlockType::Air);
+    } else if (broken == BlockType::BedHead || broken == BlockType::BedFoot) {
+        DirectionOffset step = horizontal_direction_offset(get_block_orientation(x, y, z));
+        int sign = broken == BlockType::BedHead ? 1 : -1;
+        set_block_and_rebuild(x + step.dx * sign, y, z + step.dz * sign, BlockType::Air);
+    } else if (broken == BlockType::Chest) {
+        ChestPart part = chest_part_at(*this, x, y, z);
+        if (part != ChestPart::Single) {
+            DirectionOffset right_step = horizontal_direction_offset(horizontal_direction_right_of(get_block_orientation(x, y, z)));
+            int sign = part == ChestPart::Primary ? 1 : -1;
+            int partner_x = x + right_step.dx * sign;
+            int partner_z = z + right_step.dz * sign;
+            if (get_block(partner_x, y, partner_z) == BlockType::Chest) {
+                set_block_state(partner_x, y, partner_z, 0);
+            }
+        }
+    }
+
     set_block_and_rebuild(x, y, z, BlockType::Air);
     schedule_fluid_neighbors(x, y, z);
     schedule_falling_check(x, y + 1, z);
@@ -873,6 +977,84 @@ bool World::place_block(int x, int y, int z, BlockType type)
     set_block_and_rebuild(x, y, z, type);
     schedule_fluid_neighbors(x, y, z);
     schedule_falling_check(x, y, z);
+    return true;
+}
+
+bool World::place_door(int x, int y, int z, BlockType lower_type, HorizontalDirection facing)
+{
+    if (!get_block_properties(get_block(x, y - 1, z)).solid) return false;
+    if (!place_block(x, y, z, lower_type)) return false;
+
+    BlockType upper_type = lower_type == BlockType::IronDoorLower ? BlockType::IronDoorUpper : BlockType::OakDoorUpper;
+    if (!place_block(x, y + 1, z, upper_type)) {
+        break_block(x, y, z);
+        return false;
+    }
+    set_block_orientation(x, y, z, facing);
+    set_block_orientation(x, y + 1, z, facing);
+    return true;
+}
+
+bool World::place_bed(int x, int y, int z, HorizontalDirection facing)
+{
+    DirectionOffset step = horizontal_direction_offset(facing);
+    int foot_x = x + step.dx;
+    int foot_z = z + step.dz;
+    if (!place_block(x, y, z, BlockType::BedHead)) return false;
+    if (!place_block(foot_x, y, foot_z, BlockType::BedFoot)) {
+        break_block(x, y, z);
+        return false;
+    }
+    set_block_orientation(x, y, z, facing);
+    set_block_orientation(foot_x, y, foot_z, facing);
+    return true;
+}
+
+bool World::place_chest(int x, int y, int z, HorizontalDirection facing)
+{
+    if (!place_block(x, y, z, BlockType::Chest)) return false;
+    set_block_orientation(x, y, z, facing);
+
+    // A double chest only ever pairs side by side - perpendicular to its
+    // own facing, same as real Minecraft (two same-facing chests placed
+    // front-to-back along the facing axis never merge). `sign` picks which
+    // of the two perpendicular sides: +1 is the "right of facing" side
+    // (this chest becomes Primary if it finds a partner there), -1 the
+    // left (this chest becomes Secondary).
+    DirectionOffset right_step = horizontal_direction_offset(horizontal_direction_right_of(facing));
+    DirectionOffset facing_step = horizontal_direction_offset(facing);
+    for (int sign : {1, -1}) {
+        int nx = x + right_step.dx * sign;
+        int nz = z + right_step.dz * sign;
+        if (get_block(nx, y, nz) != BlockType::Chest) continue;
+        if (get_block_orientation(nx, y, nz) != facing) continue;
+        if (chest_part_at(*this, nx, y, nz) != ChestPart::Single) continue;
+
+        // Diagonal-conflict check: the two cells directly in front of and
+        // behind the neighbor (along the shared facing axis) - if either
+        // already belongs to a different large chest, merging here would
+        // form an ambiguous corner/triple arrangement, so refuse it
+        // entirely and leave this chest single.
+        bool conflict = false;
+        for (int facing_sign : {1, -1}) {
+            int diagonal_x = nx + facing_step.dx * facing_sign;
+            int diagonal_z = nz + facing_step.dz * facing_sign;
+            if (get_block(diagonal_x, y, diagonal_z) == BlockType::Chest &&
+                chest_part_at(*this, diagonal_x, y, diagonal_z) != ChestPart::Single) {
+                conflict = true;
+                break;
+            }
+        }
+        if (conflict) continue;
+
+        bool this_is_primary = sign == 1;
+        auto packed_part = [](ChestPart part) {
+            return static_cast<uint16_t>(static_cast<uint16_t>(part) << BlockStateBits::MULTIBLOCK_PART_SHIFT);
+        };
+        set_block_state(x, y, z, packed_part(this_is_primary ? ChestPart::Primary : ChestPart::Secondary));
+        set_block_state(nx, y, nz, packed_part(this_is_primary ? ChestPart::Secondary : ChestPart::Primary));
+        break; // a chest only ever pairs with one neighbor
+    }
     return true;
 }
 

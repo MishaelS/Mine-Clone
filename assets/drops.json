@@ -1177,55 +1177,97 @@
       ]
     },
     {
-      "block": "bed",
-      "requires_tool": null,
-      "min_tool_tier": null,
-      "drops": [
-        {
-          "type": "item",
-          "name": "bed",
-          "count_min": 1,
-          "count_max": 1,
-          "chance": 1.0
-        }
-      ]
-    },
-    {
-      "block": "wooden_door",
-      "requires_tool": null,
-      "min_tool_tier": null,
-      "drops": [
-        {
-          "type": "item",
-          "name": "wooden_door_item",
-          "count_min": 1,
-          "count_max": 1,
-          "chance": 1.0
-        }
-      ]
-    },
-    {
-      "block": "iron_door",
-      "requires_tool": null,
-      "min_tool_tier": null,
-      "drops": [
-        {
-          "type": "item",
-          "name": "iron_door_item",
-          "count_min": 1,
-          "count_max": 1,
-          "chance": 1.0
-        }
-      ]
-    },
-    {
-      "block": "wooden_stairs",
+      "block": "bed_head",
       "requires_tool": null,
       "min_tool_tier": null,
       "drops": [
         {
           "type": "block",
-          "name": "wooden_stairs",
+          "name": "bed_head",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "bed_foot",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "bed_head",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "oak_door_lower",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "oak_door_lower",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "oak_door_upper",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "oak_door_lower",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "iron_door_lower",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "iron_door_lower",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "iron_door_upper",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "iron_door_lower",
+          "count_min": 1,
+          "count_max": 1,
+          "chance": 1.0
+        }
+      ]
+    },
+    {
+      "block": "oak_stairs",
+      "requires_tool": null,
+      "min_tool_tier": null,
+      "drops": [
+        {
+          "type": "block",
+          "name": "oak_stairs",
           "count_min": 1,
           "count_max": 1,
           "chance": 1.0
@@ -1324,13 +1366,13 @@
       "drops": []
     },
     {
-      "block": "trapdoor",
+      "block": "oak_trapdoor",
       "requires_tool": null,
       "min_tool_tier": null,
       "drops": [
         {
-          "type": "item",
-          "name": "trapdoor",
+          "type": "block",
+          "name": "oak_trapdoor",
           "count_min": 1,
           "count_max": 1,
           "chance": 1.0

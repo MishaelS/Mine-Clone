@@ -15,7 +15,14 @@ std::vector<BlockType> all_placeable_blocks()
     std::vector<BlockType> result;
     for (uint8_t id = 1; id < static_cast<uint8_t>(BlockType::Count); ++id) {
         BlockType type = static_cast<BlockType>(id);
-        if (type != BlockType::Water) result.push_back(type);
+        // OakDoorUpper/IronDoorUpper/BedFoot only ever come into existence
+        // as the automatic second half of a paired placement (World::
+        // place_door()/place_bed()) - never directly selectable.
+        if (type == BlockType::Water || type == BlockType::OakDoorUpper ||
+            type == BlockType::IronDoorUpper || type == BlockType::BedFoot) {
+            continue;
+        }
+        result.push_back(type);
     }
     return result;
 }

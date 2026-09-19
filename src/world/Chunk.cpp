@@ -1,4 +1,5 @@
 #include "world/Chunk.hpp"
+#include "core/BlockShape.hpp"
 #include "core/TerrainNoise.hpp"
 
 #include "raymath.h"
@@ -236,16 +237,28 @@ namespace {
         Vector3 normal;
     };
 
+    // Six faces of a box centered on the origin with the given per-axis
+    // half-extents, indexed by BlockFace (Top, Bottom, North, South, East,
+    // West - North/South are -Z/+Z, East/West are +X/-X). CUBE_FACES below
+    // is just this at {HALF,HALF,HALF}; Chunk::build_mesh_data()'s Shaped
+    // branch calls it again per box, with that shaped block's own (usually
+    // non-uniform, e.g. a stair's half-height slab) extents instead, so a
+    // stair/trapdoor/door/bed/cake's mini-cube pieces share exactly the
+    // same corner-winding/normal logic as an ordinary full block.
+    std::array<Face, 6> unit_cube_faces(Vector3 half) {
+        return {{
+            { {-half.x,  half.y, -half.z}, {-half.x,  half.y,  half.z}, { half.x,  half.y,  half.z}, { half.x,  half.y, -half.z}, { 0.0f,  1.0f,  0.0f} }, // Top
+            { {-half.x, -half.y,  half.z}, {-half.x, -half.y, -half.z}, { half.x, -half.y, -half.z}, { half.x, -half.y,  half.z}, { 0.0f, -1.0f,  0.0f} }, // Bottom
+            { {-half.x,  half.y, -half.z}, { half.x,  half.y, -half.z}, { half.x, -half.y, -half.z}, {-half.x, -half.y, -half.z}, { 0.0f,  0.0f, -1.0f} }, // North
+            { { half.x,  half.y,  half.z}, {-half.x,  half.y,  half.z}, {-half.x, -half.y,  half.z}, { half.x, -half.y,  half.z}, { 0.0f,  0.0f,  1.0f} }, // South
+            { { half.x,  half.y, -half.z}, { half.x,  half.y,  half.z}, { half.x, -half.y,  half.z}, { half.x, -half.y, -half.z}, { 1.0f,  0.0f,  0.0f} }, // East
+            { {-half.x,  half.y,  half.z}, {-half.x,  half.y, -half.z}, {-half.x, -half.y, -half.z}, {-half.x, -half.y,  half.z}, {-1.0f,  0.0f,  0.0f} }, // West
+        }};
+    }
+
     // Indexed by BlockFace (Top, Bottom, North, South, East, West). North/South
     // are -Z/+Z, East/West are +X/-X.
-    const std::array<Face, 6> CUBE_FACES = {{
-        { {-HALF,  HALF, -HALF}, {-HALF,  HALF,  HALF}, { HALF,  HALF,  HALF}, { HALF,  HALF, -HALF}, { 0.0f,  1.0f,  0.0f} }, // Top
-        { {-HALF, -HALF,  HALF}, {-HALF, -HALF, -HALF}, { HALF, -HALF, -HALF}, { HALF, -HALF,  HALF}, { 0.0f, -1.0f,  0.0f} }, // Bottom
-        { {-HALF,  HALF, -HALF}, { HALF,  HALF, -HALF}, { HALF, -HALF, -HALF}, {-HALF, -HALF, -HALF}, { 0.0f,  0.0f, -1.0f} }, // North
-        { { HALF,  HALF,  HALF}, {-HALF,  HALF,  HALF}, {-HALF, -HALF,  HALF}, { HALF, -HALF,  HALF}, { 0.0f,  0.0f,  1.0f} }, // South
-        { { HALF,  HALF, -HALF}, { HALF,  HALF,  HALF}, { HALF, -HALF,  HALF}, { HALF, -HALF, -HALF}, { 1.0f,  0.0f,  0.0f} }, // East
-        { {-HALF,  HALF,  HALF}, {-HALF,  HALF, -HALF}, {-HALF, -HALF, -HALF}, {-HALF, -HALF,  HALF}, {-1.0f,  0.0f,  0.0f} }, // West
-    }};
+    const std::array<Face, 6> CUBE_FACES = unit_cube_faces({HALF, HALF, HALF});
 
     // Cross-shaped vegetation: two diagonal planes, each emitted in both
     // directions because the opaque/cutout pass keeps back-face culling on.
@@ -1261,7 +1274,7 @@ void Chunk::carve_caves(uint32_t world_seed, int chunk_x, int chunk_z)
 
 namespace {
     constexpr uint32_t CHUNK_FILE_MAGIC = 0x4D434348u; // "MCCH"
-    constexpr uint32_t CHUNK_FILE_VERSION = 3u;
+    constexpr uint32_t CHUNK_FILE_VERSION = 4u;
 }
 
 bool Chunk::save_to_file(const std::string& path) const
@@ -1301,6 +1314,17 @@ bool Chunk::save_to_file(const std::string& path) const
         out.write(reinterpret_cast<const char*>(&index32), sizeof(index32));
         out.write(reinterpret_cast<const char*>(&direction8), sizeof(direction8));
     }
+    // Extra shaped/multi-block per-instance state (see get_block_state()'s
+    // own comment) - same sparse count-then-pairs shape as orientation
+    // above, version 4+ only.
+    uint32_t block_state_count = static_cast<uint32_t>(block_state.size());
+    out.write(reinterpret_cast<const char*>(&block_state_count), sizeof(block_state_count));
+    for (const auto& [local_index, packed] : block_state) {
+        int32_t index32 = static_cast<int32_t>(local_index);
+        out.write(reinterpret_cast<const char*>(&index32), sizeof(index32));
+        out.write(reinterpret_cast<const char*>(&packed), sizeof(packed));
+    }
+
     out.close();
     if (!out) return false;
 
@@ -1350,6 +1374,20 @@ bool Chunk::load_from_file(const std::string& path)
         if (!in) return false; // truncated - don't trust a partial read
     }
 
+    block_state.clear();
+    if (version >= 4u) {
+        uint32_t block_state_count = 0;
+        in.read(reinterpret_cast<char*>(&block_state_count), sizeof(block_state_count));
+        for (uint32_t i = 0; i < block_state_count && in; ++i) {
+            int32_t index32 = 0;
+            uint16_t packed = 0;
+            in.read(reinterpret_cast<char*>(&index32), sizeof(index32));
+            in.read(reinterpret_cast<char*>(&packed), sizeof(packed));
+            block_state[index32] = packed;
+        }
+        if (!in) return false; // truncated - don't trust a partial read
+    }
+
     highest_block_y = highest;
     return true;
 }
@@ -1387,6 +1425,7 @@ void Chunk::set_block(int x, int y, int z, BlockType type)
     // check keeps this a no-op branch rather than a hash lookup on every
     // single set_block() call generate_terrain() itself makes.
     if (!orientation.empty()) orientation.erase(index(x, y, z));
+    if (!block_state.empty()) block_state.erase(index(x, y, z));
 }
 
 HorizontalDirection Chunk::get_orientation(int x, int y, int z) const
@@ -1398,6 +1437,17 @@ HorizontalDirection Chunk::get_orientation(int x, int y, int z) const
 void Chunk::set_orientation(int x, int y, int z, HorizontalDirection direction)
 {
     orientation[index(x, y, z)] = direction;
+}
+
+uint16_t Chunk::get_block_state(int x, int y, int z) const
+{
+    auto it = block_state.find(index(x, y, z));
+    return it != block_state.end() ? it->second : 0u;
+}
+
+void Chunk::set_block_state(int x, int y, int z, uint16_t packed)
+{
+    block_state[index(x, y, z)] = packed;
 }
 
 uint8_t Chunk::get_fluid_level(int x, int y, int z) const
@@ -1662,6 +1712,67 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                     continue;
                 }
 
+                if (properties.render_shape == BlockRenderShape::Shaped) {
+                    // Stairs/trapdoors/doors/beds/cake: 0-2 boxes from
+                    // get_block_shape(), each rendered as its own mini
+                    // six-face cube (unit_cube_faces() at that box's own
+                    // half-extents). Flat per-face directional shading
+                    // (FACE_DIRECTION_SHADE, same table an ordinary cube
+                    // face uses) but no vertex AO sampling and no smooth-
+                    // lighting corner blend - one flat sky/block sample for
+                    // the whole block, same simplification the Cross branch
+                    // above already makes for foliage - since these are
+                    // sparse decorative shapes, not terrain-scale geometry.
+                    // No face culling against opaque neighbors either - a
+                    // handful of extra triangles per shaped block is an
+                    // accepted, minor overdraw cost against the complexity
+                    // of clipping box faces exactly against each other.
+                    BlockInstanceState state;
+                    state.facing = get_orientation(x, y, z);
+                    uint16_t packed = get_block_state(x, y, z);
+                    state.open        = (packed & BlockStateBits::OPEN) != 0;
+                    state.top_half    = (packed & BlockStateBits::TOP_HALF) != 0;
+                    state.hinge_right = (packed & BlockStateBits::HINGE_RIGHT) != 0;
+                    state.bite_count  = static_cast<uint8_t>((packed & BlockStateBits::BITE_COUNT_MASK) >> BlockStateBits::BITE_COUNT_SHIFT);
+                    BlockShapeBoxes shape = get_block_shape(type, state);
+
+                    float sky = static_cast<float>(get_sky_light(x, y, z)) / static_cast<float>(MAX_LIGHT);
+                    float block = static_cast<float>(get_block_light(x, y, z)) / static_cast<float>(MAX_LIGHT);
+                    float sky_fraction[4] = {sky, sky, sky, sky};
+                    float block_fraction[4] = {block, block, block, block};
+                    float ao[4] = {1.0f, 1.0f, 1.0f, 1.0f}; // no occlusion sampling for shaped geometry
+
+                    for (int b = 0; b < shape.count; ++b) {
+                        const BoundingBox& box = shape.boxes[b];
+                        Vector3 half = {
+                            (box.max.x - box.min.x) * 0.5f,
+                            (box.max.y - box.min.y) * 0.5f,
+                            (box.max.z - box.min.z) * 0.5f,
+                        };
+                        // Local 0..1 box space -> mesh-local space centered
+                        // on this cell's own center (same origin CUBE_FACES
+                        // itself uses) - box.min/max are relative to the
+                        // cell's min corner, `center` (x+0.5,y+0.5,z+0.5) is
+                        // relative to the cell's own center, so the box's
+                        // own center needs that same -0.5 recentering.
+                        Vector3 box_center = {
+                            center.x + (box.min.x + box.max.x) * 0.5f - 0.5f,
+                            center.y + (box.min.y + box.max.y) * 0.5f - 0.5f,
+                            center.z + (box.min.z + box.max.z) * 0.5f - 0.5f,
+                        };
+                        std::array<Face, 6> box_faces = unit_cube_faces(half);
+                        for (int face = 0; face < 6; ++face) {
+                            float shade[4] = {
+                                FACE_DIRECTION_SHADE[face], FACE_DIRECTION_SHADE[face],
+                                FACE_DIRECTION_SHADE[face], FACE_DIRECTION_SHADE[face],
+                            };
+                            append_face(mesh_data, box_faces[face], box_center, properties.texture_uvs[face],
+                                shade, sky_fraction, block_fraction, ao, properties.texture_tints[face]);
+                        }
+                    }
+                    continue;
+                }
+
                 // Water-only: a block with Water directly above it is
                 // interior to a body of water, not its surface (and its Top
                 // face is never actually meshed anyway - same-translucent-
@@ -1738,12 +1849,38 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                     // those two slots backs *this* face instead of always
                     // reading straight off texture_uvs[face].
                     int texture_face = face;
+                    Rectangle face_uv;
+                    bool face_uv_overridden = false;
                     if (block_is_directional(type) && face >= static_cast<int>(BlockFace::North)) {
                         HorizontalDirection facing = get_orientation(x, y, z);
                         bool is_front = face == static_cast<int>(BlockFace::North) + static_cast<int>(facing);
                         texture_face = is_front ? static_cast<int>(BlockFace::South) : static_cast<int>(BlockFace::East);
+
+                        // A large/double chest's front/back faces get their
+                        // own dedicated two-tile-wide art instead of the
+                        // ordinary single-chest texture - which half
+                        // (primary/secondary) picks left vs. right tile.
+                        // Every other face keeps the plain single-chest
+                        // side texture, same as texture_face above already
+                        // gives it.
+                        if (type == BlockType::Chest) {
+                            uint16_t packed = get_block_state(x, y, z);
+                            ChestPart part = static_cast<ChestPart>(
+                                (packed & BlockStateBits::MULTIBLOCK_PART_MASK) >> BlockStateBits::MULTIBLOCK_PART_SHIFT);
+                            if (part != ChestPart::Single) {
+                                bool is_back = face == static_cast<int>(BlockFace::North) + (static_cast<int>(facing) ^ 1);
+                                if (is_front) {
+                                    face_uv = block_atlas_tile_uv(part == ChestPart::Primary ? 9 : 10, 2);
+                                    face_uv_overridden = true;
+                                } else if (is_back) {
+                                    face_uv = block_atlas_tile_uv(part == ChestPart::Primary ? 9 : 10, 3);
+                                    face_uv_overridden = true;
+                                }
+                            }
+                        }
                     }
-                    append_face(mesh_data, f, center, properties.texture_uvs[texture_face],
+                    if (!face_uv_overridden) face_uv = properties.texture_uvs[texture_face];
+                    append_face(mesh_data, f, center, face_uv,
                         shade, sky_fraction, block_fraction, ao_strength, tint, top_drop);
                 }
             }

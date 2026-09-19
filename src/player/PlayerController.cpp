@@ -1,5 +1,6 @@
 #include "player/PlayerController.hpp"
 #include "core/Block.hpp"
+#include "core/BlockShape.hpp"
 #include "core/Tick.hpp"
 #include "world/World.hpp"
 
@@ -43,18 +44,35 @@ namespace {
         return std::max(current - max_delta, target);
     }
 
+    // True if the player's hitbox at `feet` overlaps ANY collision box of
+    // ANY nearby cell - not just "is this whole cell solid" the way the
+    // pre-shaped-block version of this function worked. A plain full-cube
+    // solid block (the overwhelming majority) still costs exactly one
+    // World::collision_boxes_at() fast-path call plus one box-overlap test
+    // per cell; only a block_has_custom_shape() cell (stairs, trapdoors,
+    // doors, beds) pays for testing its real, possibly-partial box list,
+    // which is what lets the player stand on a stair's step at the right
+    // height or walk under an open trapdoor instead of the whole cell
+    // blocking/passing as one unit.
     bool box_blocked(const World& world, Vector3 feet)
     {
-        int min_x = static_cast<int>(std::floor(feet.x - HALF_WIDTH + COLLISION_EPSILON));
-        int max_x = static_cast<int>(std::floor(feet.x + HALF_WIDTH - COLLISION_EPSILON));
-        int min_y = static_cast<int>(std::floor(feet.y + COLLISION_EPSILON));
-        int max_y = static_cast<int>(std::floor(feet.y + PlayerController::HEIGHT - COLLISION_EPSILON));
-        int min_z = static_cast<int>(std::floor(feet.z - HALF_WIDTH + COLLISION_EPSILON));
-        int max_z = static_cast<int>(std::floor(feet.z + HALF_WIDTH - COLLISION_EPSILON));
+        BoundingBox player_box{
+            {feet.x - HALF_WIDTH + COLLISION_EPSILON, feet.y + COLLISION_EPSILON, feet.z - HALF_WIDTH + COLLISION_EPSILON},
+            {feet.x + HALF_WIDTH - COLLISION_EPSILON, feet.y + PlayerController::HEIGHT - COLLISION_EPSILON, feet.z + HALF_WIDTH - COLLISION_EPSILON},
+        };
+        int min_x = static_cast<int>(std::floor(player_box.min.x));
+        int max_x = static_cast<int>(std::floor(player_box.max.x));
+        int min_y = static_cast<int>(std::floor(player_box.min.y));
+        int max_y = static_cast<int>(std::floor(player_box.max.y));
+        int min_z = static_cast<int>(std::floor(player_box.min.z));
+        int max_z = static_cast<int>(std::floor(player_box.max.z));
         for (int x = min_x; x <= max_x; ++x) {
             for (int y = min_y; y <= max_y; ++y) {
                 for (int z = min_z; z <= max_z; ++z) {
-                    if (get_block_properties(world.get_block(x, y, z)).solid) return true;
+                    BlockShapeBoxes shape = world.collision_boxes_at(x, y, z);
+                    for (int i = 0; i < shape.count; ++i) {
+                        if (CheckCollisionBoxes(player_box, shape.boxes[i])) return true;
+                    }
                 }
             }
         }
@@ -105,13 +123,16 @@ namespace {
         return false;
     }
 
-    // Cactus is a full solid collision cube in this engine (unlike real
-    // Minecraft's own slightly-inset cactus hitbox), so the movement solver
-    // above never actually lets the hitbox overlap a cactus cell - probing
-    // with a small horizontal margin instead means standing flush against
-    // one still counts as contact, the same way vanilla's inset hitbox lets
-    // a flush-pressed player take damage without ever being "inside" it.
-    bool box_touches_cactus(const World& world, Vector3 feet)
+    // Generalizes what used to be a single hardcoded BlockType::Cactus
+    // check into anything blocks.json flags damages_on_touch (see
+    // BlockProperties::damages_on_touch) - cactus is a full solid collision
+    // cube in this engine (unlike real Minecraft's own slightly-inset
+    // cactus hitbox), so the movement solver above never actually lets the
+    // hitbox overlap a damaging cell; probing with a small horizontal
+    // margin instead means standing flush against one still counts as
+    // contact, the same way vanilla's inset hitbox lets a flush-pressed
+    // player take damage without ever being "inside" it.
+    bool box_touches_damaging_block(const World& world, Vector3 feet)
     {
         constexpr float MARGIN = 0.1f;
         const int min_x = static_cast<int>(std::floor(feet.x - HALF_WIDTH - MARGIN + COLLISION_EPSILON));
@@ -123,7 +144,7 @@ namespace {
         for (int x = min_x; x <= max_x; ++x) {
             for (int y = min_y; y <= max_y; ++y) {
                 for (int z = min_z; z <= max_z; ++z) {
-                    if (world.get_block(x, y, z) == BlockType::Cactus) return true;
+                    if (get_block_properties(world.get_block(x, y, z)).damages_on_touch) return true;
                 }
             }
         }
@@ -211,7 +232,7 @@ void PlayerController::update(Camera3D& eyes, const World& world, GameMode mode,
     Vector3 feet = feet_position(eyes);
     touching_water = box_touches_water(world, feet);
     touching_lava = box_touches_lava(world, feet);
-    touching_cactus = box_touches_cactus(world, feet);
+    touching_cactus = box_touches_damaging_block(world, feet);
     if (mode == GameMode::Creative) {
         float speed = CREATIVE_SPEED * (input.sprint ? CREATIVE_SPRINT_MULTIPLIER : 1.0f);
         Vector3 delta = Vector3Scale(wish, speed * delta_time);

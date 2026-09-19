@@ -907,7 +907,7 @@
     {
       "output": {
         "type": "block",
-        "name": "wooden_stairs",
+        "name": "oak_stairs",
         "count": 4
       },
       "shape": "shaped",
@@ -958,8 +958,8 @@
     },
     {
       "output": {
-        "type": "item",
-        "name": "wooden_door_item",
+        "type": "block",
+        "name": "oak_door_lower",
         "count": 1
       },
       "shape": "shaped",
@@ -984,8 +984,8 @@
     },
     {
       "output": {
-        "type": "item",
-        "name": "iron_door_item",
+        "type": "block",
+        "name": "iron_door_lower",
         "count": 1
       },
       "shape": "shaped",
@@ -1062,8 +1062,8 @@
     },
     {
       "output": {
-        "type": "item",
-        "name": "bed",
+        "type": "block",
+        "name": "bed_head",
         "count": 1
       },
       "shape": "shaped",
@@ -1166,7 +1166,7 @@
     },
     {
       "output": {
-        "type": "item",
+        "type": "block",
         "name": "cake",
         "count": 1
       },
