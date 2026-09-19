@@ -1762,11 +1762,23 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                         };
                         std::array<Face, 6> box_faces = unit_cube_faces(half);
                         for (int face = 0; face < 6; ++face) {
-                            float shade[4] = {
-                                FACE_DIRECTION_SHADE[face], FACE_DIRECTION_SHADE[face],
-                                FACE_DIRECTION_SHADE[face], FACE_DIRECTION_SHADE[face],
-                            };
-                            append_face(mesh_data, box_faces[face], box_center, properties.texture_uvs[face],
+                            // Tile choice, crop and orientation all live in
+                            // shaped_face_texture() (core/BlockShape.hpp).
+                            ShapedFaceTexture texture = shaped_face_texture(
+                                type, state, properties, static_cast<BlockFace>(face), box);
+                            if (texture.hidden) continue;
+                            const float shade_value = texture.flat_shade ? 1.0f : FACE_DIRECTION_SHADE[face];
+                            float shade[4] = {shade_value, shade_value, shade_value, shade_value};
+                            Vector3 face_center = Vector3Subtract(box_center, Vector3Scale(box_faces[face].normal, texture.inset));
+                            Face textured_face = box_faces[face];
+                            for (int turn = 0; turn < texture.quarter_turns; ++turn) {
+                                Vector3 first = textured_face.v1;
+                                textured_face.v1 = textured_face.v2;
+                                textured_face.v2 = textured_face.v3;
+                                textured_face.v3 = textured_face.v4;
+                                textured_face.v4 = first;
+                            }
+                            append_face(mesh_data, textured_face, face_center, texture.uv,
                                 shade, sky_fraction, block_fraction, ao, properties.texture_tints[face]);
                         }
                     }
@@ -1803,11 +1815,22 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                     // it meets something actually different (including
                     // Air). Different transparent types still show their
                     // shared face normally - glass against foliage, say.
-                    if (!get_block_properties(neighbor_type).transparent) continue;
-                    // Leaves deliberately keep faces against other leaves:
-                    // their alpha layers and AO accumulate inward, making
-                    // a dense canopy darker than its exposed outside.
-                    if (properties.transparent && neighbor_type == type && properties.cull_same_faces) continue;
+                    // An inset side face (cactus - see BlockProperties::
+                    // side_inset) sits inside its own cell rather than on
+                    // the shared boundary, so a neighbor can't hide it:
+                    // always drawn.
+                    bool inset_side = properties.side_inset > 0.0f && face >= static_cast<int>(BlockFace::North);
+                    if (!inset_side) {
+                        if (!get_block_properties(neighbor_type).transparent) continue;
+                        // Leaves deliberately keep faces against other
+                        // leaves: their alpha layers and AO accumulate
+                        // inward, making a dense canopy darker than its
+                        // exposed outside.
+                        if (properties.transparent && neighbor_type == type && properties.cull_same_faces) continue;
+                    }
+                    Vector3 face_center = inset_side
+                        ? Vector3Subtract(center, Vector3Scale(f.normal, properties.side_inset))
+                        : center;
 
                     Vector3 corners[4] = {f.v1, f.v2, f.v3, f.v4};
                     float shade[4];
@@ -1880,7 +1903,7 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                         }
                     }
                     if (!face_uv_overridden) face_uv = properties.texture_uvs[texture_face];
-                    append_face(mesh_data, f, center, face_uv,
+                    append_face(mesh_data, f, face_center, face_uv,
                         shade, sky_fraction, block_fraction, ao_strength, tint, top_drop);
                 }
             }

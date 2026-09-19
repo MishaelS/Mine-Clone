@@ -1,0 +1,67 @@
+{
+  "atlas": "sprites/items.png",
+
+  "items": [
+    { "name": "wooden_sword"   , "sprite": {"x": 0, "y": 4} },
+    { "name": "stone_sword"    , "sprite": {"x": 1, "y": 4} },
+    { "name": "iron_sword"     , "sprite": {"x": 2, "y": 4} },
+    { "name": "diamond_sword"  , "sprite": {"x": 3, "y": 4} },
+    { "name": "gold_sword"     , "sprite": {"x": 4, "y": 4} },
+
+    { "name": "wooden_shovel"  , "sprite": {"x": 0, "y": 5} },
+    { "name": "stone_shovel"   , "sprite": {"x": 1, "y": 5} },
+    { "name": "iron_shovel"    , "sprite": {"x": 2, "y": 5} },
+    { "name": "diamond_shovel" , "sprite": {"x": 3, "y": 5} },
+    { "name": "gold_shovel"    , "sprite": {"x": 4, "y": 5} },
+
+    { "name": "wooden_pickaxe" , "sprite": {"x": 0, "y": 6} },
+    { "name": "stone_pickaxe"  , "sprite": {"x": 1, "y": 6} },
+    { "name": "iron_pickaxe"   , "sprite": {"x": 2, "y": 6} },
+    { "name": "diamond_pickaxe", "sprite": {"x": 3, "y": 6} },
+    { "name": "gold_pickaxe"   , "sprite": {"x": 4, "y": 6} },
+
+    { "name": "wooden_axe"     , "sprite": {"x": 0, "y": 7} },
+    { "name": "stone_axe"      , "sprite": {"x": 1, "y": 7} },
+    { "name": "iron_axe"       , "sprite": {"x": 2, "y": 7} },
+    { "name": "diamond_axe"    , "sprite": {"x": 3, "y": 7} },
+    { "name": "gold_axe"       , "sprite": {"x": 4, "y": 7} },
+
+    { "name": "wooden_hoe"     , "sprite": {"x": 0, "y": 8} },
+    { "name": "stone_hoe"      , "sprite": {"x": 1, "y": 8} },
+    { "name": "iron_hoe"       , "sprite": {"x": 2, "y": 8} },
+    { "name": "diamond_hoe"    , "sprite": {"x": 3, "y": 8} },
+    { "name": "gold_hoe"       , "sprite": {"x": 4, "y": 8} },
+
+    { "name": "stick"          , "sprite": {"x": 5, "y": 3} },
+    { "name": "coal"           , "sprite": {"x": 7, "y": 0} },
+    { "name": "iron_ingot"     , "sprite": {"x": 7, "y": 1} },
+    { "name": "gold_ingot"     , "sprite": {"x": 6, "y": 1} },
+    { "name": "diamond"        , "sprite": {"x": 7, "y": 3} },
+    { "name": "redstone_dust"  , "sprite": {"x": 8, "y": 3} },
+    { "name": "sapling"        , "sprite": {"x":14, "y": 2} },
+    { "name": "wheat_seeds"    , "sprite": {"x": 9, "y": 0} },
+
+    { "name": "apple"          , "sprite": {"x":10, "y": 0} },
+    { "name": "golden_apple"   , "sprite": {"x":11, "y": 0} },
+    { "name": "soup"           , "sprite": {"x": 8, "y": 4} },
+    { "name": "raw_porkchop"   , "sprite": {"x": 7, "y": 5} },
+    { "name": "cooked_porkchop", "sprite": {"x": 8, "y": 5} },
+    { "name": "raw_fish"       , "sprite": {"x": 9, "y": 5} },
+    { "name": "cooked_fish"    , "sprite": {"x":10, "y": 5} },
+    { "name": "bread"          , "sprite": {"x": 9, "y": 2} },
+    { "name": "cookie"         , "sprite": {"x":12, "y": 5} },
+    { "name": "egg"            , "sprite": {"x":12, "y": 0} },
+    { "name": "milk_bucket"    , "sprite": {"x":13, "y": 4} }
+  ],
+
+  "block_items": [
+    { "block": "torch"             , "sprite": {"x":13, "y": 3} },
+    { "block": "redstone_torch"    , "sprite": {"x": 6, "y": 7} },
+    { "block": "lit_redstone_torch", "sprite": {"x": 6, "y": 6} },
+    { "block": "oak_sapling"       , "sprite": {"x":14, "y": 2} },
+    { "block": "oak_door_lower"    , "sprite": {"x":11, "y": 2} },
+    { "block": "iron_door_lower"   , "sprite": {"x":12, "y": 2} },
+    { "block": "bed_head"          , "sprite": {"x":13, "y": 2} },
+    { "block": "cake"              , "sprite": {"x":13, "y": 1} }
+  ]
+}

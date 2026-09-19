@@ -930,14 +930,25 @@ std::optional<BlockType> World::break_block(int x, int y, int z)
     // through resolve_block_drops(), so exactly one drop happens either
     // way). A large chest's halves demote to independent single chests
     // instead - their own inventories are untouched, never merged/moved.
-    if (broken == BlockType::OakDoorLower || broken == BlockType::IronDoorLower) {
-        set_block_and_rebuild(x, y + 1, z, BlockType::Air);
-    } else if (broken == BlockType::OakDoorUpper || broken == BlockType::IronDoorUpper) {
-        set_block_and_rebuild(x, y - 1, z, BlockType::Air);
+    // The partner is only cleared if it really is the matching half - never
+    // whatever unrelated block happens to sit where a partner would be.
+    auto clear_partner = [this](int px, int py, int pz, BlockType expected) {
+        if (get_block(px, py, pz) == expected) set_block_and_rebuild(px, py, pz, BlockType::Air);
+    };
+    if (broken == BlockType::OakDoorLower) {
+        clear_partner(x, y + 1, z, BlockType::OakDoorUpper);
+    } else if (broken == BlockType::IronDoorLower) {
+        clear_partner(x, y + 1, z, BlockType::IronDoorUpper);
+    } else if (broken == BlockType::OakDoorUpper) {
+        clear_partner(x, y - 1, z, BlockType::OakDoorLower);
+    } else if (broken == BlockType::IronDoorUpper) {
+        clear_partner(x, y - 1, z, BlockType::IronDoorLower);
     } else if (broken == BlockType::BedHead || broken == BlockType::BedFoot) {
+        // Head sits one cell from the foot in the stored facing's direction
+        // - see place_bed().
         DirectionOffset step = horizontal_direction_offset(get_block_orientation(x, y, z));
-        int sign = broken == BlockType::BedHead ? 1 : -1;
-        set_block_and_rebuild(x + step.dx * sign, y, z + step.dz * sign, BlockType::Air);
+        if (broken == BlockType::BedFoot) clear_partner(x + step.dx, y, z + step.dz, BlockType::BedHead);
+        else clear_partner(x - step.dx, y, z - step.dz, BlockType::BedFoot);
     } else if (broken == BlockType::Chest) {
         ChestPart part = chest_part_at(*this, x, y, z);
         if (part != ChestPart::Single) {
@@ -998,15 +1009,15 @@ bool World::place_door(int x, int y, int z, BlockType lower_type, HorizontalDire
 bool World::place_bed(int x, int y, int z, HorizontalDirection facing)
 {
     DirectionOffset step = horizontal_direction_offset(facing);
-    int foot_x = x + step.dx;
-    int foot_z = z + step.dz;
-    if (!place_block(x, y, z, BlockType::BedHead)) return false;
-    if (!place_block(foot_x, y, foot_z, BlockType::BedFoot)) {
+    int head_x = x + step.dx;
+    int head_z = z + step.dz;
+    if (!place_block(x, y, z, BlockType::BedFoot)) return false;
+    if (!place_block(head_x, y, head_z, BlockType::BedHead)) {
         break_block(x, y, z);
         return false;
     }
     set_block_orientation(x, y, z, facing);
-    set_block_orientation(foot_x, y, foot_z, facing);
+    set_block_orientation(head_x, y, head_z, facing);
     return true;
 }
 

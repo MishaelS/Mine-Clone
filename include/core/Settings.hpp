@@ -30,7 +30,7 @@ struct Settings {
     int window_width = 1280;
     int window_height = 720;
     int ui_scale = 1;                 // 1=standard, 2=medium, 3=large, 4=huge
-    std::string language = "ru";      // menu localization: "ru" or "en"
+    std::string language = "ru";      // assets/translations/<code>.json file name
     int master_volume = 100;
     int effects_volume = 100;
     int ambient_volume = 70;

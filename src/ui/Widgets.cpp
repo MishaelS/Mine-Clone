@@ -2,6 +2,7 @@
 #include "ui/FontManager.hpp"
 #include "core/TextureManager.hpp"
 #include "rendering/BlockMesh.hpp"
+#include "core/BlockShape.hpp"
 
 #include "rlgl.h"
 // Declarations only here - RAYGUI_IMPLEMENTATION is compiled once, in
@@ -468,28 +469,11 @@ namespace ui {
     void block_icon(Rectangle bounds, BlockType type) {
         if (type == BlockType::Air) return;
 
-        // A torch's in-world (terrain.png) cross sprite is mostly transparent
-        // flame/pole at icon scale - same as real Minecraft, these three get a
-        // dedicated flat items.png icon instead (drawn the same way
-        // item_icon() draws a real ItemType) rather than the Cross-shape
-        // render below. Tile coordinates given directly, not read off the
-        // atlas image.
-        constexpr int ICON_TILE_PIXELS = 16;
-        Rectangle items_png_source{};
-        bool use_items_png_icon = true;
-        switch (type) {
-            case BlockType::Torch:            items_png_source = {13 * ICON_TILE_PIXELS, 3 * ICON_TILE_PIXELS, ICON_TILE_PIXELS, ICON_TILE_PIXELS}; break;
-            case BlockType::RedstoneTorch:     items_png_source = { 6 * ICON_TILE_PIXELS, 6 * ICON_TILE_PIXELS, ICON_TILE_PIXELS, ICON_TILE_PIXELS}; break;
-            case BlockType::LitRedstoneTorch:  items_png_source = { 6 * ICON_TILE_PIXELS, 7 * ICON_TILE_PIXELS, ICON_TILE_PIXELS, ICON_TILE_PIXELS}; break;
-            // Same reasoning as the torches above - a sapling's terrain.png
-            // cross sprite is a thin sprig on a mostly-transparent tile, barely
-            // readable at icon scale. Same tile ItemType::Sapling's own loose-
-            // item icon already uses (see Item.cpp's define_material call).
-            case BlockType::OakSapling:        items_png_source = {14 * ICON_TILE_PIXELS, 2 * ICON_TILE_PIXELS, ICON_TILE_PIXELS, ICON_TILE_PIXELS}; break;
-            default: use_items_png_icon = false; break;
-        }
-        if (use_items_png_icon) {
-            DrawTexturePro(get_item_atlas_texture(), items_png_source, bounds, {0.0f, 0.0f}, 0.0f, WHITE);
+        // Torches, sapling, doors, bed: their in-world shape reads poorly (or
+        // not at all) at icon scale, so - same as real Minecraft - they show
+        // a flat item-atlas sprite instead (items.json's "block_items").
+        if (std::optional<Rectangle> sprite = get_block_item_sprite(type)) {
+            DrawTexturePro(get_item_atlas_texture(), *sprite, bounds, {0.0f, 0.0f}, 0.0f, WHITE);
             return;
         }
 
@@ -509,6 +493,68 @@ namespace ui {
             rlSetTexture(atlas.id);
             rlBegin(RL_QUADS);
             draw_atlas_quad(properties.texture_uvs[face], icon, properties.texture_tints[face]);
+            rlEnd();
+            rlSetTexture(0);
+            return;
+        }
+
+        if (properties.render_shape == BlockRenderShape::Shaped) {
+            // Same isometric view as the full-cube icon below (whose fixed
+            // points this projection reproduces for a 0..1 cube), but drawn
+            // per box of the block's item-form shape so a slab/stair/
+            // trapdoor reads as one. Each visible face samples only its
+            // matching part of the tile, oriented the way the cube icon's
+            // own faces are (top: u along x, v along z; left/South: u along
+            // x; right/East: u along -z; sides: v along -y) - so a full box
+            // gives exactly the full-cube icon.
+            auto project = [&](float px, float py, float pz) {
+                return Vector2{
+                    bounds.x + bounds.width * (0.07f + 0.43f * (px - pz + 1.0f)),
+                    bounds.y + bounds.height * (0.04f + 0.205f * (px + pz) + 0.51f * (1.0f - py)),
+                };
+            };
+            auto crop = [](Rectangle uv, float u0, float u1, float v0, float v1) {
+                return Rectangle{uv.x + u0 * uv.width, uv.y + v0 * uv.height,
+                                 (u1 - u0) * uv.width, (v1 - v0) * uv.height};
+            };
+
+            BlockShapeBoxes shape = get_item_shape(type);
+            // Painter's order: lower boxes first, then farther ones (the
+            // viewer sits at +x/+z), so a stair's raised step is drawn over
+            // the slab it stands on.
+            std::sort(shape.boxes.begin(), shape.boxes.begin() + shape.count,
+                      [](const BoundingBox& a, const BoundingBox& b) {
+                          if (a.min.y != b.min.y) return a.min.y < b.min.y;
+                          return a.min.x + a.min.z < b.min.x + b.min.z;
+                      });
+
+            int top = static_cast<int>(BlockFace::Top);
+            int left = static_cast<int>(BlockFace::South);
+            int right = static_cast<int>(BlockFace::East);
+            rlSetTexture(atlas.id);
+            rlBegin(RL_QUADS);
+            for (int b = 0; b < shape.count; ++b) {
+                const Vector3 lo = shape.boxes[b].min;
+                const Vector3 hi = shape.boxes[b].max;
+                Vector2 left_face[4] = {
+                    project(lo.x, hi.y, hi.z), project(hi.x, hi.y, hi.z),
+                    project(hi.x, lo.y, hi.z), project(lo.x, lo.y, hi.z),
+                };
+                Vector2 right_face[4] = {
+                    project(hi.x, hi.y, hi.z), project(hi.x, hi.y, lo.z),
+                    project(hi.x, lo.y, lo.z), project(hi.x, lo.y, hi.z),
+                };
+                Vector2 top_face[4] = {
+                    project(lo.x, hi.y, lo.z), project(hi.x, hi.y, lo.z),
+                    project(hi.x, hi.y, hi.z), project(lo.x, hi.y, hi.z),
+                };
+                draw_atlas_quad(crop(properties.texture_uvs[left], lo.x, hi.x, 1.0f - hi.y, 1.0f - lo.y), left_face,
+                                shade(properties.texture_tints[left], 0.72f));
+                draw_atlas_quad(crop(properties.texture_uvs[right], 1.0f - hi.z, 1.0f - lo.z, 1.0f - hi.y, 1.0f - lo.y), right_face,
+                                shade(properties.texture_tints[right], 0.86f));
+                draw_atlas_quad(crop(properties.texture_uvs[top], lo.x, hi.x, lo.z, hi.z), top_face,
+                                properties.texture_tints[top]);
+            }
             rlEnd();
             rlSetTexture(0);
             return;
@@ -552,15 +598,33 @@ namespace ui {
         int left  = static_cast<int>(BlockFace::South);
         int right = static_cast<int>(BlockFace::East);
 
+        // A side-inset block (cactus) has a transparent rim its in-world
+        // model hides by pulling the sides inward; a flat isometric icon
+        // can't do that, so it crops the rim out of the texture instead
+        // (top on all four edges, sides left/right) - no see-through seams.
+        Rectangle top_uv = properties.texture_uvs[top];
+        Rectangle left_uv = properties.texture_uvs[left];
+        Rectangle right_uv = properties.texture_uvs[right];
+        if (properties.side_inset > 0.0f) {
+            auto crop = [&](Rectangle uv, bool vertical) {
+                float dx = uv.width * properties.side_inset;
+                float dy = vertical ? uv.height * properties.side_inset : 0.0f;
+                return Rectangle{uv.x + dx, uv.y + dy, uv.width - dx * 2.0f, uv.height - dy * 2.0f};
+            };
+            top_uv = crop(top_uv, true);
+            left_uv = crop(left_uv, false);
+            right_uv = crop(right_uv, false);
+        }
+
         rlSetTexture(atlas.id);
         rlBegin(RL_QUADS);
             // Sides first, then the top, so the upper face owns their shared
             // seam even for translucent block textures.
-            draw_atlas_quad(properties.texture_uvs[left], left_face,
+            draw_atlas_quad(left_uv, left_face,
                             shade(properties.texture_tints[left], LEFT_BRIGHTNESS));
-            draw_atlas_quad(properties.texture_uvs[right], right_face,
+            draw_atlas_quad(right_uv, right_face,
                             shade(properties.texture_tints[right], RIGHT_BRIGHTNESS));
-            draw_atlas_quad(properties.texture_uvs[top], top_face,
+            draw_atlas_quad(top_uv, top_face,
                             properties.texture_tints[top]);
         rlEnd();
         rlSetTexture(0);

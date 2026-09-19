@@ -201,6 +201,12 @@ const std::vector<Json>& Json::as_array() const
     return type == Type::Array ? array_value : empty;
 }
 
+const std::map<std::string, Json>& Json::as_object() const
+{
+    static const std::map<std::string, Json> empty;
+    return type == Type::Object ? object_value : empty;
+}
+
 const Json& Json::operator[](const std::string& key) const
 {
     static const Json null;

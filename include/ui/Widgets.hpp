@@ -126,7 +126,7 @@ namespace ui {
     // share one look. Returns true on the frame it's clicked.
     bool block_button(Rectangle bounds, BlockType type, bool selected = false);
 
-    // A tool's flat 2D icon, sampled straight from items.png - unlike
+    // A tool's flat 2D icon, sampled straight from the item atlas - unlike
     // block_icon()'s isometric cube render, items are plain flat sprites in
     // Minecraft's own inventory too.
     void item_icon(Rectangle bounds, ItemType type);

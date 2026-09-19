@@ -53,9 +53,11 @@ public:
     // pointer (GameEngine's own dropped_items list), never polymorphically
     // through a GameObject*, so this is deliberately a distinct method
     // rather than an override with a mismatched signature. Blocks render as
-    // small 3D cubes using terrain.png. Non-block items use one flat icon
-    // from items.png; that billboard faces `viewer_position` only around the
-    // vertical axis, so looking up/down never tilts its top or bottom edge.
+    // small 3D cubes using terrain.png. Non-block items - and blocks with an
+    // items.json "block_items" sprite (torches, sapling, doors, bed) - use
+    // one flat icon from the item atlas; that billboard faces
+    // `viewer_position` only around the vertical axis, so looking up/down
+    // never tilts its top or bottom edge.
     void render(float tick_alpha, Vector3 viewer_position, const World& world) const;
 
     const ItemStack& get_stack() const { return stack; }

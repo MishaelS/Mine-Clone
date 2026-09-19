@@ -352,6 +352,7 @@ GameEngine::GameEngine(int screen_width, int screen_height, const char* title)
     Load_drop_table(); // needs both name tables above ready to resolve against
     Load_recipes();
     audio.initialize();
+    ui::load_translations(); // before FontManager::get() below - the font bakes their glyphs
     ui::set_language(settings.language);
     ui::set_sound_callback([this](ui::SoundEvent event) {
         if (event == ui::SoundEvent::Click) audio.play_ui_click();
@@ -1593,16 +1594,19 @@ void GameEngine::update(float delta_time)
                         placed = true;
                         if (block_needs_facing(selected.block)) {
                             world->set_block_orientation(place_x, place_y, place_z, facing);
-                            if (selected.block == BlockType::OakTrapdoor) {
-                                // Half-detection from the original raycast
-                                // hit (the face actually clicked), not the
-                                // new cell - see RaycastHit::hit_point's
-                                // own comment.
-                                bool top_half = targeted_block->normal.y != 0.0f
-                                    ? targeted_block->normal.y < 0.0f
-                                    : (targeted_block->hit_point.y - std::floor(targeted_block->hit_point.y)) < 0.5f;
-                                if (top_half) world->set_block_state(place_x, place_y, place_z, BlockStateBits::TOP_HALF);
-                            }
+                        }
+                        if (selected.block == BlockType::OakTrapdoor || selected.block == BlockType::OakSlab) {
+                            // Upper or lower half, vanilla's rule, from the
+                            // original raycast hit (the face actually
+                            // clicked), not the new cell - see RaycastHit::
+                            // hit_point's own comment: the underside of a
+                            // block -> top half, the top of a block ->
+                            // bottom half, a side face -> whichever half of
+                            // it was clicked.
+                            bool top_half = targeted_block->normal.y != 0.0f
+                                ? targeted_block->normal.y < 0.0f
+                                : (targeted_block->hit_point.y - std::floor(targeted_block->hit_point.y)) >= 0.5f;
+                            if (top_half) world->set_block_state(place_x, place_y, place_z, BlockStateBits::TOP_HALF);
                         }
                     }
                     // No explicit queueing needed for a freshly placed

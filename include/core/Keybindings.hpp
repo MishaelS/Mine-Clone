@@ -42,9 +42,6 @@ struct Binding {
 bool binding_down(const Binding& binding);
 bool binding_pressed(const Binding& binding);
 
-// Short label for a settings row, e.g. "W", "Shift", "Мышь: ЛКМ".
-std::string binding_display_name(const Binding& binding, bool english = false);
-
 // The first key or mouse button newly pressed this frame, if any - drains
 // GetKeyPressed()'s queue and scans the mouse buttons. Skips KEY_ESCAPE,
 // which cancels a rebind-in-progress instead of becoming its new binding.
@@ -52,10 +49,9 @@ std::string binding_display_name(const Binding& binding, bool english = false);
 std::optional<Binding> poll_any_binding_pressed();
 
 // Stable string key for this action in settings.json - see Settings.cpp.
+// Also the suffix of its translation key ("action.<key>") - see
+// ui::game_action_display_name().
 const char* game_action_json_key(GameAction action);
-
-// Russian label for this action's row in the Settings screen.
-const char* game_action_display_name(GameAction action, bool english = false);
 
 // W/S/A/D + Space/Shift/Ctrl, mouse Left/Right for break/place, E/Q/T for
 // inventory/drop/chat. MoveLeft/MoveRight keep driving `movement.y` (not

@@ -29,4 +29,8 @@ private:
 
     // Confirmation is tied to the folder, and cleared when selection changes.
     std::optional<std::string> pending_delete_folder;
+
+    // Double-clicking a row opens that world, same as Play.
+    double last_click_time = -1.0;
+    std::optional<size_t> last_clicked_world;
 };

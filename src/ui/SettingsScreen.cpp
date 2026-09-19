@@ -93,13 +93,16 @@ SettingsScreen::Action SettingsScreen::update(Settings& settings)
         changed |= ui::slider_int(cell(0, 1), ui::tr("settings.effects"), settings.effects_volume, 0, 100);
         changed |= ui::slider_int(cell(1, 1), ui::tr("settings.ambient"), settings.ambient_volume, 0, 100);
     } else if (section == Section::Language) {
-        if (ui::button(cell(0, 0), ui::tr("language.ru"), settings.language == "ru")) {
-            settings.language = "ru";
-            changed = true;
-        }
-        if (ui::button(cell(1, 0), ui::tr("language.en"), settings.language == "en")) {
-            settings.language = "en";
-            changed = true;
+        // One button per assets/translations/*.json file, each labelled
+        // with that file's own language_name - adding a file adds a button.
+        const std::vector<ui::LanguageInfo>& languages = ui::available_languages();
+        for (size_t i = 0; i < languages.size(); ++i) {
+            const ui::LanguageInfo& language = languages[i];
+            if (ui::button(cell(static_cast<int>(i % 2), static_cast<int>(i / 2)), language.name,
+                           ui::language() == language.code)) {
+                settings.language = language.code;
+                changed = true;
+            }
         }
     } else {
         // At a high GUI Scale level the 2-column grid (6 rows for the
@@ -122,9 +125,8 @@ SettingsScreen::Action SettingsScreen::update(Settings& settings)
 
             const GameAction action = static_cast<GameAction>(i);
             const bool active = rebinding_action && *rebinding_action == action;
-            const bool english = settings.language == "en";
-            const std::string caption = std::string(game_action_display_name(action, english)) + ": " +
-                (active ? "..." : binding_display_name(settings.keybindings[i], english));
+            const std::string caption = ui::game_action_display_name(action) + ": " +
+                (active ? "..." : ui::binding_display_name(settings.keybindings[i]));
             if (ui::button(cell(static_cast<int>(i % 2), row), caption, active,
                            !rebinding_action || active) && !was_rebinding && !rebinding_action) {
                 rebinding_action = action;

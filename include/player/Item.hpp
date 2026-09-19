@@ -57,22 +57,31 @@ struct ItemProperties {
     // highest, matching real Minecraft's own long-standing quirk (a Gold
     // pickaxe still can't mine Iron ore). 0 for a Material (unused).
     int tier = 0;
-    Rectangle atlas_source;        // pixel-space rect within items.png (not normalized - DrawTexturePro takes pixels)
+    Rectangle atlas_source;        // pixel-space rect within the item atlas (not normalized - DrawTexturePro takes pixels)
     int heal_amount = 0;           // half-hearts restored on eating (PlayerHealth's own unit) - 0 for anything not food
 };
 
-// Uploads items.png and fills the ItemType -> ItemProperties table. Every
-// value is hardcoded right in the .cpp rather than loaded from an
-// items.json the way blocks.json drives Block.cpp - 25 fixed tools isn't
-// worth a data file yet. Call once after the window exists (texture loads
-// need a GL context), same as Load_block_definitions().
+// Fills the ItemType -> ItemProperties table. Gameplay stats (durability,
+// speed, tier, heal amount) are defined in the .cpp; the item atlas
+// texture path and every sprite's tile coordinates come from
+// assets/items.json, the same way blocks.json supplies terrain tile
+// coordinates. Throws if items.json names an unknown item/block or leaves
+// any ItemType without a sprite. Call once after the window exists
+// (texture loads need a GL context), same as Load_block_definitions().
 void Load_item_definitions();
 
 const ItemProperties& get_item_properties(ItemType type);
 
-// items.png - the texture every ItemProperties::atlas_source indexes into.
-// Valid only after Load_item_definitions().
+// The item atlas texture (items.json's "atlas") every ItemProperties::
+// atlas_source and get_block_item_sprite() rect indexes into. Valid only
+// after Load_item_definitions().
 const Texture2D& get_item_atlas_texture();
+
+// A block that shows a flat item-atlas sprite instead of its terrain-based
+// cube/cross render - both as an inventory icon and as a dropped item
+// (torches, sapling, doors, bed - items.json's "block_items"). std::nullopt
+// for every other block.
+std::optional<Rectangle> get_block_item_sprite(BlockType type);
 
 // The snake_case name (e.g. "wooden_pickaxe") player.json persists a tool
 // as - never the raw enum value, which isn't safe to persist across builds

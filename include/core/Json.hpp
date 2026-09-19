@@ -27,6 +27,8 @@ public:
     double as_number(double fallback = 0.0) const;
     std::string as_string(const std::string& fallback = "") const;
     const std::vector<Json>& as_array() const;
+    // Every member of an object, in key order; empty if this isn't an object.
+    const std::map<std::string, Json>& as_object() const;
 
     // Object member access; returns a Null Json if this isn't an object or
     // the key is missing.

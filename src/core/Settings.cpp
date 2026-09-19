@@ -51,7 +51,9 @@ Settings load() {
         settings.window_width           = std::clamp(static_cast<int>(root["window_width"].as_number(settings.window_width)), 960, 3840);
         settings.window_height          = std::clamp(static_cast<int>(root["window_height"].as_number(settings.window_height)), 540, 2160);
         settings.ui_scale               = std::clamp(static_cast<int>(root["ui_scale"].as_number(settings.ui_scale)), 1, 4);
-        settings.language               = root["language"].as_string(settings.language) == "en" ? "en" : "ru";
+        // Any translation file's code - an unknown one (its file since
+        // removed) is resolved by ui::set_language() at startup.
+        settings.language               = root["language"].as_string(settings.language);
         settings.master_volume          = static_cast<int>(root["master_volume"].as_number(settings.master_volume));
         settings.effects_volume         = static_cast<int>(root["effects_volume"].as_number(settings.effects_volume));
         settings.ambient_volume         = static_cast<int>(root["ambient_volume"].as_number(settings.ambient_volume));

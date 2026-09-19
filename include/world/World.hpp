@@ -212,9 +212,10 @@ public:
     // fixed left for now (see BlockInstanceState's own comment).
     bool place_door(int x, int y, int z, BlockType lower_type, HorizontalDirection facing);
 
-    // Atomically places a bed: BedHead at (x, y, z), BedFoot one cell away
-    // in `facing`'s direction (head-to-foot, same Y) - rolled back via
-    // break_block() if the foot cell can't be placed.
+    // Atomically places a bed: BedFoot at (x, y, z), BedHead (the pillow
+    // end) one cell away in `facing`'s direction - toward the placing
+    // player, since `facing` comes from direction_facing_player() - rolled
+    // back via break_block() if the head cell can't be placed.
     bool place_bed(int x, int y, int z, HorizontalDirection facing);
 
     // Places a single Chest at (x, y, z), then checks its 4 horizontal

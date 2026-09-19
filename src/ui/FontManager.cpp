@@ -1,5 +1,7 @@
 #include "ui/FontManager.hpp"
+#include "ui/Localization.hpp"
 
+#include <set>
 #include <vector>
 
 namespace FontManager {
@@ -15,14 +17,18 @@ namespace FontManager {
         Font font{};
         bool loaded = false;
 
-        // Basic Latin + Cyrillic, since this is a Latin+Cyrillic font meant
-        // for Russian text - raylib's default codepoint set (0-255) would
-        // leave every Cyrillic glyph missing.
+        // Basic Latin + Cyrillic (raylib's default set, 0-255, would leave
+        // every Cyrillic glyph missing), plus every character any loaded
+        // translation file uses - so a newly added language's own letters
+        // get baked too, as far as the .ttf itself actually has them.
         std::vector<int> build_codepoints() {
-            std::vector<int> codepoints;
-            for (int c = 0x0020; c <= 0x007E; ++c) codepoints.push_back(c); // basic Latin
-            for (int c = 0x0400; c <= 0x04FF; ++c) codepoints.push_back(c); // Cyrillic
-            return codepoints;
+            std::set<int> codepoints;
+            for (int c = 0x0020; c <= 0x007E; ++c) codepoints.insert(c); // basic Latin
+            for (int c = 0x0400; c <= 0x04FF; ++c) codepoints.insert(c); // Cyrillic
+            for (int c : ui::translation_codepoints()) {
+                if (c >= 0x20) codepoints.insert(c);
+            }
+            return {codepoints.begin(), codepoints.end()};
         }
     }
 

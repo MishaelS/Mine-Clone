@@ -907,6 +907,22 @@
     {
       "output": {
         "type": "block",
+        "name": "oak_slab",
+        "count": 6
+      },
+      "shape": "shaped",
+      "grid_size": "3x3",
+      "pattern": [
+        [
+          "oak_planks",
+          "oak_planks",
+          "oak_planks"
+        ]
+      ]
+    },
+    {
+      "output": {
+        "type": "block",
         "name": "oak_stairs",
         "count": 4
       },

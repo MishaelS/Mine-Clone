@@ -1,5 +1,6 @@
 #include "rendering/BlockMesh.hpp"
 #include "rendering/EntityLighting.hpp"
+#include "core/BlockShape.hpp"
 
 #include "rlgl.h"
 
@@ -40,6 +41,44 @@ void draw_block_cube(BlockType type, unsigned char alpha, std::optional<Color> t
     const Texture2D& atlas = get_block_atlas_texture();
     const BlockProperties& properties = get_block_properties(type);
 
+    // A shaped block (slab, stairs, trapdoor...) draws its own item-form
+    // boxes instead of a full cube - each box's 6 faces are FACES with
+    // every -H/+H corner moved to that box's own min/max, textured with the
+    // matching cropped part of the tile (crop_tile_to_box()), same as its
+    // placed chunk mesh.
+    if (properties.render_shape == BlockRenderShape::Shaped) {
+        BlockShapeBoxes shape = get_item_shape(type);
+        rlSetTexture(atlas.id);
+        rlBegin(RL_QUADS);
+        for (int b = 0; b < shape.count; ++b) {
+            const BoundingBox& box = shape.boxes[b];
+            for (const Face& face : FACES) {
+                int face_index = static_cast<int>(face.texture_face);
+                Rectangle uv = get_sample_safe_block_uv(
+                    crop_tile_to_box(properties.texture_uvs[face_index], face.texture_face, box));
+                Color tint = multiply_tint(
+                    tint_override.value_or(properties.texture_tints[face_index]), environment_tint);
+                float shade = FACE_DIRECTION_SHADE[face_index];
+                rlColor4ub(static_cast<unsigned char>(tint.r * shade),
+                           static_cast<unsigned char>(tint.g * shade),
+                           static_cast<unsigned char>(tint.b * shade),
+                           static_cast<unsigned char>((tint.a * alpha) / 255));
+                float u[] = {uv.x, uv.x + uv.width, uv.x + uv.width, uv.x};
+                float v[] = {uv.y, uv.y, uv.y + uv.height, uv.y + uv.height};
+                for (int i = 0; i < 4; ++i) {
+                    const Vector3& corner = face.vertices[i];
+                    rlTexCoord2f(u[i], v[i]);
+                    rlVertex3f((corner.x < 0.0f ? box.min.x : box.max.x) - H,
+                               (corner.y < 0.0f ? box.min.y : box.max.y) - H,
+                               (corner.z < 0.0f ? box.min.z : box.max.z) - H);
+                }
+            }
+        }
+        rlEnd();
+        rlSetTexture(0);
+        return;
+    }
+
     rlSetTexture(atlas.id);
     rlBegin(RL_QUADS);
     const Face* faces = properties.render_shape == BlockRenderShape::Cross ? CROSS_FACES : FACES;
@@ -58,9 +97,20 @@ void draw_block_cube(BlockType type, unsigned char alpha, std::optional<Color> t
                    static_cast<unsigned char>((tint.a * alpha) / 255));
         float u[] = {uv.x, uv.x + uv.width, uv.x + uv.width, uv.x};
         float v[] = {uv.y, uv.y, uv.y + uv.height, uv.y + uv.height};
+        // Same inward shift of the side faces the chunk mesh applies (see
+        // BlockProperties::side_inset) - otherwise a dropped cactus shows
+        // the same see-through edge seams the placed one used to.
+        Vector3 inset = {0.0f, 0.0f, 0.0f};
+        if (properties.render_shape == BlockRenderShape::Cube && face_index >= static_cast<int>(BlockFace::North)) {
+            float d = properties.side_inset;
+            if (face.texture_face == BlockFace::North) inset.z = d;
+            else if (face.texture_face == BlockFace::South) inset.z = -d;
+            else if (face.texture_face == BlockFace::East) inset.x = -d;
+            else inset.x = d;
+        }
         for (int i = 0; i < 4; ++i) {
             rlTexCoord2f(u[i], v[i]);
-            rlVertex3f(face.vertices[i].x, face.vertices[i].y, face.vertices[i].z);
+            rlVertex3f(face.vertices[i].x + inset.x, face.vertices[i].y, face.vertices[i].z + inset.z);
         }
     }
     rlEnd();

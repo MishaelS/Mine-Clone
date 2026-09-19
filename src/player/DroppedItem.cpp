@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 namespace {
     // Vanilla's own per-tick item-entity numbers (blocks/tick, multiplicative
@@ -71,10 +72,19 @@ namespace {
         float size;
     };
 
-    BillboardTexture item_billboard_texture(ItemType type)
+    // Flat item-atlas sprite for this stack, if it has one: always for a
+    // tool/material, and for the handful of blocks items.json gives a
+    // "block_items" sprite (torches, sapling, doors, bed). Everything else
+    // renders as a small 3D block cube instead.
+    std::optional<Rectangle> item_sprite(const ItemStack& stack)
+    {
+        if (stack.holds_item()) return get_item_properties(stack.tool).atlas_source;
+        return get_block_item_sprite(stack.block);
+    }
+
+    BillboardTexture item_billboard_texture(Rectangle source)
     {
         const Texture2D& atlas = get_item_atlas_texture();
-        const Rectangle source = get_item_properties(type).atlas_source;
         constexpr float sub_texel = 1.0f / 1024.0f;
         Rectangle uv = {
             (source.x + sub_texel) / static_cast<float>(atlas.width),
@@ -230,13 +240,13 @@ void DroppedItem::render(float tick_alpha, Vector3 viewer_position, const World&
 
     rlPushMatrix();
     rlTranslatef(render_position.x, render_position.y + bob, render_position.z);
-    if (stack.holds_item()) {
+    if (std::optional<Rectangle> sprite = item_sprite(stack)) {
         Vector3 to_viewer = Vector3Subtract(viewer_position, render_position);
         // Cylindrical billboard: ignore pitch so the item remains vertical
         // even when the camera is above or below it.
         float yaw = std::atan2(to_viewer.x, to_viewer.z) * RAD2DEG;
         rlRotatef(yaw, 0.0f, 1.0f, 0.0f);
-        BillboardTexture billboard = item_billboard_texture(stack.tool);
+        BillboardTexture billboard = item_billboard_texture(*sprite);
         billboard.tint = multiply_tint(billboard.tint, environment_tint);
         draw_billboard_quad(billboard);
     } else {

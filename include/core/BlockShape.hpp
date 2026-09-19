@@ -15,10 +15,10 @@
 // BlockRenderShape::Shaped branch scales/offsets for its mesh geometry, so
 // one box list drives both systems with no risk of them disagreeing.
 struct BlockShapeBoxes {
-    // No shaped block needs more than 2 boxes (stairs: bottom slab + step
-    // quarter; every other shape needs 0 or 1) - fixed-capacity, so reading
-    // a shape never allocates.
-    static constexpr int MAX_BOXES = 2;
+    // No shaped block needs more than 3 boxes (torch: its two crossed pairs
+    // of side planes plus the cap; stairs 2; everything else 1) -
+    // fixed-capacity, so reading a shape never allocates.
+    static constexpr int MAX_BOXES = 3;
     std::array<BoundingBox, MAX_BOXES> boxes{};
     int count = 0;
 };
@@ -66,9 +66,56 @@ enum class ChestPart : uint8_t { Single, Primary, Secondary };
 // path. Mirrors (and is driven by) BlockProperties::has_custom_shape.
 bool block_has_custom_shape(BlockType type);
 
-// This shaped block's current box list, in local 0..1 tile space. Empty
-// (count == 0) for a block with no collision at all despite having custom
-// render geometry (none exist yet, but the shape stays representable).
-// Never called (and gives an empty result) for a type block_has_custom_shape()
-// reports false for.
+// This shaped block's current box list, in local 0..1 tile space - its
+// render geometry (BlockRenderShape::Shaped), and also its collision when
+// block_has_custom_shape() is true. A torch is render-only: shaped here,
+// but not custom_shape in blocks.json, so it still has no collision.
+// Empty for a type with no shape.
 BlockShapeBoxes get_block_shape(BlockType type, const BlockInstanceState& state);
+
+// The shape a shaped block is drawn with when it isn't placed in the world
+// - its inventory icon and its dropped-item entity - so a slab or stair
+// reads as one instead of as a full cube of its texture. Default state
+// (bottom half, closed, no bites), facing North so a stair's raised step
+// sits at the back of the inventory's isometric view, same as vanilla.
+BlockShapeBoxes get_item_shape(BlockType type);
+
+// The part of a 16x16 tile that one face of a partial box actually covers
+// (vanilla's own UV cropping): a slab's 8px-tall side samples only the
+// matching 8 rows of the tile instead of squashing the whole tile into it,
+// so texels keep their native size on every shaped block. `box` is in
+// local 0..1 cell space; `tile` is any UV rect (normalized or pixel - the
+// crop is proportional). A full 0..1 box returns `tile` unchanged, and each
+// face's axis/flip matches an ordinary cube face's own texture orientation
+// (Chunk.cpp's unit_cube_faces() / BlockMesh.cpp's FACES corner order), so
+// a cropped face lines up with the same texels a full block would show at
+// that spot. Shared by the chunk mesh, dropped-item cubes and inventory
+// icons so all three agree.
+Rectangle crop_tile_to_box(Rectangle tile, BlockFace face, const BoundingBox& box);
+
+// One face of a placed shaped block, fully textured: which tile it uses
+// (a cake's "cut" face once bitten, a bed half's "end" face on its outer
+// end - see BlockProperties), cropped to the box (crop_tile_to_box()), and
+// oriented - a door's broad faces and a bed's long sides mirrored
+// (negative width) so their art reads the right way round, a bed's top
+// turned to follow its facing.
+struct ShapedFaceTexture {
+    Rectangle uv{};
+    // Quarter turns to apply by cycling the face's four corners (v1<-v2<-
+    // v3<-v4) before texturing: same quad, same winding, texture rotated
+    // 90 degrees per step. Only ever set for a full-footprint face (a bed's
+    // top), where rotating doesn't disturb the crop.
+    int quarter_turns = 0;
+    // Not drawn at all - a bed half's face toward its own other half, which
+    // would otherwise show through the gaps between the legs.
+    bool hidden = false;
+    // Drawn this far (in blocks) inward along the face's own normal -
+    // rendering only, collision keeps the full box. A bed's underside sits
+    // at the top of its frame rather than on the floor under the legs.
+    float inset = 0.0f;
+    // No per-direction shading (FACE_DIRECTION_SHADE) - vanilla's torch
+    // model ("shade": false), so a torch reads evenly lit from every side.
+    bool flat_shade = false;
+};
+ShapedFaceTexture shaped_face_texture(BlockType type, const BlockInstanceState& state,
+                                      const BlockProperties& properties, BlockFace face, const BoundingBox& box);

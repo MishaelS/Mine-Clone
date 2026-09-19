@@ -118,6 +118,7 @@ enum class BlockType : uint8_t {
     BedHead,
     BedFoot,
     Cake,
+    OakSlab,
     Count, // not a real block; sentinel for table/array sizing
 };
 
@@ -257,6 +258,14 @@ struct BlockProperties {
     // Chunk::build_mesh_data()'s BlockRenderShape::Shaped branch.
     bool has_custom_shape;
 
+    // How far (in blocks - blocks.json gives it in texture pixels, 1 =
+    // 1/16) the four side faces are drawn inward from the cell edge, top/
+    // bottom untouched - vanilla's cactus model: its 14x14 top/bottom art
+    // then meets the side faces exactly, and the full-width spike rows of
+    // the side texture stick out past the body's edges. 0 for every
+    // ordinary block. Rendering only - collision is unaffected.
+    float side_inset;
+
     // True for a block that damages on contact regardless of whether it
     // blocks movement (cactus) - generalizes what used to be a single
     // hardcoded BlockType::Cactus check in PlayerController.cpp's
@@ -275,6 +284,18 @@ struct BlockProperties {
     // tile that's deliberately colorless art meant to be recolored in code
     // (e.g. grass top), same idea as Minecraft's biome-tinted grass overlay.
     Color texture_tints[6];
+
+    // Optional blocks.json "cut" face - the cross-section shown on a
+    // partially eaten cake's open side instead of its ordinary side
+    // texture (see Chunk::build_mesh_data()'s Shaped branch). Tinted the
+    // same as the side faces.
+    std::optional<Rectangle> cut_texture_uv;
+
+    // Optional blocks.json "end" face - the outer end of a two-cell block
+    // (a bed half's headboard or foot end), used instead of "side" on that
+    // one face; "side" then covers the long sides. See core/BlockShape.hpp's
+    // shaped_face_texture().
+    std::optional<Rectangle> end_texture_uv;
 };
 
 // Parses assets/blocks.json and fills the BlockType -> BlockProperties table.

@@ -2,8 +2,6 @@
 
 #include "raylib.h"
 
-#include <cstdio>
-
 bool binding_down(const Binding& binding)
 {
     if (binding.kind == BindingKind::MouseButton) return IsMouseButtonDown(binding.code);
@@ -14,58 +12,6 @@ bool binding_pressed(const Binding& binding)
 {
     if (binding.kind == BindingKind::MouseButton) return IsMouseButtonPressed(binding.code);
     return IsKeyPressed(binding.code);
-}
-
-namespace {
-    // Only the keys default_keybindings() (or a reasonable rebind) actually
-    // uses need a friendly name - anything else falls back to its raw
-    // raylib key code so the row still shows *something* legible.
-    const char* key_display_name(int key, bool english) {
-        switch (key) {
-            case KEY_W           : return "W";
-            case KEY_A           : return "A";
-            case KEY_S           : return "S";
-            case KEY_D           : return "D";
-            case KEY_SPACE       : return english ? "Space" : "Пробел";
-            case KEY_LEFT_SHIFT  : return "Shift";
-            case KEY_LEFT_CONTROL: return "Ctrl";
-            case KEY_LEFT_ALT    : return "Alt";
-            case KEY_TAB         : return "Tab";
-            case KEY_UP          : return english ? "Up" : "Стрелка вверх";
-            case KEY_DOWN        : return english ? "Down" : "Стрелка вниз";
-            case KEY_LEFT        : return english ? "Left" : "Стрелка влево";
-            case KEY_RIGHT       : return english ? "Right" : "Стрелка вправо";
-            default:
-                return nullptr;
-        }
-    }
-
-    const char* mouse_display_name(int button, bool english) {
-        switch (button) {
-            case MOUSE_BUTTON_LEFT  : return english ? "Mouse: Left" : "Мышь: ЛКМ";
-            case MOUSE_BUTTON_RIGHT : return english ? "Mouse: Right" : "Мышь: ПКМ";
-            case MOUSE_BUTTON_MIDDLE: return english ? "Mouse: Middle" : "Мышь: СКМ";
-            default: return english ? "Mouse button" : "Мышь: кнопка";
-        }
-    }
-}
-
-std::string binding_display_name(const Binding& binding, bool english)
-{
-    if (binding.kind == BindingKind::MouseButton) return mouse_display_name(binding.code, english);
-
-    if (const char* name = key_display_name(binding.code, english)) return name;
-
-    // Printable ASCII keys (letters/digits not already named above, plus
-    // punctuation) - raylib's KeyboardKey values for these match their own
-    // ASCII codepoint, so this covers any of them without a giant switch.
-    if (binding.code >= 32 && binding.code < 127) {
-        return std::string(1, static_cast<char>(binding.code));
-    }
-
-    char buffer[48];
-    std::snprintf(buffer, sizeof(buffer), english ? "Key #%d" : "Клавиша #%d", binding.code);
-    return buffer;
 }
 
 std::optional<Binding> poll_any_binding_pressed()
@@ -91,29 +37,11 @@ namespace {
         "jump", "sneak", "sprint", "break_block", "place_block",
         "toggle_inventory", "drop_item", "open_chat",
     };
-
-    constexpr const char* ACTION_DISPLAY_NAMES[] = {
-        "Вперёд",
-        "Назад",
-        "Влево",
-        "Вправо",
-        "Прыжок", "Красться / вниз", "Бег", "Ломать блок", "Ставить блок",
-        "Инвентарь", "Выбросить предмет", "Открыть чат",
-    };
-    constexpr const char* ACTION_DISPLAY_NAMES_EN[] = {
-        "Forward", "Back", "Left", "Right", "Jump", "Sneak / down", "Sprint", "Break block", "Place block",
-        "Inventory", "Drop item", "Open chat",
-    };
 }
 
 const char* game_action_json_key(GameAction action)
 {
     return ACTION_JSON_KEYS[static_cast<size_t>(action)];
-}
-
-const char* game_action_display_name(GameAction action, bool english)
-{
-    return (english ? ACTION_DISPLAY_NAMES_EN : ACTION_DISPLAY_NAMES)[static_cast<size_t>(action)];
 }
 
 std::array<Binding, static_cast<size_t>(GameAction::Count)> default_keybindings()

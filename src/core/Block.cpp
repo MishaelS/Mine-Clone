@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -199,6 +200,7 @@ namespace {
         {"bed_head"         , BlockType::BedHead         },
         {"bed_foot"         , BlockType::BedFoot         },
         {"cake"             , BlockType::Cake            },
+        {"oak_slab"         , BlockType::OakSlab         },
     };
 
     BlockSoundGroup sound_group_from_name(const std::string& name) {
@@ -299,6 +301,7 @@ void Load_block_definitions()
         properties.density = static_cast<float>(entry["density"].as_number(physical_defaults.density));
         properties.has_custom_shape = entry["custom_shape"].as_bool(false);
         properties.damages_on_touch = entry["damages_on_touch"].as_bool(false);
+        properties.side_inset = static_cast<float>(entry["side_inset"].as_number(0.0)) / static_cast<float>(TILE_PIXELS);
         // Order: Top, Bottom, North, South, East, West.
         properties.texture_uvs[0] = top.uv;
         properties.texture_uvs[1] = bottom.uv;
@@ -312,6 +315,12 @@ void Load_block_definitions()
         properties.texture_tints[3] = south.tint;
         properties.texture_tints[4] = east.tint;
         properties.texture_tints[5] = west.tint;
+        if (entry["cut"].get_type() == Json::Type::Object) {
+            properties.cut_texture_uv = load_face_texture(entry["cut"]).uv;
+        }
+        if (entry["end"].get_type() == Json::Type::Object) {
+            properties.end_texture_uv = load_face_texture(entry["end"]).uv;
+        }
 
         block_table[block_index] = properties;
         block_names[block_index] = name;
@@ -393,9 +402,11 @@ Rectangle get_sample_safe_block_uv(Rectangle uv)
     constexpr float SUB_TEXEL_INSET = 1.0f / 1024.0f;
     float inset_u = SUB_TEXEL_INSET / static_cast<float>(atlas.width);
     float inset_v = SUB_TEXEL_INSET / static_cast<float>(atlas.height);
-    return {uv.x + inset_u, uv.y + inset_v,
-            std::max(0.0f, uv.width - inset_u * 2.0f),
-            std::max(0.0f, uv.height - inset_v * 2.0f)};
+    // Sign-aware: a mirrored rect (negative width/height - see
+    // shaped_face_uv()'s door faces) is inset toward its own middle too.
+    return {uv.x + std::copysign(inset_u, uv.width), uv.y + std::copysign(inset_v, uv.height),
+            std::copysign(std::max(0.0f, std::fabs(uv.width) - inset_u * 2.0f), uv.width),
+            std::copysign(std::max(0.0f, std::fabs(uv.height) - inset_v * 2.0f), uv.height)};
 }
 
 Rectangle block_atlas_tile_uv(int column, int row)
