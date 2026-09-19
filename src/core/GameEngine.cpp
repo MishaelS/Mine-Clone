@@ -212,6 +212,18 @@ namespace {
         }
         return away_z > 0.0f ? HorizontalDirection::South : HorizontalDirection::North;
     }
+
+    bool slab_click_adds_missing_half(const World& world, const World::RaycastHit& hit)
+    {
+        uint16_t packed = world.get_block_state(hit.x, hit.y, hit.z);
+        bool existing_top_half = (packed & BlockStateBits::TOP_HALF) != 0;
+        if (hit.normal.y > 0.5f) return !existing_top_half;
+        if (hit.normal.y < -0.5f) return existing_top_half;
+
+        float local_y = hit.hit_point.y - std::floor(hit.hit_point.y);
+        return existing_top_half ? local_y < 0.5f : local_y >= 0.5f;
+    }
+
     bool has_nearby_log(World& world, int x, int y, int z) {
         for (int lx = -LEAF_DECAY_LOG_RADIUS; lx <= LEAF_DECAY_LOG_RADIUS; ++lx) {
             for (int ly = -LEAF_DECAY_LOG_RADIUS; ly <= LEAF_DECAY_LOG_RADIUS; ++ly) {
@@ -1326,8 +1338,20 @@ void GameEngine::update(float delta_time)
         int ground_y = static_cast<int>(std::floor(feet_y - 0.06f));
         int ground_z = static_cast<int>(std::floor(camera.position.z));
         BlockType ground_type = world->get_block(ground_x, ground_y, ground_z);
-        bool grounded = player_controller.is_grounded() && get_block_properties(ground_type).solid &&
-                        std::fabs(feet_y - (ground_y + 1.0f)) <= 0.22f;
+        float ground_surface_y = static_cast<float>(ground_y) + 1.0f;
+        bool supported_by_shape = false;
+        BlockShapeBoxes ground_shape = world->collision_boxes_at(ground_x, ground_y, ground_z);
+        for (int i = 0; i < ground_shape.count; ++i) {
+            const BoundingBox& box = ground_shape.boxes[i];
+            if (camera.position.x >= box.min.x && camera.position.x <= box.max.x &&
+                camera.position.z >= box.min.z && camera.position.z <= box.max.z &&
+                std::fabs(feet_y - box.max.y) <= 0.22f) {
+                ground_surface_y = box.max.y;
+                supported_by_shape = true;
+                break;
+            }
+        }
+        bool grounded = player_controller.is_grounded() && supported_by_shape;
         float dx = camera.position.x - previous_camera_position.x;
         float dz = camera.position.z - previous_camera_position.z;
         float horizontal_distance = std::sqrt(dx * dx + dz * dz);
@@ -1337,9 +1361,9 @@ void GameEngine::update(float delta_time)
             int emitted = 0;
             while (footstep_particle_distance >= FOOTSTEP_DISTANCE && emitted < 2) {
                 particles.spawn_footstep(ground_type,
-                    Vector3{camera.position.x, ground_y + 1.0f, camera.position.z});
+                    Vector3{camera.position.x, ground_surface_y, camera.position.z});
                 audio.play_step(ground_type,
-                    Vector3{camera.position.x, ground_y + 1.0f, camera.position.z}, camera.position);
+                    Vector3{camera.position.x, ground_surface_y, camera.position.z}, camera.position);
                 footstep_particle_distance -= FOOTSTEP_DISTANCE;
                 ++emitted;
             }
@@ -1351,20 +1375,29 @@ void GameEngine::update(float delta_time)
         // depend on horizontal distance, otherwise a straight jump/fall is
         // silent even though the feet leave or strike a real block.
         if (was_grounded && !player_controller.is_grounded()) {
+            float old_feet_y = previous_camera_position.y - PlayerController::EYE_HEIGHT;
             int old_ground_y = static_cast<int>(std::floor(
-                previous_camera_position.y - PlayerController::EYE_HEIGHT - 0.06f));
+                old_feet_y - 0.06f));
+            int old_ground_x = static_cast<int>(std::floor(previous_camera_position.x));
+            int old_ground_z = static_cast<int>(std::floor(previous_camera_position.z));
             BlockType old_ground = world->get_block(
-                static_cast<int>(std::floor(previous_camera_position.x)), old_ground_y,
-                static_cast<int>(std::floor(previous_camera_position.z)));
-            if (get_block_properties(old_ground).solid) {
-                audio.play_step(old_ground,
-                    {previous_camera_position.x, old_ground_y + 1.0f, previous_camera_position.z},
-                    camera.position);
+                old_ground_x, old_ground_y, old_ground_z);
+            BlockShapeBoxes old_ground_shape = world->collision_boxes_at(old_ground_x, old_ground_y, old_ground_z);
+            for (int i = 0; i < old_ground_shape.count; ++i) {
+                const BoundingBox& box = old_ground_shape.boxes[i];
+                if (previous_camera_position.x >= box.min.x && previous_camera_position.x <= box.max.x &&
+                    previous_camera_position.z >= box.min.z && previous_camera_position.z <= box.max.z &&
+                    std::fabs(old_feet_y - box.max.y) <= 0.22f) {
+                    audio.play_step(old_ground,
+                        {previous_camera_position.x, box.max.y, previous_camera_position.z},
+                        camera.position);
+                    break;
+                }
             }
         } else if (!was_grounded && player_controller.is_grounded() &&
-                   get_block_properties(ground_type).solid) {
+                   supported_by_shape) {
             audio.play_step(ground_type,
-                {camera.position.x, ground_y + 1.0f, camera.position.z}, camera.position);
+                {camera.position.x, ground_surface_y, camera.position.z}, camera.position);
             footstep_particle_distance = 0.0f;
         }
     }
@@ -1583,52 +1616,60 @@ void GameEngine::update(float delta_time)
                 // reads as Air for one, so without this check place_block
                 // would be called with Air and silently clear out whatever
                 // was targeted).
-                bool replace_target = get_block_properties(targeted_type).replaceable;
-                int place_x = targeted_block->x + (replace_target ? 0 : static_cast<int>(targeted_block->normal.x));
-                int place_y = targeted_block->y + (replace_target ? 0 : static_cast<int>(targeted_block->normal.y));
-                int place_z = targeted_block->z + (replace_target ? 0 : static_cast<int>(targeted_block->normal.z));
-                if (!player_controller.intersects_block(camera, place_x, place_y, place_z)) {
-                    bool placed = false;
-                    HorizontalDirection facing = direction_facing_player(aim);
-                    // Door/bed are placed as one atomic pair (World::
-                    // place_door()/place_bed()) rather than through the
-                    // generic single-cell path below - see their own
-                    // comments for why (support check, rollback on a
-                    // blocked second half).
-                    if (selected.block == BlockType::OakDoorLower || selected.block == BlockType::IronDoorLower) {
-                        placed = world->place_door(place_x, place_y, place_z, selected.block, facing);
-                    } else if (selected.block == BlockType::BedHead) {
-                        placed = world->place_bed(place_x, place_y, place_z, facing);
-                    } else if (selected.block == BlockType::Chest) {
-                        // Merges into a large/double chest with a matching
-                        // neighbor when possible - see World::place_chest()'s
-                        // own comment for the diagonal-conflict rule.
-                        placed = world->place_chest(place_x, place_y, place_z, facing);
-                    } else if (world->place_block(place_x, place_y, place_z, selected.block)) {
-                        placed = true;
-                        if (block_needs_facing(selected.block)) {
-                            world->set_block_orientation(place_x, place_y, place_z, facing);
-                        }
-                        if (selected.block == BlockType::OakTrapdoor || selected.block == BlockType::OakSlab) {
-                            // Upper or lower half, vanilla's rule, from the
-                            // original raycast hit (the face actually
-                            // clicked), not the new cell - see RaycastHit::
-                            // hit_point's own comment: the underside of a
-                            // block -> top half, the top of a block ->
-                            // bottom half, a side face -> whichever half of
-                            // it was clicked.
-                            bool top_half = targeted_block->normal.y != 0.0f
-                                ? targeted_block->normal.y < 0.0f
-                                : (targeted_block->hit_point.y - std::floor(targeted_block->hit_point.y)) >= 0.5f;
-                            if (top_half) world->set_block_state(place_x, place_y, place_z, BlockStateBits::TOP_HALF);
+                bool placed = false;
+                HorizontalDirection facing = direction_facing_player(aim);
+
+                if (selected.block == BlockType::OakSlab && targeted_type == BlockType::OakSlab &&
+                    slab_click_adds_missing_half(*world, *targeted_block)) {
+                    if (!player_controller.intersects_block(camera, targeted_block->x, targeted_block->y, targeted_block->z)) {
+                        placed = world->combine_oak_slab(targeted_block->x, targeted_block->y, targeted_block->z);
+                    }
+                } else {
+                    bool replace_target = get_block_properties(targeted_type).replaceable;
+                    int place_x = targeted_block->x + (replace_target ? 0 : static_cast<int>(targeted_block->normal.x));
+                    int place_y = targeted_block->y + (replace_target ? 0 : static_cast<int>(targeted_block->normal.y));
+                    int place_z = targeted_block->z + (replace_target ? 0 : static_cast<int>(targeted_block->normal.z));
+                    if (!player_controller.intersects_block(camera, place_x, place_y, place_z)) {
+                        // Door/bed are placed as one atomic pair (World::
+                        // place_door()/place_bed()) rather than through the
+                        // generic single-cell path below - see their own
+                        // comments for why (support check, rollback on a
+                        // blocked second half).
+                        if (selected.block == BlockType::OakDoorLower || selected.block == BlockType::IronDoorLower) {
+                            placed = world->place_door(place_x, place_y, place_z, selected.block, facing);
+                        } else if (selected.block == BlockType::BedHead) {
+                            placed = world->place_bed(place_x, place_y, place_z, facing);
+                        } else if (selected.block == BlockType::Chest) {
+                            // Merges into a large/double chest with a matching
+                            // neighbor when possible - see World::place_chest()'s
+                            // own comment for the diagonal-conflict rule.
+                            placed = world->place_chest(place_x, place_y, place_z, facing);
+                        } else if (world->place_block(place_x, place_y, place_z, selected.block)) {
+                            placed = true;
+                            if (block_needs_facing(selected.block)) {
+                                world->set_block_orientation(place_x, place_y, place_z, facing);
+                            }
+                            if (selected.block == BlockType::OakTrapdoor || selected.block == BlockType::OakSlab) {
+                                // Upper or lower half, vanilla's rule, from the
+                                // original raycast hit (the face actually
+                                // clicked), not the new cell - see RaycastHit::
+                                // hit_point's own comment: the underside of a
+                                // block -> top half, the top of a block ->
+                                // bottom half, a side face -> whichever half of
+                                // it was clicked.
+                                bool top_half = targeted_block->normal.y != 0.0f
+                                    ? targeted_block->normal.y < 0.0f
+                                    : (targeted_block->hit_point.y - std::floor(targeted_block->hit_point.y)) >= 0.5f;
+                                if (top_half) world->set_block_state(place_x, place_y, place_z, BlockStateBits::TOP_HALF);
+                            }
                         }
                     }
-                    // No explicit queueing needed for a freshly placed
-                    // sapling any more - it's just a regular block in a
-                    // loaded chunk now, so update_random_ticks() will find
-                    // it on its own on some future random tick.
-                    if (placed && current_game_mode == GameMode::Survival && --selected.count <= 0) selected.clear();
                 }
+                // No explicit queueing needed for a freshly placed
+                // sapling any more - it's just a regular block in a
+                // loaded chunk now, so update_random_ticks() will find
+                // it on its own on some future random tick.
+                if (placed && current_game_mode == GameMode::Survival && --selected.count <= 0) selected.clear();
             }
         }
     }
@@ -1739,10 +1780,12 @@ void GameEngine::draw()
             if (show_wireframe) rlDisableWireMode();
         }
         if (targeted_block) {
-            ui::block_outline(targeted_block->x, targeted_block->y, targeted_block->z);
+            BlockShapeBoxes target_shape = world->outline_boxes_at(
+                targeted_block->x, targeted_block->y, targeted_block->z);
+            ui::block_outline(target_shape);
             if (is_breaking && targeted_block->x == breaking_x && targeted_block->y == breaking_y &&
                 targeted_block->z == breaking_z) {
-                ui::block_breaking_overlay(breaking_x, breaking_y, breaking_z, breaking_progress);
+                ui::block_breaking_overlay(target_shape, breaking_progress);
             }
         }
         EndMode3D();

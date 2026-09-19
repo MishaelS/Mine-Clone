@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <vector>
 
 // Per-shape collision/render geometry for a block whose footprint isn't
 // simply "solid ? one full unit cube : nothing" - stairs, trapdoors, doors,
@@ -60,6 +61,10 @@ namespace BlockStateBits {
 
 enum class ChestPart : uint8_t { Single, Primary, Secondary };
 
+// A placed block's BlockInstanceState from its stored facing (Chunk::
+// get_orientation()) and packed block_state bits (Chunk::get_block_state()).
+BlockInstanceState unpack_block_state(HorizontalDirection facing, uint16_t packed);
+
 // True only for the handful of BlockTypes get_block_shape() below actually
 // has a case for - a plain solid or plain non-solid block never pays for a
 // BlockShape lookup at all, see World::collision_boxes_at()'s own fast
@@ -72,6 +77,32 @@ bool block_has_custom_shape(BlockType type);
 // but not custom_shape in blocks.json, so it still has no collision.
 // Empty for a type with no shape.
 BlockShapeBoxes get_block_shape(BlockType type, const BlockInstanceState& state);
+
+// Vanilla's second shape: the outline/selection shape - what the crosshair
+// ray hits (World::raycast()), what the black target outline and the
+// breaking cracks are drawn around. Separate from collision, same as
+// vanilla: a torch or a sapling has none of the latter but still has a
+// small box to aim at. In order: blocks.json's own "outline" boxes (static
+// shapes - torch, plants, cactus); else, for a custom_shape block, its
+// collision shape (get_block_shape() - it depends on facing/open/half/
+// bites); else one full cube. Local 0..1 cell space.
+BlockShapeBoxes get_outline_shape(BlockType type, const BlockInstanceState& state);
+
+// The line segments of `shape`'s outline, as vanilla draws the targeted
+// block's frame: the edges of the boxes' union, so two touching boxes
+// (a stair's slab and step) read as one L-shaped outline with no line
+// across the seam between them. Same coordinate space as the boxes.
+struct OutlineEdge { Vector3 from, to; };
+std::vector<OutlineEdge> outline_edges(const BlockShapeBoxes& shape);
+
+// Whether some box of `shape` has a face on the plane `plane` (a
+// coordinate along `face`'s axis, in `shape`'s own space) facing back
+// against `face` - i.e. lying flush on the other side of it - that fully
+// covers `rect` (the covered face's own extent on the two other axes, in
+// the same space). Used to drop a mesh face nobody can see: one box of a
+// block hidden under another of the same block, or a face flush against
+// an opaque neighbor (Chunk::build_mesh_data()).
+bool shape_covers_face(const BoundingBox* boxes, int box_count, BlockFace face, float plane, const BoundingBox& rect);
 
 // The shape a shaped block is drawn with when it isn't placed in the world
 // - its inventory icon and its dropped-item entity - so a slab or stair

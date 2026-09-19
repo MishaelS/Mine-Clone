@@ -24,7 +24,7 @@ namespace {
     constexpr float AIR_ACCELERATION = 7.0f;
     constexpr float WATER_SPEED = 2.2f;
     constexpr float NORMAL_STEP_HEIGHT = 0.6f;
-    constexpr float STEP_RISE_SPEED = 4.5f;
+    constexpr float STEP_SMOOTH_SPEED = 7.0f;
     // Vanilla applies a distinct upward impulse when a swimming entity is
     // horizontally blocked at a ledge.  It is intentionally stronger than
     // ordinary swim-up velocity so gravity cannot pull the hitbox back into
@@ -168,11 +168,12 @@ namespace {
     }
 
     // Finds the smallest clear height from which the requested horizontal
-    // move fits. Raising the player separately from the horizontal retry
-    // makes a dry-land step a short smooth climb rather than a one-frame
-    // teleport onto the block. Water-bank exits use their own impulse below.
-    bool rise_towards_step(const World& world, Vector3& feet, float horizontal_delta,
-                           int axis, float maximum_height, float delta_time)
+    // move fits. Commit that height atomically: partial per-frame rises can
+    // still leave the hitbox intersecting the slab/stair side, which makes
+    // the horizontal solver cancel velocity and produces visible jitter.
+    // Water-bank exits use their own impulse below.
+    float rise_towards_step(const World& world, Vector3& feet, float horizontal_delta,
+                            int axis, float maximum_height)
     {
         constexpr float SEARCH_INCREMENT = 0.05f;
         float required_height = 0.0f;
@@ -187,13 +188,13 @@ namespace {
                 break;
             }
         }
-        if (required_height <= 0.0f) return false;
+        if (required_height <= 0.0f) return 0.0f;
 
         Vector3 raised = feet;
-        raised.y += std::min(required_height, STEP_RISE_SPEED * delta_time);
-        if (box_blocked(world, raised)) return false;
+        raised.y += required_height;
+        if (box_blocked(world, raised)) return 0.0f;
         feet.y = raised.y;
-        return true;
+        return required_height;
     }
 
     Vector3 horizontal_basis_forward(const Camera3D& eyes)
@@ -208,6 +209,7 @@ void PlayerController::reset()
 {
     horizontal_velocity = {0.0f, 0.0f, 0.0f};
     vertical_velocity = 0.0f;
+    step_visual_offset = 0.0f;
     grounded = false;
     touching_water = false;
     touching_lava = false;
@@ -241,6 +243,7 @@ void PlayerController::update(Camera3D& eyes, const World& world, GameMode mode,
         eyes.target = Vector3Add(eyes.target, delta);
         horizontal_velocity = {0.0f, 0.0f, 0.0f};
         vertical_velocity = 0.0f;
+        step_visual_offset = 0.0f;
         grounded = false;
         // Creative is invulnerable (GameEngine never reads these while in
         // that mode), but keep them from holding a stale true from before
@@ -285,13 +288,22 @@ void PlayerController::update(Camera3D& eyes, const World& world, GameMode mode,
     // frame would double the vertical motion and visibly pop the player.
     const bool may_step = grounded && !in_water;
     const float step_height = NORMAL_STEP_HEIGHT;
-    if (blocked_x && may_step && rise_towards_step(
-            world, feet, horizontal_velocity.x * delta_time, 0, step_height, delta_time)) {
+    float feet_y_before_step = feet.y;
+    float step_x = blocked_x && may_step
+        ? rise_towards_step(world, feet, horizontal_velocity.x * delta_time, 0, step_height)
+        : 0.0f;
+    if (step_x > 0.0f) {
         blocked_x = move_axis(world, feet, horizontal_velocity.x * delta_time, 0);
     }
-    if (blocked_z && may_step && rise_towards_step(
-            world, feet, horizontal_velocity.z * delta_time, 2, step_height, delta_time)) {
+    float step_z = blocked_z && may_step
+        ? rise_towards_step(world, feet, horizontal_velocity.z * delta_time, 2, step_height)
+        : 0.0f;
+    if (step_z > 0.0f) {
         blocked_z = move_axis(world, feet, horizontal_velocity.z * delta_time, 2);
+    }
+    float stepped_height = feet.y - feet_y_before_step;
+    if (stepped_height > 0.0f) {
+        step_visual_offset = std::min(NORMAL_STEP_HEIGHT, step_visual_offset + stepped_height);
     }
     if (in_water && input.jump && (blocked_x || blocked_z)) {
         vertical_velocity = std::max(vertical_velocity, WATER_EXIT_VELOCITY);
@@ -326,7 +338,8 @@ void PlayerController::update(Camera3D& eyes, const World& world, GameMode mode,
         fall_distance = 0.0f;
     }
 
-    eyes.position = {feet.x, feet.y + EYE_HEIGHT, feet.z};
+    step_visual_offset = std::max(0.0f, step_visual_offset - STEP_SMOOTH_SPEED * delta_time);
+    eyes.position = {feet.x, feet.y + EYE_HEIGHT - step_visual_offset, feet.z};
     Vector3 shift = Vector3Subtract(eyes.position, previous);
     eyes.target = Vector3Add(eyes.target, shift);
 
@@ -356,7 +369,7 @@ float PlayerController::consume_landing_fall_distance()
 
 Vector3 PlayerController::feet_position(const Camera3D& eyes) const
 {
-    return {eyes.position.x, eyes.position.y - EYE_HEIGHT, eyes.position.z};
+    return {eyes.position.x, eyes.position.y - EYE_HEIGHT + step_visual_offset, eyes.position.z};
 }
 
 Vector3 PlayerController::closest_hitbox_point(const Camera3D& eyes, Vector3 point) const

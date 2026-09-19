@@ -208,6 +208,11 @@ public:
     // True only when the block was actually placed.
     bool place_block(int x, int y, int z, BlockType type);
 
+    // Replaces an existing oak slab with its full-block material. Used by
+    // placement when the player adds the missing slab half to the same
+    // cell, Minecraft-style.
+    bool combine_oak_slab(int x, int y, int z);
+
     // Atomically places both halves of a door: `lower_type` (OakDoorLower
     // or IronDoorLower) at (x, y, z), its matching upper half directly
     // above. Requires a solid block below (same "needs support" class as
@@ -425,6 +430,11 @@ public:
     // by PlayerController's collision resolution and (in future shaped-
     // mesh work) Chunk::build_mesh_data().
     BlockShapeBoxes collision_boxes_at(int x, int y, int z) const;
+
+    // This cell's current selection/raycast box list, in WORLD space. It is
+    // separate from collision: a torch or plant can be targeted without
+    // blocking movement, while custom-shape blocks use their placed shape.
+    BlockShapeBoxes outline_boxes_at(int x, int y, int z) const;
 
     // A Chest block's own 27-slot storage, keyed by its world position -
     // created empty the first time a given position is looked up (opening

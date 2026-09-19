@@ -4,6 +4,7 @@
 #include "rendering/BlockMesh.hpp"
 #include "core/BlockShape.hpp"
 
+#include "raymath.h"
 #include "rlgl.h"
 // Declarations only here - RAYGUI_IMPLEMENTATION is compiled once, in
 // RayGuiImpl.cpp. Backs button()/text_input()/slider_int() below.
@@ -49,6 +50,23 @@ namespace {
     constexpr unsigned char CROSSHAIR_INTENSITY = 235;
     constexpr float TARGET_OUTLINE_SIZE = 1.002f;
     constexpr Color TARGET_OUTLINE_COLOR = {0, 0, 0, 200};
+
+    struct OverlayFace {
+        BlockFace face;
+        int x_sign;
+        int y_sign;
+        int z_sign;
+        int corners[4][3];
+    };
+
+    constexpr OverlayFace OVERLAY_FACES[6] = {
+        {BlockFace::Top,    0,  1,  0, {{-1,  1, -1}, {-1,  1,  1}, { 1,  1,  1}, { 1,  1, -1}}},
+        {BlockFace::Bottom, 0, -1,  0, {{-1, -1,  1}, {-1, -1, -1}, { 1, -1, -1}, { 1, -1,  1}}},
+        {BlockFace::North,  0,  0, -1, {{-1,  1, -1}, { 1,  1, -1}, { 1, -1, -1}, {-1, -1, -1}}},
+        {BlockFace::South,  0,  0,  1, {{ 1,  1,  1}, {-1,  1,  1}, {-1, -1,  1}, { 1, -1,  1}}},
+        {BlockFace::East,   1,  0,  0, {{ 1,  1, -1}, { 1,  1,  1}, { 1, -1,  1}, { 1, -1, -1}}},
+        {BlockFace::West,  -1,  0,  0, {{-1,  1,  1}, {-1,  1, -1}, {-1, -1, -1}, {-1, -1,  1}}},
+    };
 
     Color shade(Color color, float brightness) {
         return {
@@ -386,13 +404,42 @@ namespace ui {
         EndBlendMode();
     }
 
-    void block_outline(int block_x, int block_y, int block_z) {
-        Vector3 center = {block_x + 0.5f, block_y + 0.5f, block_z + 0.5f};
-        DrawCubeWires(center, TARGET_OUTLINE_SIZE, TARGET_OUTLINE_SIZE,
-                    TARGET_OUTLINE_SIZE, TARGET_OUTLINE_COLOR);
+    void block_outline(const BlockShapeBoxes& shape) {
+        for (const OutlineEdge& edge : outline_edges(shape)) {
+            DrawLine3D(edge.from, edge.to, TARGET_OUTLINE_COLOR);
+        }
     }
 
-    void block_breaking_overlay(int block_x, int block_y, int block_z, float progress) {
+    void draw_breaking_box_overlay(const BoundingBox& box, Vector3 block_origin,
+                                   Rectangle full_block_uv, Color tint) {
+        BoundingBox local_box{
+            Vector3Subtract(box.min, block_origin),
+            Vector3Subtract(box.max, block_origin),
+        };
+        Vector3 center = Vector3Scale(Vector3Add(box.min, box.max), 0.5f);
+        Vector3 half = Vector3Scale(Vector3Subtract(box.max, box.min), 0.5f * TARGET_OUTLINE_SIZE);
+
+        rlSetTexture(get_block_atlas_texture().id);
+        rlBegin(RL_QUADS);
+        rlColor4ub(tint.r, tint.g, tint.b, tint.a);
+        for (const OverlayFace& face : OVERLAY_FACES) {
+            Rectangle uv = get_sample_safe_block_uv(crop_tile_to_box(full_block_uv, face.face, local_box));
+            float u[] = {uv.x, uv.x + uv.width, uv.x + uv.width, uv.x};
+            float v[] = {uv.y, uv.y, uv.y + uv.height, uv.y + uv.height};
+            rlNormal3f(static_cast<float>(face.x_sign), static_cast<float>(face.y_sign), static_cast<float>(face.z_sign));
+            for (int i = 0; i < 4; ++i) {
+                rlTexCoord2f(u[i], v[i]);
+                rlVertex3f(
+                    center.x + half.x * static_cast<float>(face.corners[i][0]),
+                    center.y + half.y * static_cast<float>(face.corners[i][1]),
+                    center.z + half.z * static_cast<float>(face.corners[i][2]));
+            }
+        }
+        rlEnd();
+        rlSetTexture(0);
+    }
+
+    void block_breaking_overlay(const BlockShapeBoxes& shape, float progress) {
         constexpr int STAGE_COUNT = 10; // terrain.png row 15, columns 0-9
         constexpr int STAGE_ROW = 15;
         // Half-transparent: alpha-blended over the block already drawn beneath
@@ -400,14 +447,18 @@ namespace ui {
         // instead of a flat gray/white overlay stamped on top of it.
         constexpr unsigned char OVERLAY_ALPHA = 128;
         int stage = std::clamp(static_cast<int>(progress * STAGE_COUNT), 0, STAGE_COUNT - 1);
-        Rectangle uv = get_sample_safe_block_uv(block_atlas_tile_uv(stage, STAGE_ROW));
+        Rectangle uv = block_atlas_tile_uv(stage, STAGE_ROW);
+        if (shape.count <= 0) return;
 
-        Vector3 center = {block_x + 0.5f, block_y + 0.5f, block_z + 0.5f};
-        rlPushMatrix();
-        rlTranslatef(center.x, center.y, center.z);
-        rlScalef(TARGET_OUTLINE_SIZE, TARGET_OUTLINE_SIZE, TARGET_OUTLINE_SIZE);
-        draw_textured_cube(get_block_atlas_texture(), uv, {255, 255, 255, OVERLAY_ALPHA});
-        rlPopMatrix();
+        Vector3 block_origin{
+            std::floor(shape.boxes[0].min.x),
+            std::floor(shape.boxes[0].min.y),
+            std::floor(shape.boxes[0].min.z),
+        };
+
+        for (int i = 0; i < shape.count; ++i) {
+            draw_breaking_box_overlay(shape.boxes[i], block_origin, uv, {255, 255, 255, OVERLAY_ALPHA});
+        }
     }
 
     void label(Rectangle bounds, const std::string& text, Color color, TextAlign align) {

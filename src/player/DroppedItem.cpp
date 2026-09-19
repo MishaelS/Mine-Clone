@@ -49,11 +49,20 @@ namespace {
     constexpr float MAGNET_RADIUS     = 1.0f;
     constexpr float MAGNET_PULL_SPEED = 3.0f; // blocks/second, at its strongest right at the pickup radius
 
-    bool blocked(const World* world, Vector3 position) {
+    std::optional<BoundingBox> containing_collision_box(const World* world, Vector3 position) {
         int x = static_cast<int>(std::floor(position.x));
         int y = static_cast<int>(std::floor(position.y));
         int z = static_cast<int>(std::floor(position.z));
-        return get_block_properties(world->get_block(x, y, z)).solid;
+        BlockShapeBoxes shape = world->collision_boxes_at(x, y, z);
+        for (int i = 0; i < shape.count; ++i) {
+            const BoundingBox& box = shape.boxes[i];
+            if (position.x >= box.min.x && position.x <= box.max.x &&
+                position.y >= box.min.y && position.y <= box.max.y &&
+                position.z >= box.min.z && position.z <= box.max.z) {
+                return box;
+            }
+        }
+        return std::nullopt;
     }
 
     // A tool or material has no BlockType (and so no BlockProperties::
@@ -170,17 +179,16 @@ void DroppedItem::tick_physics(const World* world)
         // is new: items never had sideways velocity before the break-
         // direction/Q-drop launch impulse existed to give them any.
         if (velocity.y <= 0.0f) {
-            int gy = static_cast<int>(std::floor(next.y - ITEM_HALF_SIZE));
-            if (blocked(world, {next.x, next.y - ITEM_HALF_SIZE, next.z})) {
-                next.y = gy + 1.0f + ITEM_HALF_SIZE;
+            if (auto floor_box = containing_collision_box(world, {next.x, next.y - ITEM_HALF_SIZE, next.z})) {
+                next.y = floor_box->max.y + ITEM_HALF_SIZE;
                 velocity.y = 0.0f;
             }
         }
-        if (blocked(world, {next.x, motion.current.y, motion.current.z})) {
+        if (containing_collision_box(world, {next.x, motion.current.y, motion.current.z})) {
             next.x = motion.current.x;
             velocity.x = 0.0f;
         }
-        if (blocked(world, {motion.current.x, motion.current.y, next.z})) {
+        if (containing_collision_box(world, {motion.current.x, motion.current.y, next.z})) {
             next.z = motion.current.z;
             velocity.z = 0.0f;
         }

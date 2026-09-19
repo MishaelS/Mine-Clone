@@ -189,6 +189,57 @@ namespace {
     constexpr int WORLD_BORDER_BLOCKS = 8'000'000;
     constexpr int WORLD_BORDER_CHUNKS = WORLD_BORDER_BLOCKS / CHUNK_SIZE;
 
+    void offset_shape(BlockShapeBoxes& shape, int x, int y, int z)
+    {
+        Vector3 offset{static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)};
+        for (int i = 0; i < shape.count; ++i) {
+            shape.boxes[i].min = Vector3Add(shape.boxes[i].min, offset);
+            shape.boxes[i].max = Vector3Add(shape.boxes[i].max, offset);
+        }
+    }
+
+    std::optional<World::RaycastHit> ray_box_hit(Vector3 origin, Vector3 dir,
+                                                 const BoundingBox& box, int x, int y, int z,
+                                                 float max_distance)
+    {
+        constexpr float EPS = 0.00001f;
+        float t_min = 0.0f;
+        float t_max = max_distance;
+        Vector3 normal{0.0f, 0.0f, 0.0f};
+
+        auto axis = [&](float origin_coord, float dir_coord, float min_coord, float max_coord,
+                        Vector3 min_normal, Vector3 max_normal) {
+            if (std::fabs(dir_coord) < EPS) {
+                return origin_coord >= min_coord - EPS && origin_coord <= max_coord + EPS;
+            }
+            float inv = 1.0f / dir_coord;
+            float t1 = (min_coord - origin_coord) * inv;
+            float t2 = (max_coord - origin_coord) * inv;
+            Vector3 n1 = min_normal;
+            Vector3 n2 = max_normal;
+            if (t1 > t2) {
+                std::swap(t1, t2);
+                std::swap(n1, n2);
+            }
+            if (t1 > t_min) {
+                t_min = t1;
+                normal = n1;
+            }
+            t_max = std::min(t_max, t2);
+            return t_min <= t_max + EPS;
+        };
+
+        if (!axis(origin.x, dir.x, box.min.x, box.max.x, {-1.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}) ||
+            !axis(origin.y, dir.y, box.min.y, box.max.y, {0.0f, -1.0f, 0.0f}, {0.0f, 1.0f, 0.0f}) ||
+            !axis(origin.z, dir.z, box.min.z, box.max.z, {0.0f, 0.0f, -1.0f}, {0.0f, 0.0f, 1.0f})) {
+            return std::nullopt;
+        }
+        if (t_max < 0.0f || t_min > max_distance) return std::nullopt;
+
+        float distance = std::max(0.0f, t_min);
+        return World::RaycastHit{x, y, z, normal, distance, Vector3Add(origin, Vector3Scale(dir, distance))};
+    }
+
     int chebyshev_distance(int ax, int az, int bx, int bz) {
         return std::max(std::abs(ax - bx), std::abs(az - bz));
     }
@@ -750,19 +801,26 @@ BlockShapeBoxes World::collision_boxes_at(int x, int y, int z) const
         return result;
     }
 
-    BlockInstanceState state;
-    state.facing = get_block_orientation(x, y, z);
-    uint16_t packed = get_block_state(x, y, z);
-    state.open        = (packed & BlockStateBits::OPEN) != 0;
-    state.top_half    = (packed & BlockStateBits::TOP_HALF) != 0;
-    state.hinge_right = (packed & BlockStateBits::HINGE_RIGHT) != 0;
-    state.bite_count  = static_cast<uint8_t>((packed & BlockStateBits::BITE_COUNT_MASK) >> BlockStateBits::BITE_COUNT_SHIFT);
+    BlockInstanceState state = unpack_block_state(get_block_orientation(x, y, z), get_block_state(x, y, z));
 
     result = get_block_shape(type, state);
-    for (int i = 0; i < result.count; ++i) {
-        result.boxes[i].min = Vector3Add(result.boxes[i].min, {static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)});
-        result.boxes[i].max = Vector3Add(result.boxes[i].max, {static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)});
+    offset_shape(result, x, y, z);
+    return result;
+}
+
+BlockShapeBoxes World::outline_boxes_at(int x, int y, int z) const
+{
+    BlockType type = get_block(x, y, z);
+    const BlockProperties& properties = get_block_properties(type);
+    if (!properties.selectable) return BlockShapeBoxes{};
+
+    BlockInstanceState state;
+    if (properties.has_custom_shape) {
+        state = unpack_block_state(get_block_orientation(x, y, z), get_block_state(x, y, z));
     }
+
+    BlockShapeBoxes result = get_outline_shape(type, state);
+    offset_shape(result, x, y, z);
     return result;
 }
 
@@ -880,33 +938,33 @@ std::optional<World::RaycastHit> World::raycast(Vector3 origin, Vector3 directio
     float t_delta_y = boundary_t_step(step_y, dir.y);
     float t_delta_z = boundary_t_step(step_z, dir.z);
 
-    // Outward normal of the face the ray most recently entered the current
-    // voxel through; {0,0,0} for the starting voxel (there's no "entry
-    // face" if the ray already starts inside a solid block).
-    Vector3 normal = {0.0f, 0.0f, 0.0f};
     float traveled = 0.0f;
 
     while (traveled <= max_distance) {
-        if (get_block_properties(get_block(x, y, z)).selectable) {
-            Vector3 hit_point = Vector3Add(origin, Vector3Scale(dir, traveled));
-            return RaycastHit{x, y, z, normal, traveled, hit_point};
+        BlockShapeBoxes outline = outline_boxes_at(x, y, z);
+        std::optional<RaycastHit> nearest;
+        for (int i = 0; i < outline.count; ++i) {
+            auto hit = ray_box_hit(origin, dir, outline.boxes[i], x, y, z, max_distance);
+            if (hit && (!nearest || hit->distance < nearest->distance)) {
+                nearest = hit;
+            }
+        }
+        if (nearest) {
+            return nearest;
         }
 
         if (t_max_x < t_max_y && t_max_x < t_max_z) {
             x += step_x;
             traveled = t_max_x;
             t_max_x += t_delta_x;
-            normal = {static_cast<float>(-step_x), 0.0f, 0.0f};
         } else if (t_max_y < t_max_z) {
             y += step_y;
             traveled = t_max_y;
             t_max_y += t_delta_y;
-            normal = {0.0f, static_cast<float>(-step_y), 0.0f};
         } else {
             z += step_z;
             traveled = t_max_z;
             t_max_z += t_delta_z;
-            normal = {0.0f, 0.0f, static_cast<float>(-step_z)};
         }
     }
 
@@ -986,6 +1044,15 @@ bool World::place_block(int x, int y, int z, BlockType type)
         return false;
     }
     set_block_and_rebuild(x, y, z, type);
+    schedule_fluid_neighbors(x, y, z);
+    schedule_falling_check(x, y, z);
+    return true;
+}
+
+bool World::combine_oak_slab(int x, int y, int z)
+{
+    if (get_block(x, y, z) != BlockType::OakSlab) return false;
+    set_block_and_rebuild(x, y, z, BlockType::OakPlanks);
     schedule_fluid_neighbors(x, y, z);
     schedule_falling_check(x, y, z);
     return true;

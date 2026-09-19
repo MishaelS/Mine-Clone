@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 namespace {
     constexpr std::size_t MAX_PARTICLES = 768;
@@ -111,11 +112,21 @@ void ParticleSystem::spawn_footstep(BlockType type, Vector3 ground_position)
 
 void ParticleSystem::update(float delta_time, const World* world)
 {
-    auto solid_at = [world](Vector3 position) {
-        return world && get_block_properties(world->get_block(
-            static_cast<int>(std::floor(position.x)),
-            static_cast<int>(std::floor(position.y)),
-            static_cast<int>(std::floor(position.z)))).solid;
+    auto collision_at = [world](Vector3 position) -> std::optional<BoundingBox> {
+        if (!world) return std::nullopt;
+        int x = static_cast<int>(std::floor(position.x));
+        int y = static_cast<int>(std::floor(position.y));
+        int z = static_cast<int>(std::floor(position.z));
+        BlockShapeBoxes shape = world->collision_boxes_at(x, y, z);
+        for (int i = 0; i < shape.count; ++i) {
+            const BoundingBox& box = shape.boxes[i];
+            if (position.x >= box.min.x && position.x <= box.max.x &&
+                position.y >= box.min.y && position.y <= box.max.y &&
+                position.z >= box.min.z && position.z <= box.max.z) {
+                return box;
+            }
+        }
+        return std::nullopt;
     };
 
     for (Particle& particle : particles) {
@@ -127,18 +138,20 @@ void ParticleSystem::update(float delta_time, const World* world)
         Vector3 next = Vector3Add(particle.position, Vector3Scale(particle.velocity, delta_time));
         // Ground: rest on top of whatever it just fell into instead of
         // sinking through it.
-        if (particle.velocity.y <= 0.0f && solid_at({next.x, next.y, next.z})) {
-            next.y = std::floor(next.y) + 1.0f;
-            particle.velocity.y = 0.0f;
+        if (particle.velocity.y <= 0.0f) {
+            if (auto floor_box = collision_at({next.x, next.y, next.z})) {
+                next.y = floor_box->max.y;
+                particle.velocity.y = 0.0f;
+            }
+        }
+        if (collision_at({next.x, particle.position.y, particle.position.z})) {
+            next.x = particle.position.x;
+            particle.velocity.x = 0.0f;
         }
         // Walls: stop dead on whichever horizontal axis actually hit
         // something, checked independently so sliding along one still
         // works right next to a wall on the other axis.
-        if (solid_at({next.x, particle.position.y, particle.position.z})) {
-            next.x = particle.position.x;
-            particle.velocity.x = 0.0f;
-        }
-        if (solid_at({particle.position.x, particle.position.y, next.z})) {
+        if (collision_at({particle.position.x, particle.position.y, next.z})) {
             next.z = particle.position.z;
             particle.velocity.z = 0.0f;
         }

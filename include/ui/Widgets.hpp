@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/BlockShape.hpp"
+
 #include "raylib.h"
 #include "core/Block.hpp"
 #include "player/Item.hpp"
@@ -75,14 +77,14 @@ namespace ui {
     void crosshair();
 
     // World-space selection chrome for the currently targeted voxel.
-    void block_outline(int block_x, int block_y, int block_z);
+    void block_outline(const BlockShapeBoxes& shape);
 
     // Alpha-blended crack overlay on the block currently being broken -
     // terrain.png's own "block breaking" strip (row 15, 10 stages), picked
     // by `progress` (0..1, GameEngine's own breaking_progress) the same
     // way real Minecraft steps through its crack stages as a hold-to-break
     // approaches completion.
-    void block_breaking_overlay(int block_x, int block_y, int block_z, float progress);
+    void block_breaking_overlay(const BlockShapeBoxes& shape, float progress);
 
     // Centered text within `bounds` - doesn't draw a background of its own.
     // One font size for all chrome. Long labels are elided, never shrunk.

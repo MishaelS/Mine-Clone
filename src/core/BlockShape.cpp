@@ -1,5 +1,8 @@
 #include "core/BlockShape.hpp"
 
+#include <algorithm>
+#include <cmath>
+
 namespace {
     // Real door/trapdoor panel thickness (3/16 of a block, same as vanilla).
     constexpr float PANEL_THICKNESS = 0.1875f;
@@ -160,6 +163,57 @@ namespace {
         result.boxes[0] = box;
         return result;
     }
+
+    BlockShapeBoxes full_cube_shape()
+    {
+        BlockShapeBoxes result;
+        result.count = 1;
+        result.boxes[0] = {{0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}};
+        return result;
+    }
+
+    BlockShapeBoxes plant_outline_shape()
+    {
+        BlockShapeBoxes result;
+        result.count = 1;
+        result.boxes[0] = {{2.0f / 16.0f, 0.0f, 2.0f / 16.0f},
+                           {14.0f / 16.0f, 13.0f / 16.0f, 14.0f / 16.0f}};
+        return result;
+    }
+
+    BlockShapeBoxes cactus_outline_shape()
+    {
+        BlockShapeBoxes result;
+        result.count = 1;
+        result.boxes[0] = {{1.0f / 16.0f, 0.0f, 1.0f / 16.0f},
+                           {15.0f / 16.0f, 1.0f, 15.0f / 16.0f}};
+        return result;
+    }
+
+    bool same_point(Vector3 a, Vector3 b)
+    {
+        constexpr float EPS = 0.0001f;
+        return std::fabs(a.x - b.x) <= EPS && std::fabs(a.y - b.y) <= EPS && std::fabs(a.z - b.z) <= EPS;
+    }
+
+    bool rect_contains(float min_a, float max_a, float min_b, float max_b,
+                       float inner_min_a, float inner_max_a, float inner_min_b, float inner_max_b)
+    {
+        constexpr float EPS = 0.0001f;
+        return inner_min_a >= min_a - EPS && inner_max_a <= max_a + EPS &&
+               inner_min_b >= min_b - EPS && inner_max_b <= max_b + EPS;
+    }
+}
+
+BlockInstanceState unpack_block_state(HorizontalDirection facing, uint16_t packed)
+{
+    BlockInstanceState state;
+    state.facing = facing;
+    state.open        = (packed & BlockStateBits::OPEN) != 0;
+    state.top_half    = (packed & BlockStateBits::TOP_HALF) != 0;
+    state.hinge_right = (packed & BlockStateBits::HINGE_RIGHT) != 0;
+    state.bite_count  = static_cast<uint8_t>((packed & BlockStateBits::BITE_COUNT_MASK) >> BlockStateBits::BITE_COUNT_SHIFT);
+    return state;
 }
 
 BlockShapeBoxes get_item_shape(BlockType type)
@@ -327,4 +381,85 @@ BlockShapeBoxes get_block_shape(BlockType type, const BlockInstanceState& state)
         default:
             return BlockShapeBoxes{};
     }
+}
+
+BlockShapeBoxes get_outline_shape(BlockType type, const BlockInstanceState& state)
+{
+    const BlockProperties& properties = get_block_properties(type);
+    if (!properties.selectable) return BlockShapeBoxes{};
+
+    if (type == BlockType::ShortGrass || type == BlockType::OakSapling) return plant_outline_shape();
+    if (type == BlockType::Cactus) return cactus_outline_shape();
+    if (is_torch(type)) {
+        BlockShapeBoxes result;
+        result.count = 1;
+        result.boxes[0] = {{6.0f / 16.0f, 0.0f, 6.0f / 16.0f},
+                           {10.0f / 16.0f, 10.0f / 16.0f, 10.0f / 16.0f}};
+        return result;
+    }
+    if (properties.has_custom_shape) return get_block_shape(type, state);
+    return full_cube_shape();
+}
+
+std::vector<OutlineEdge> outline_edges(const BlockShapeBoxes& shape)
+{
+    std::vector<OutlineEdge> edges;
+    edges.reserve(static_cast<size_t>(shape.count) * 12);
+
+    auto add_edge = [&edges](Vector3 from, Vector3 to) {
+        for (const OutlineEdge& edge : edges) {
+            if ((same_point(edge.from, from) && same_point(edge.to, to)) ||
+                (same_point(edge.from, to) && same_point(edge.to, from))) {
+                return;
+            }
+        }
+        edges.push_back({from, to});
+    };
+
+    for (int i = 0; i < shape.count; ++i) {
+        const BoundingBox& b = shape.boxes[i];
+        Vector3 p[8] = {
+            {b.min.x, b.min.y, b.min.z}, {b.max.x, b.min.y, b.min.z},
+            {b.max.x, b.min.y, b.max.z}, {b.min.x, b.min.y, b.max.z},
+            {b.min.x, b.max.y, b.min.z}, {b.max.x, b.max.y, b.min.z},
+            {b.max.x, b.max.y, b.max.z}, {b.min.x, b.max.y, b.max.z},
+        };
+        add_edge(p[0], p[1]); add_edge(p[1], p[2]); add_edge(p[2], p[3]); add_edge(p[3], p[0]);
+        add_edge(p[4], p[5]); add_edge(p[5], p[6]); add_edge(p[6], p[7]); add_edge(p[7], p[4]);
+        add_edge(p[0], p[4]); add_edge(p[1], p[5]); add_edge(p[2], p[6]); add_edge(p[3], p[7]);
+    }
+
+    return edges;
+}
+
+bool shape_covers_face(const BoundingBox* boxes, int box_count, BlockFace face, float plane, const BoundingBox& rect)
+{
+    constexpr float EPS = 0.0001f;
+    for (int i = 0; i < box_count; ++i) {
+        const BoundingBox& b = boxes[i];
+        switch (face) {
+            case BlockFace::Top:
+            case BlockFace::Bottom:
+                if (std::fabs((face == BlockFace::Top ? b.min.y : b.max.y) - plane) <= EPS &&
+                    rect_contains(b.min.x, b.max.x, b.min.z, b.max.z, rect.min.x, rect.max.x, rect.min.z, rect.max.z)) {
+                    return true;
+                }
+                break;
+            case BlockFace::North:
+            case BlockFace::South:
+                if (std::fabs((face == BlockFace::North ? b.max.z : b.min.z) - plane) <= EPS &&
+                    rect_contains(b.min.x, b.max.x, b.min.y, b.max.y, rect.min.x, rect.max.x, rect.min.y, rect.max.y)) {
+                    return true;
+                }
+                break;
+            case BlockFace::East:
+            case BlockFace::West:
+                if (std::fabs((face == BlockFace::East ? b.min.x : b.max.x) - plane) <= EPS &&
+                    rect_contains(b.min.z, b.max.z, b.min.y, b.max.y, rect.min.z, rect.max.z, rect.min.y, rect.max.y)) {
+                    return true;
+                }
+                break;
+        }
+    }
+    return false;
 }
