@@ -166,6 +166,11 @@ public:
     // tint (GameEngine) and Entity's water-drag movement slowdown.
     std::optional<int> water_depth_at(Vector3 position) const;
 
+    // Horizontal flow direction/strength at a world position inside water.
+    // Zero when the sampled cell is not water or the surrounding fluid
+    // levels do not imply a directional current.
+    Vector3 water_flow_at(Vector3 position) const;
+
     // A solid block hit by a ray, found by stepping through the voxel grid
     // one cell at a time (Amanatides & Woo traversal) rather than sampling
     // at fixed intervals, so a fast-moving thin ray can't tunnel through a

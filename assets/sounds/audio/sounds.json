@@ -245,9 +245,7 @@
     ]
   },
   "water": {
-    "swim": [
-      "sounds/audio/sound/splash.ogg"
-    ],
+    "swim": [ ],
     "ambient": [
       "sounds/audio/sound/water.ogg"
     ]

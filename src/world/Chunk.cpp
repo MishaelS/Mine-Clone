@@ -37,14 +37,12 @@ namespace {
     // coordinate) as Minecraft's own sea level.
     constexpr int WATER_LEVEL = 64 - MIN_WORLD_Y;
 
-    // Still water's top face sits slightly below a full block's own top,
-    // same as real Minecraft (14/16 tall, i.e. 2/16 below the top) - applied
-    // in append_face() via its top_drop parameter, only to the block's
-    // upward-facing corners (see there), so this doesn't touch the actual
-    // block grid Chunk::get_block/is_opaque/collision reasoning uses: a
-    // water "block" still logically fills its full cell, only the rendered
-    // mesh is shorter.
-    constexpr float WATER_SURFACE_DROP = 2.0f / 16.0f;
+    // A source/falling water cell renders just below a full cube, while
+    // flowing levels 1..7 step down toward the far edge of an 8-block flow.
+    // This is visual only: collision/fluid logic still treats Water as the
+    // same grid cell and reads Chunk::fluid_level for its state.
+    constexpr float WATER_SOURCE_SURFACE_HEIGHT = 14.0f / 16.0f;
+    constexpr float WATER_MIN_FLOW_SURFACE_HEIGHT = 2.0f / 16.0f;
 
     // Per-biome terrain shape and surface/subsurface blocks - the same
     // overall column structure (bedrock, subsurface, surface, water/air)
@@ -448,6 +446,17 @@ namespace {
         return buckets.back();
     }
 
+    float water_surface_height(uint8_t level)
+    {
+        if (level == FLUID_LEVEL_SOURCE || level == FLUID_LEVEL_FALLING) {
+            return WATER_SOURCE_SURFACE_HEIGHT;
+        }
+        float t = static_cast<float>(std::clamp<uint8_t>(level, 1, FLUID_LEVEL_MAX_FLOW) - 1) /
+                  static_cast<float>(FLUID_LEVEL_MAX_FLOW - 1);
+        return WATER_SOURCE_SURFACE_HEIGHT +
+               (WATER_MIN_FLOW_SURFACE_HEIGHT - WATER_SOURCE_SURFACE_HEIGHT) * t;
+    }
+
     BoundingBox face_rect_for_box(const BoundingBox& box, BlockFace face)
     {
         switch (face) {
@@ -498,8 +507,9 @@ namespace {
     // ever need anything other than white. `top_drop` lowers this face's own
     // upward-facing corners (any corner at local y > 0, i.e. Top's own 4
     // corners, or a side face's top edge - never Bottom's, which are all at
-    // y < 0) by that many world units - see WATER_SURFACE_DROP, the only
-    // current caller that passes anything other than the default 0.
+    // y < 0) by that many world units. `uv_v0/uv_v1` crop the face's
+    // vertical texture range without stretching, the same idea shaped
+    // blocks use through crop_tile_to_box().
     // `shade` is the day/night-*independent* part of a corner's brightness
     // (AO * FACE_DIRECTION_SHADE, or plain 1.0 for cross-shaped foliage,
     // which has neither) - baked straight into mesh_data.colors, same as
@@ -510,30 +520,19 @@ namespace {
     // combines them with the current daylightFactor uniform itself, per
     // fragment, so day/night dims only the sky contribution without ever
     // needing this mesh rebuilt when the time of day changes.
-    void append_face(ChunkMeshBuffers& mesh_data, const Face& face, Vector3 center, Rectangle uv,
-                      const float shade[4], const float sky_fraction[4], const float block_fraction[4],
-                      const float ao[4], Color tint, float top_drop = 0.0f) {
-        uv = get_sample_safe_block_uv(uv);
-        Vector3 corners[4] = {face.v1, face.v2, face.v3, face.v4};
-        if (top_drop != 0.0f) {
-            for (Vector3& corner : corners) {
-                if (corner.y > 0.0f) corner.y -= top_drop;
-            }
-        }
-        // V=0 is the image's top row (raylib doesn't flip on load), so the
-        // top edge of the face (corners 0, 1) must sample V=0, not V=1.
-        float u[4] = {uv.x,              uv.x + uv.width, uv.x + uv.width, uv.x};
-        float v[4] = {uv.y,              uv.y,             uv.y + uv.height, uv.y + uv.height};
-
+    void append_custom_face(ChunkMeshBuffers& mesh_data, const Vector3 corners[4], Vector3 normal,
+                            Vector3 center, const float u[4], const float v[4],
+                            const float shade[4], const float sky_fraction[4], const float block_fraction[4],
+                            const float ao[4], Color tint) {
         static constexpr int TRIANGLE[6] = {0, 1, 2, 0, 2, 3};
         for (int corner : TRIANGLE) {
             mesh_data.positions.push_back(center.x + corners[corner].x);
             mesh_data.positions.push_back(center.y + corners[corner].y);
             mesh_data.positions.push_back(center.z + corners[corner].z);
 
-            mesh_data.normals.push_back(face.normal.x);
-            mesh_data.normals.push_back(face.normal.y);
-            mesh_data.normals.push_back(face.normal.z);
+            mesh_data.normals.push_back(normal.x);
+            mesh_data.normals.push_back(normal.y);
+            mesh_data.normals.push_back(normal.z);
 
             mesh_data.texcoords.push_back(u[corner]);
             mesh_data.texcoords.push_back(v[corner]);
@@ -558,6 +557,27 @@ namespace {
             mesh_data.ao.push_back(ao[corner]);
             mesh_data.ao.push_back(ao[corner]);
         }
+    }
+
+    void append_face(ChunkMeshBuffers& mesh_data, const Face& face, Vector3 center, Rectangle uv,
+                      const float shade[4], const float sky_fraction[4], const float block_fraction[4],
+                      const float ao[4], Color tint, float top_drop = 0.0f,
+                      float uv_v0 = 0.0f, float uv_v1 = 1.0f) {
+        uv = get_sample_safe_block_uv(uv);
+        Vector3 corners[4] = {face.v1, face.v2, face.v3, face.v4};
+        if (top_drop != 0.0f) {
+            for (Vector3& corner : corners) {
+                if (corner.y > 0.0f) corner.y -= top_drop;
+            }
+        }
+        // V=0 is the image's top row (raylib doesn't flip on load), so the
+        // top edge of the face (corners 0, 1) must sample V=0, not V=1.
+        float u[4] = {uv.x,              uv.x + uv.width, uv.x + uv.width, uv.x};
+        float v_top = uv.y + uv.height * uv_v0;
+        float v_bottom = uv.y + uv.height * uv_v1;
+        float v[4] = {v_top, v_top, v_bottom, v_bottom};
+        append_custom_face(mesh_data, corners, face.normal, center, u, v,
+                           shade, sky_fraction, block_fraction, ao, tint);
     }
 
     // Loaded once by load_chunk_shader() (called from GameEngine's
@@ -1692,6 +1712,19 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
         return neighbor == nullptr ? BlockType::Air : neighbor->get_block(x, y, z);
     };
 
+    auto neighbor_fluid_level = [&](int x, int y, int z) {
+        if (y < 0 || y >= CHUNK_HEIGHT) return FLUID_LEVEL_SOURCE;
+
+        const Chunk* neighbor = nullptr;
+        if (x < 0)                { neighbor = west;  x += CHUNK_SIZE; }
+        else if (x >= CHUNK_SIZE) { neighbor = east;  x -= CHUNK_SIZE; }
+        else if (z < 0)           { neighbor = north; z += CHUNK_SIZE; }
+        else if (z >= CHUNK_SIZE) { neighbor = south; z -= CHUNK_SIZE; }
+        else return get_fluid_level(x, y, z);
+
+        return neighbor == nullptr ? FLUID_LEVEL_SOURCE : neighbor->get_fluid_level(x, y, z);
+    };
+
     // Bounded to highest_block_y, not CHUNK_HEIGHT: everything above it is
     // guaranteed air in every column of this chunk, so there's nothing
     // there to ever emit a face.
@@ -1838,15 +1871,125 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                     continue;
                 }
 
-                // Water-only: a block with Water directly above it is
-                // interior to a body of water, not its surface (and its Top
-                // face is never actually meshed anyway - same-translucent-
-                // type culling below skips it) - only a true surface block
-                // gets the lowered top geometry (top_drop, WATER_SURFACE_
-                // DROP) real still water has in Minecraft.
+                if (type == BlockType::Water) {
+                    const bool covered_by_water = neighbor_block(x, y + 1, z) == BlockType::Water;
+                    const Rectangle water_uv = get_sample_safe_block_uv(properties.texture_uvs[static_cast<int>(BlockFace::Top)]);
+
+                    auto water_height_at = [&](int sx, int sz) -> std::optional<float> {
+                        if (neighbor_block(sx, y, sz) != BlockType::Water) return std::nullopt;
+                        if (neighbor_block(sx, y + 1, sz) == BlockType::Water) return 1.0f;
+                        return water_surface_height(neighbor_fluid_level(sx, y, sz));
+                    };
+
+                    auto corner_height = [&](int dx, int dz) {
+                        float total = 0.0f;
+                        int count = 0;
+                        const int sample_offsets[4][2] = {{0, 0}, {dx, 0}, {0, dz}, {dx, dz}};
+                        for (const auto& offset : sample_offsets) {
+                            if (auto height = water_height_at(x + offset[0], z + offset[1])) {
+                                total += *height;
+                                ++count;
+                            }
+                        }
+                        return count > 0 ? total / static_cast<float>(count) : water_surface_height(get_fluid_level(x, y, z));
+                    };
+
+                    const float nw = covered_by_water ? 1.0f : corner_height(-1, -1);
+                    const float sw = covered_by_water ? 1.0f : corner_height(-1,  1);
+                    const float se = covered_by_water ? 1.0f : corner_height( 1,  1);
+                    const float ne = covered_by_water ? 1.0f : corner_height( 1, -1);
+
+                    auto append_water_quad = [&](const Vector3 water_corners[4], Vector3 normal, BlockFace face,
+                                                 const float u[4], const float v[4]) {
+                        float shade[4];
+                        float ao_strength[4];
+                        float sky_fraction[4];
+                        float block_fraction[4];
+                        for (int i = 0; i < 4; ++i) {
+                            int ao_level = vertex_ao(nb, x, y, z, normal, water_corners[i]);
+                            VertexLight light = vertex_light(nb, x, y, z, normal, water_corners[i]);
+                            shade[i] = FACE_DIRECTION_SHADE[static_cast<int>(face)];
+                            ao_strength[i] = AO_BRIGHTNESS[ao_level];
+                            sky_fraction[i] = light.sky;
+                            block_fraction[i] = light.block;
+                        }
+                        append_custom_face(water_data, water_corners, normal, center, u, v,
+                                           shade, sky_fraction, block_fraction, ao_strength,
+                                           properties.texture_tints[static_cast<int>(face)]);
+                    };
+
+                    if (!covered_by_water) {
+                        Vector3 top_corners[4] = {
+                            {-HALF, nw - HALF, -HALF},
+                            {-HALF, sw - HALF,  HALF},
+                            { HALF, se - HALF,  HALF},
+                            { HALF, ne - HALF, -HALF},
+                        };
+                        float u[4] = {water_uv.x, water_uv.x + water_uv.width, water_uv.x + water_uv.width, water_uv.x};
+                        float v[4] = {water_uv.y, water_uv.y, water_uv.y + water_uv.height, water_uv.y + water_uv.height};
+                        append_water_quad(top_corners, {0.0f, 1.0f, 0.0f}, BlockFace::Top, u, v);
+                    }
+
+                    struct WaterSide {
+                        BlockFace face;
+                        int dx;
+                        int dz;
+                        Vector3 normal;
+                        float h0;
+                        float h1;
+                        Vector3 corners[4];
+                    };
+                    WaterSide sides[4] = {
+                        {BlockFace::North, 0, -1, {0.0f, 0.0f, -1.0f}, nw, ne,
+                         {{-HALF, nw - HALF, -HALF}, { HALF, ne - HALF, -HALF}, { HALF, -HALF, -HALF}, {-HALF, -HALF, -HALF}}},
+                        {BlockFace::South, 0,  1, {0.0f, 0.0f,  1.0f}, se, sw,
+                         {{ HALF, se - HALF,  HALF}, {-HALF, sw - HALF,  HALF}, {-HALF, -HALF,  HALF}, { HALF, -HALF,  HALF}}},
+                        {BlockFace::East,  1,  0, {1.0f, 0.0f,  0.0f}, ne, se,
+                         {{ HALF, ne - HALF, -HALF}, { HALF, se - HALF,  HALF}, { HALF, -HALF,  HALF}, { HALF, -HALF, -HALF}}},
+                        {BlockFace::West, -1,  0, {-1.0f, 0.0f, 0.0f}, sw, nw,
+                         {{-HALF, sw - HALF,  HALF}, {-HALF, nw - HALF, -HALF}, {-HALF, -HALF, -HALF}, {-HALF, -HALF,  HALF}}},
+                    };
+                    for (const WaterSide& side : sides) {
+                        BlockType neighbor_type = neighbor_block(x + side.dx, y, z + side.dz);
+                        if (neighbor_type == BlockType::Water || !get_block_properties(neighbor_type).transparent) continue;
+                        if (!get_block_properties(neighbor_block(x, y - 1, z)).transparent &&
+                            !get_block_properties(neighbor_block(x + side.dx, y - 1, z + side.dz)).transparent) {
+                            continue;
+                        }
+
+                        Rectangle uv = get_sample_safe_block_uv(properties.texture_uvs[static_cast<int>(side.face)]);
+                        float u[4] = {uv.x, uv.x + uv.width, uv.x + uv.width, uv.x};
+                        float v[4] = {
+                            uv.y + uv.height * (1.0f - side.h0),
+                            uv.y + uv.height * (1.0f - side.h1),
+                            uv.y + uv.height,
+                            uv.y + uv.height,
+                        };
+                        append_water_quad(side.corners, side.normal, side.face, u, v);
+                    }
+
+                    if (get_block_properties(neighbor_block(x, y - 1, z)).transparent &&
+                        neighbor_block(x, y - 1, z) != BlockType::Water) {
+                        const Face& bottom = CUBE_FACES[static_cast<int>(BlockFace::Bottom)];
+                        Vector3 bottom_corners[4] = {bottom.v1, bottom.v2, bottom.v3, bottom.v4};
+                        Rectangle uv = get_sample_safe_block_uv(properties.texture_uvs[static_cast<int>(BlockFace::Bottom)]);
+                        float u[4] = {uv.x, uv.x + uv.width, uv.x + uv.width, uv.x};
+                        float v[4] = {uv.y, uv.y, uv.y + uv.height, uv.y + uv.height};
+                        append_water_quad(bottom_corners, bottom.normal, BlockFace::Bottom, u, v);
+                    }
+                    continue;
+                }
+
+                // Water-only: surface height depends on this cell's fluid
+                // level, so sources/falling columns look nearly full while
+                // levels 1..7 visually step down across the flow.
                 float top_drop = 0.0f;
-                if (type == BlockType::Water && neighbor_block(x, y + 1, z) != BlockType::Water) {
-                    top_drop = WATER_SURFACE_DROP;
+                float water_height = 1.0f;
+                if (type == BlockType::Water) {
+                    water_height = water_surface_height(get_fluid_level(x, y, z));
+                    if (neighbor_block(x, y + 1, z) != BlockType::Water) {
+                        top_drop = 1.0f - water_height;
+                    }
                 }
 
                 for (int face = 0; face < 6; ++face) {
@@ -1879,7 +2022,14 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                         // leaves: their alpha layers and AO accumulate
                         // inward, making a dense canopy darker than its
                         // exposed outside.
-                        if (properties.transparent && neighbor_type == type && properties.cull_same_faces) continue;
+                        if (properties.transparent && neighbor_type == type && properties.cull_same_faces) {
+                            bool hidden_by_same_type = true;
+                            if (type == BlockType::Water && face >= static_cast<int>(BlockFace::North)) {
+                                float neighbor_height = water_surface_height(neighbor_fluid_level(nx, ny, nz));
+                                hidden_by_same_type = neighbor_height >= water_height - 0.001f;
+                            }
+                            if (hidden_by_same_type) continue;
+                        }
                     }
                     Vector3 face_center = inset_side
                         ? Vector3Subtract(center, Vector3Scale(f.normal, properties.side_inset))
@@ -1956,8 +2106,14 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                         }
                     }
                     if (!face_uv_overridden) face_uv = properties.texture_uvs[texture_face];
+                    float uv_v0 = 0.0f;
+                    float uv_v1 = 1.0f;
+                    if (type == BlockType::Water && face >= static_cast<int>(BlockFace::North) && top_drop > 0.0f) {
+                        float visible_height = 1.0f - top_drop;
+                        uv_v0 = 1.0f - visible_height;
+                    }
                     append_face(mesh_data, f, face_center, face_uv,
-                        shade, sky_fraction, block_fraction, ao_strength, tint, top_drop);
+                        shade, sky_fraction, block_fraction, ao_strength, tint, top_drop, uv_v0, uv_v1);
                 }
             }
         }

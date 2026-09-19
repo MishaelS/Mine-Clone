@@ -1667,6 +1667,57 @@ std::optional<int> World::water_depth_at(Vector3 position) const
     return depth;
 }
 
+Vector3 World::water_flow_at(Vector3 position) const
+{
+    int x = static_cast<int>(std::floor(position.x));
+    int y = static_cast<int>(std::floor(position.y));
+    int z = static_cast<int>(std::floor(position.z));
+    if (get_block(x, y, z) != BlockType::Water) return {0.0f, 0.0f, 0.0f};
+
+    auto fluid_level_at = [&](int wx, int wy, int wz) -> std::optional<uint8_t> {
+        if (wy < MIN_WORLD_Y || wy >= MIN_WORLD_Y + CHUNK_HEIGHT) return std::nullopt;
+        if (get_block(wx, wy, wz) != BlockType::Water) return std::nullopt;
+
+        int chunk_x = floor_div(wx, CHUNK_SIZE);
+        int chunk_z = floor_div(wz, CHUNK_SIZE);
+        const Chunk* chunk = chunk_at(chunk_x, chunk_z);
+        if (chunk == nullptr) return std::nullopt;
+        return chunk->get_fluid_level(wx - chunk_x * CHUNK_SIZE, wy - MIN_WORLD_Y, wz - chunk_z * CHUNK_SIZE);
+    };
+
+    auto effective_level = [](uint8_t level) {
+        return (level == FLUID_LEVEL_SOURCE || level == FLUID_LEVEL_FALLING) ? 0 : static_cast<int>(level);
+    };
+
+    std::optional<uint8_t> current_level = fluid_level_at(x, y, z);
+    if (!current_level.has_value()) return {0.0f, 0.0f, 0.0f};
+
+    Vector3 flow{0.0f, 0.0f, 0.0f};
+    const int current_effective = effective_level(*current_level);
+    constexpr int OFFSETS[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+    for (const auto& offset : OFFSETS) {
+        int nx = x + offset[0];
+        int nz = z + offset[1];
+        if (std::optional<uint8_t> neighbor_level = fluid_level_at(nx, y, nz)) {
+            int delta = effective_level(*neighbor_level) - current_effective;
+            if (delta > 0) {
+                flow.x += static_cast<float>(offset[0] * delta);
+                flow.z += static_cast<float>(offset[1] * delta);
+            }
+        } else if (get_block(nx, y, nz) == BlockType::Air &&
+                   !get_block_properties(get_block(nx, y - 1, nz)).solid) {
+            // A spill edge: the next cell is open and unsupported below, so
+            // bias the current toward the falling sheet instead of leaving
+            // the last horizontal cell feeling still.
+            flow.x += static_cast<float>(offset[0]) * 1.5f;
+            flow.z += static_cast<float>(offset[1]) * 1.5f;
+        }
+    }
+
+    if (Vector3LengthSqr(flow) <= 0.000001f) return {0.0f, 0.0f, 0.0f};
+    return Vector3Normalize(flow);
+}
+
 void World::update_chunk_states(Vector3 observer_position)
 {
     ChunkCoordinates observer_chunk = chunk_coordinates(

@@ -14,17 +14,19 @@ namespace {
     constexpr float COLLISION_EPSILON = 0.001f;
     constexpr float GROUND_PROBE = 0.05f;
 
-    constexpr float CREATIVE_SPEED = 4.0f;
+    constexpr float CREATIVE_SPEED             = 4.0f;
     constexpr float CREATIVE_SPRINT_MULTIPLIER = 2.0f;
-    constexpr float WALK_SPEED = 4.317f;
-    constexpr float SPRINT_SPEED = 5.612f;
-    constexpr float SNEAK_SPEED = 1.30f;
-    constexpr float GROUND_ACCELERATION = 28.0f;
-    constexpr float GROUND_DECELERATION = 34.0f;
-    constexpr float AIR_ACCELERATION = 7.0f;
-    constexpr float WATER_SPEED = 2.2f;
-    constexpr float NORMAL_STEP_HEIGHT = 0.6f;
-    constexpr float STEP_SMOOTH_SPEED = 7.0f;
+    constexpr float WALK_SPEED                 = 4.317f;
+    constexpr float SPRINT_SPEED               = 5.612f;
+    constexpr float SNEAK_SPEED                = 1.30f;
+    constexpr float GROUND_ACCELERATION        = 28.0f;
+    constexpr float GROUND_DECELERATION        = 34.0f;
+    constexpr float AIR_ACCELERATION           = 7.0f;
+    constexpr float WATER_SPEED                = 1.2f;
+    constexpr float WATER_FLOW_ACCELERATION    = 8.0f;
+    constexpr float WATER_FLOW_MAX_SPEED       = 8.45f;
+    constexpr float NORMAL_STEP_HEIGHT         = 0.6f;
+    constexpr float STEP_SMOOTH_SPEED          = 7.0f;
     // Vanilla applies a distinct upward impulse when a swimming entity is
     // horizontally blocked at a ledge.  It is intentionally stronger than
     // ordinary swim-up velocity so gravity cannot pull the hitbox back into
@@ -99,6 +101,37 @@ namespace {
             }
         }
         return false;
+    }
+
+    Vector3 box_water_flow(const World& world, Vector3 feet)
+    {
+        const int min_x = static_cast<int>(std::floor(feet.x - HALF_WIDTH + COLLISION_EPSILON));
+        const int max_x = static_cast<int>(std::floor(feet.x + HALF_WIDTH - COLLISION_EPSILON));
+        const int min_y = static_cast<int>(std::floor(feet.y + COLLISION_EPSILON));
+        const int max_y = static_cast<int>(std::floor(feet.y + PlayerController::HEIGHT - COLLISION_EPSILON));
+        const int min_z = static_cast<int>(std::floor(feet.z - HALF_WIDTH + COLLISION_EPSILON));
+        const int max_z = static_cast<int>(std::floor(feet.z + HALF_WIDTH - COLLISION_EPSILON));
+
+        Vector3 total{0.0f, 0.0f, 0.0f};
+        int count = 0;
+        for (int x = min_x; x <= max_x; ++x) {
+            for (int y = min_y; y <= max_y; ++y) {
+                for (int z = min_z; z <= max_z; ++z) {
+                    if (world.get_block(x, y, z) != BlockType::Water ||
+                        feet.y >= y + WATER_SURFACE_HEIGHT ||
+                        feet.y + PlayerController::HEIGHT <= y) {
+                        continue;
+                    }
+
+                    Vector3 flow = world.water_flow_at({x + 0.5f, y + 0.5f, z + 0.5f});
+                    if (Vector3LengthSqr(flow) <= 0.000001f) continue;
+                    total = Vector3Add(total, flow);
+                    ++count;
+                }
+            }
+        }
+        if (count == 0 || Vector3LengthSqr(total) <= 0.000001f) return {0.0f, 0.0f, 0.0f};
+        return Vector3Normalize(total);
     }
 
     // Same shape as box_touches_water, minus the partial-surface-height
@@ -269,6 +302,16 @@ void PlayerController::update(Camera3D& eyes, const World& world, GameMode mode,
     if (Vector3LengthSqr(wish) < 0.000001f && grounded) acceleration = GROUND_DECELERATION;
     horizontal_velocity.x = move_towards(horizontal_velocity.x, desired.x, acceleration * delta_time);
     horizontal_velocity.z = move_towards(horizontal_velocity.z, desired.z, acceleration * delta_time);
+    if (in_water) {
+        Vector3 flow = box_water_flow(world, feet);
+        if (Vector3LengthSqr(flow) > 0.000001f) {
+            Vector3 flow_target = Vector3Scale(flow, WATER_FLOW_MAX_SPEED);
+            horizontal_velocity.x = move_towards(horizontal_velocity.x, desired.x + flow_target.x,
+                                                 WATER_FLOW_ACCELERATION * delta_time);
+            horizontal_velocity.z = move_towards(horizontal_velocity.z, desired.z + flow_target.z,
+                                                 WATER_FLOW_ACCELERATION * delta_time);
+        }
+    }
 
     if (in_water) {
         float target_vertical = input.jump ? WATER_SPEED : input.sneak ? -WATER_SPEED : -0.35f;

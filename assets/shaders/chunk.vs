@@ -51,15 +51,9 @@ void main()
     vec3 localPosition = vertexPosition;
 
     if (isWaterPass) {
-        // Only a water surface's own already-lowered top corners ripple -
-        // Chunk::append_face's top_drop (WATER_SURFACE_DROP = 2/16) leaves
-        // them at a local Y whose fractional part is 0.875, distinguishing
-        // them from a full-height bottom corner (fractional part 0.0).
-        // Every vertex reaching this shader during the water pass is one
-        // or the other: a fully-submerged water block's top face is never
-        // actually meshed at all (Chunk::build_mesh culls it), so there's
-        // no "undropped water top" case to worry about being missed here.
-        if (fract(localPosition.y) > 0.5) {
+        // Ripple the water surface and side top edges, whatever flowing
+        // level produced their height. Bottom corners stay at -0.5.
+        if (localPosition.y > -0.49) {
             vec3 worldPosition = (matModel * vec4(localPosition, 1.0)).xyz;
             float wave = sin(worldPosition.x * 0.6 + worldPosition.z * 0.4 + waterTime * 1.6) * 0.04
                        + sin(worldPosition.x * 0.25 - worldPosition.z * 0.35 + waterTime * 1.1) * 0.03;
