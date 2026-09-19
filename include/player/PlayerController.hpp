@@ -47,7 +47,7 @@ public:
 
 private:
     Vector3 horizontal_velocity = {0.0f, 0.0f, 0.0f};
-    float vertical_velocity = 0.0f;
+    float vertical_velocity  = 0.0f;
     float step_visual_offset = 0.0f;
     bool grounded        = false;
     bool touching_water  = false;

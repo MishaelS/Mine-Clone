@@ -46,17 +46,17 @@ struct BlockInstanceState {
 // block (which never has a block_state entry at all) never needs special-
 // casing here.
 namespace BlockStateBits {
-    constexpr uint16_t OPEN = 1u << 0;         // door / trapdoor
-    constexpr uint16_t TOP_HALF = 1u << 1;     // trapdoor only
+    constexpr uint16_t OPEN        = 1u << 0;  // door / trapdoor
+    constexpr uint16_t TOP_HALF    = 1u << 1;  // trapdoor only
     constexpr uint16_t HINGE_RIGHT = 1u << 2;  // door only
 
     // 0 = single, 1 = primary, 2 = secondary - large/double chest pairing only.
     constexpr uint16_t MULTIBLOCK_PART_SHIFT = 3;
-    constexpr uint16_t MULTIBLOCK_PART_MASK = 0b11u << MULTIBLOCK_PART_SHIFT;
+    constexpr uint16_t MULTIBLOCK_PART_MASK  = 0b11u << MULTIBLOCK_PART_SHIFT;
 
     // Cake, 0-6 - see get_block_shape(BlockType::Cake, ...).
     constexpr uint16_t BITE_COUNT_SHIFT = 5;
-    constexpr uint16_t BITE_COUNT_MASK = 0b111u << BITE_COUNT_SHIFT;
+    constexpr uint16_t BITE_COUNT_MASK  = 0b111u << BITE_COUNT_SHIFT;
 }
 
 enum class ChestPart : uint8_t { Single, Primary, Secondary };
