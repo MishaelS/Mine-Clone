@@ -71,9 +71,10 @@ public:
     // its own 27-slot storage, read from `world` via World::
     // chest_inventory() at whatever position open_container() was last
     // called with - `world` may be null only in states this is never
-    // actually called from (chest slots just render empty then). Furnace's
-    // own input/fuel/output slots are still pure background decoration -
-    // this project has no smelting simulation yet.
+    // actually called from (chest slots just render empty then). Furnace
+    // shows World::furnace_state()'s input/fuel/output slots (output is
+    // take-only) plus its flame/arrow progress; the smelting itself runs in
+    // World::update_furnaces() whether or not this screen is open.
     std::optional<ItemStack> update_grid(Inventory& inventory, GameMode game_mode, World* world, const Binding& drop_binding);
 
 private:

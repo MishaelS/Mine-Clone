@@ -444,4 +444,62 @@ namespace WorldSave {
         }
         return result;
     }
+    bool save_furnaces(const std::string& folder_name, const std::vector<FurnaceSaveState>& furnaces) {
+        std::ofstream out(world_directory(folder_name) + "/furnaces.json", std::ios::binary | std::ios::trunc);
+        if (!out) return false;
+
+        out << "{\n  \"furnaces\": [\n";
+        bool wrote_any = false;
+        for (const FurnaceSaveState& furnace : furnaces) {
+            // Nothing in it and not burning - nothing worth restoring.
+            if (furnace.state.empty()) continue;
+            if (wrote_any) out << ",\n";
+            wrote_any = true;
+            out << "    { \"x\": " << furnace.x << ", \"y\": " << furnace.y << ", \"z\": " << furnace.z
+                << ", \"input\": ";
+            write_item_stack(out, furnace.state.input);
+            out << ", \"fuel\": ";
+            write_item_stack(out, furnace.state.fuel);
+            out << ", \"output\": ";
+            write_item_stack(out, furnace.state.output);
+            out << ", \"burn_ticks_left\": " << furnace.state.burn_ticks_left
+                << ", \"burn_ticks_total\": " << furnace.state.burn_ticks_total
+                << ", \"cook_ticks\": " << furnace.state.cook_ticks << " }";
+        }
+        out << "\n  ]\n}\n";
+        return static_cast<bool>(out);
+    }
+
+    std::vector<FurnaceSaveState> load_furnaces(const std::string& folder_name) {
+        std::vector<FurnaceSaveState> result;
+        std::string text = read_whole_file(world_directory(folder_name) + "/furnaces.json");
+        if (text.empty()) return result;
+
+        try {
+            Json root = Json::parse(text);
+            for (const Json& entry : root["furnaces"].as_array()) {
+                std::optional<ItemStack> input = read_item_stack(entry["input"]);
+                std::optional<ItemStack> fuel = read_item_stack(entry["fuel"]);
+                std::optional<ItemStack> output = read_item_stack(entry["output"]);
+                // Same "one bad entry doesn't cost every other one" rule as
+                // load_chests().
+                if (!input || !fuel || !output) continue;
+
+                FurnaceSaveState furnace;
+                furnace.x = static_cast<int>(entry["x"].as_number(0));
+                furnace.y = static_cast<int>(entry["y"].as_number(0));
+                furnace.z = static_cast<int>(entry["z"].as_number(0));
+                furnace.state.input = *input;
+                furnace.state.fuel = *fuel;
+                furnace.state.output = *output;
+                furnace.state.burn_ticks_left = std::max(0, static_cast<int>(entry["burn_ticks_left"].as_number(0)));
+                furnace.state.burn_ticks_total = std::max(0, static_cast<int>(entry["burn_ticks_total"].as_number(0)));
+                furnace.state.cook_ticks = std::max(0, static_cast<int>(entry["cook_ticks"].as_number(0)));
+                result.push_back(furnace);
+            }
+        } catch (const std::exception&) {
+            return {};
+        }
+        return result;
+    }
 }

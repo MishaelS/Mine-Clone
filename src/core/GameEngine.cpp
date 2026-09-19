@@ -6,6 +6,7 @@
 #include "player/Item.hpp"
 #include "player/DropTable.hpp"
 #include "player/Recipe.hpp"
+#include "player/Smelting.hpp"
 #include "player/PlayerController.hpp"
 #include "ui/FontManager.hpp"
 #include "ui/Widgets.hpp"
@@ -351,6 +352,7 @@ GameEngine::GameEngine(int screen_width, int screen_height, const char* title)
     Load_item_definitions();
     Load_drop_table(); // needs both name tables above ready to resolve against
     Load_recipes();
+    Load_smelting(); // same name tables as recipes
     audio.initialize();
     ui::load_translations(); // before FontManager::get() below - the font bakes their glyphs
     ui::set_language(settings.language);
@@ -457,6 +459,7 @@ void GameEngine::tick()
         world->update_chunk_states(camera.position);
         world->update_fluids();
         world->update_falling_blocks();
+        world->update_furnaces();
     }
     tick_dropped_items();
     update_leaf_decay();
@@ -685,6 +688,18 @@ void GameEngine::spill_chest_if_any(int x, int y, int z)
     std::array<ItemStack, INVENTORY_STORAGE_SIZE> contents = world->take_chest_inventory(x, y, z);
     Vector3 center = {x + 0.5f, y + 0.5f, z + 0.5f};
     for (const ItemStack& stack : contents) {
+        if (stack.empty()) continue;
+        dropped_items.push_back(std::make_unique<DroppedItem>(
+            center, stack, break_launch_velocity({0.0f, 1.0f, 0.0f}), DroppedItemOrigin::Natural));
+    }
+}
+
+void GameEngine::spill_furnace_if_any(int x, int y, int z)
+{
+    if (!world) return;
+    FurnaceState furnace = world->take_furnace_state(x, y, z);
+    Vector3 center = {x + 0.5f, y + 0.5f, z + 0.5f};
+    for (const ItemStack& stack : {furnace.input, furnace.fuel, furnace.output}) {
         if (stack.empty()) continue;
         dropped_items.push_back(std::make_unique<DroppedItem>(
             center, stack, break_launch_velocity({0.0f, 1.0f, 0.0f}), DroppedItemOrigin::Natural));
@@ -1135,11 +1150,6 @@ void GameEngine::draw_player_model() const
 
 void GameEngine::update(float delta_time)
 {
-    // For the open-transition check right after every path that can open
-    // the inventory grid (E, or right-clicking a Workbench/Furnace/Chest)
-    // - see its own comment further down.
-    bool inventory_was_open = inventory_hud.is_open();
-
     // Mouse wheel adjusting walking speed - commented out for now (left
     // over from when this was a free-fly camera with no gravity); walking
     // speed stays fixed at CAMERA_MOVE_SPEED_DEFAULT instead. Uncomment to
@@ -1398,6 +1408,7 @@ void GameEngine::update(float delta_time)
                 if (is_log_block(*broken)) check_leaf_decay_near(hit->x, hit->y, hit->z);
                 check_grass_support_above(hit->x, hit->y, hit->z);
                 if (*broken == BlockType::Chest) spill_chest_if_any(hit->x, hit->y, hit->z);
+                if (*broken == BlockType::Furnace || *broken == BlockType::LitFurnace) spill_furnace_if_any(hit->x, hit->y, hit->z);
             }
         }
     }
@@ -1472,6 +1483,9 @@ void GameEngine::update(float delta_time)
                     if (is_log_block(*broken)) check_leaf_decay_near(breaking_x, breaking_y, breaking_z);
                     check_grass_support_above(breaking_x, breaking_y, breaking_z);
                     if (*broken == BlockType::Chest) spill_chest_if_any(breaking_x, breaking_y, breaking_z);
+                    if (*broken == BlockType::Furnace || *broken == BlockType::LitFurnace) {
+                        spill_furnace_if_any(breaking_x, breaking_y, breaking_z);
+                    }
                 }
                 is_breaking = false;
                 breaking_progress = 0.0f;
@@ -1621,15 +1635,6 @@ void GameEngine::update(float delta_time)
 
     } // alive && !ui_captured
 
-    // Just opened (E, or right-clicking a Workbench/Furnace/Chest) - draw()
-    // reuses the exact same frozen-blurred-background mechanism the Esc
-    // pause menu does (see pause_snapshot_pending's own comment there),
-    // rather than a separate texture: the two screens never overlap, since
-    // Esc closes an already-open inventory instead of pausing over it.
-    if (!inventory_was_open && inventory_hud.is_open()) {
-        pause_snapshot_pending = true;
-    }
-
     for (auto& object : objects) {
         if (object->is_active()) {
             object->update(delta_time, world.get());
@@ -1643,26 +1648,17 @@ void GameEngine::draw()
     BeginDrawing();
     ClearBackground(RAYWHITE);
 
-    // Inventory screens (hotbar grid, chest/furnace/workbench) freeze-frame
-    // the world behind them the same way the Esc pause menu does - a
-    // one-time blurred snapshot (pause_snapshot/pause_snapshot_pending,
-    // shared with the pause menu below since the two never overlap: Esc
-    // closes an open inventory first rather than pausing over it) instead
-    // of a live re-render every frame, both because re-blurring a full
-    // frame is far too expensive to do continuously and because it reads
-    // as the same familiar "paused" look. The world itself keeps
-    // simulating regardless (see update()'s own ui_captured handling,
-    // which is exactly why this is purely visual, not an actual pause) -
-    // gravity/damage/a growing sapling just aren't shown while it's
-    // covered by a frozen picture of the moment the grid opened.
-    //
-    // pause_snapshot_pending forces one more live frame through even while
-    // the grid is already open - set the instant it (or Esc's own pause)
-    // just opened, it's what actually gives capture_blurred_background()
-    // below fresh pixels to grab before this same condition flips back to
-    // showing the cached texture on every subsequent frame.
-    bool show_live_world = !inventory_hud.is_open() || pause_snapshot_pending;
-    if (show_live_world) {
+    // Inventory screens (hotbar grid, chest/furnace/workbench) keep the
+    // world drawing live behind them - it keeps simulating anyway (see
+    // update()'s own ui_captured handling) - just blurred: rendered at half
+    // resolution into an off-screen target and drawn back through a small
+    // GPU blur (ui::begin_blurred_background()), cheap enough every frame.
+    // The Esc pause menu still uses a one-time snapshot instead (see
+    // pause_snapshot_pending below) - it draws over its own menu loop, not
+    // this one.
+    const bool blur_world = inventory_hud.is_open();
+    if (blur_world) ui::begin_blurred_background();
+    {
         // How far the current frame already is into the *next* tick (0
         // right after one lands, approaching 1 right before the next does)
         // - every tick-simulated entity (dropped items, falling blocks)
@@ -1754,15 +1750,8 @@ void GameEngine::draw()
         Color haze_color = skybox_horizon_color();
         haze_color.a = CAMERA_HAZE_ALPHA;
         DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), haze_color);
-    } else if (IsTextureValid(pause_snapshot)) {
-        // The haze rectangle above is already baked into this captured
-        // frame (it was drawn to the back buffer right before the capture
-        // below ever ran) - redrawing it here would double it up.
-        DrawTexturePro(pause_snapshot,
-            {0.0f, 0.0f, static_cast<float>(pause_snapshot.width), static_cast<float>(pause_snapshot.height)},
-            {0.0f, 0.0f, static_cast<float>(GetScreenWidth()), static_cast<float>(GetScreenHeight())},
-            {0.0f, 0.0f}, 0.0f, WHITE);
     }
+    if (blur_world) ui::end_blurred_background();
 
     if (pause_snapshot_pending) {
         if (IsTextureValid(pause_snapshot)) UnloadTexture(pause_snapshot);
@@ -1929,7 +1918,7 @@ void GameEngine::update_and_draw_menu()
         case GameState::WorldList: {
             WorldListScreen::Action action = world_list_screen.update();
             if (action.type == WorldListScreen::ActionType::LoadWorld) {
-                start_singleplayer_world(action.folder_name);
+                pending_world_folder = action.folder_name;
             } else if (action.type == WorldListScreen::ActionType::CreateWorld) {
                 enter_state(GameState::WorldCreate);
             } else if (action.type == WorldListScreen::ActionType::Back) {
@@ -1941,7 +1930,7 @@ void GameEngine::update_and_draw_menu()
             WorldCreateScreen::Action action = world_create_screen.update();
             if (action.type == WorldCreateScreen::ActionType::Create) {
                 WorldSave::create_world(action.world);
-                start_singleplayer_world(action.world.folder_name);
+                pending_world_folder = action.world.folder_name;
             } else if (action.type == WorldCreateScreen::ActionType::Cancel) {
                 enter_state(GameState::WorldList);
             }
@@ -1974,6 +1963,14 @@ void GameEngine::update_and_draw_menu()
     }
 
     EndDrawing();
+
+    // Only now, with this menu frame finished - loading draws frames of
+    // its own (the loading screen), which can't nest inside this one.
+    if (pending_world_folder) {
+        std::string folder = *pending_world_folder;
+        pending_world_folder.reset();
+        start_singleplayer_world(folder);
+    }
 }
 
 void GameEngine::enter_state(GameState new_state)
@@ -2018,7 +2015,31 @@ void GameEngine::start_singleplayer_world(const std::string& folder_name)
 
     current_world_folder = folder_name;
     current_game_mode = info->game_mode;
+
+    // A world with no player.json yet has never been played - it's being
+    // generated from scratch, not loaded back.
+    std::optional<PlayerSaveState> saved = WorldSave::load_player_state(folder_name);
+    const char* title_key = saved ? "loading.loading" : "loading.generating";
+    loading_screen.reset();
+    last_loading_frame_time = 0.0;
+    auto draw_loading_frame = [this, title_key](WorldLoadStage stage, float progress) {
+        // At most 60 frames a second: EndDrawing() waits out the target
+        // frame time, so drawing after every single chunk would slow the
+        // load itself down.
+        const double now = GetTime();
+        if (now - last_loading_frame_time < 1.0 / 60.0 && progress < 1.0f) return;
+        last_loading_frame_time = now;
+        const char* stage_key = stage == WorldLoadStage::Terrain ? "loading.terrain"
+            : stage == WorldLoadStage::Lighting ? "loading.lighting" : "loading.meshes";
+        BeginDrawing();
+        ClearBackground(BLACK);
+        loading_screen.draw(ui::tr(title_key), ui::tr(stage_key), progress);
+        EndDrawing();
+    };
+    draw_loading_frame(WorldLoadStage::Terrain, 0.0f); // up before the World is even built
+
     auto new_world = std::make_unique<World>(config);
+    new_world->set_load_progress_callback(draw_loading_frame);
     // Inventory belongs to a save, never to the GameEngine session. Without
     // this reset, entering a brand-new world after leaving another one
     // leaked the previous world's stacks into it.
@@ -2035,7 +2056,7 @@ void GameEngine::start_singleplayer_world(const std::string& folder_name)
     // played world was reopened - measured as roughly doubling load time.
     // A brand new world has no player.json yet, so falls through to
     // set_world()'s normal spawn search unchanged.
-    if (std::optional<PlayerSaveState> saved = WorldSave::load_player_state(folder_name)) {
+    if (saved) {
         world = std::move(new_world);
         camera.position = saved->position;
         camera.target = Vector3Add(camera.position, Vector3Scale(saved->forward, 10.0f));
@@ -2074,8 +2095,25 @@ void GameEngine::start_singleplayer_world(const std::string& folder_name)
         for (const ChestSaveState& chest : WorldSave::load_chests(folder_name)) {
             world->chest_inventory(chest.x, chest.y, chest.z) = chest.slots;
         }
+        // Same for every furnace - burn/cook progress included, so a lit
+        // furnace keeps smelting where it left off.
+        for (const FurnaceSaveState& furnace : WorldSave::load_furnaces(folder_name)) {
+            world->furnace_state(furnace.x, furnace.y, furnace.z) = furnace.state;
+        }
     } else {
         set_world(std::move(new_world));
+    }
+    // Loading's done - no more loading-screen frames from here on (the
+    // callback captures `this`, and nothing blocking should draw one).
+    if (world) world->set_load_progress_callback({});
+
+    // The bar fills slower than a fast load finishes - let it visibly
+    // reach 100% before switching to the world.
+    while (!loading_screen.finished() && !WindowShouldClose()) {
+        BeginDrawing();
+        ClearBackground(BLACK);
+        loading_screen.draw(ui::tr(title_key), ui::tr("loading.meshes"), 1.0f);
+        EndDrawing();
     }
 
     enter_state(GameState::Playing);
@@ -2118,6 +2156,12 @@ void GameEngine::save_player_state()
         saved_chests.push_back({chest.x, chest.y, chest.z, chest.slots});
     }
     WorldSave::save_chests(current_world_folder, saved_chests);
+
+    std::vector<FurnaceSaveState> saved_furnaces;
+    for (const World::FurnaceSnapshot& furnace : world->all_furnace_states()) {
+        saved_furnaces.push_back({furnace.x, furnace.y, furnace.z, furnace.state});
+    }
+    WorldSave::save_furnaces(current_world_folder, saved_furnaces);
 }
 
 void GameEngine::return_to_main_menu()

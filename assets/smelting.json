@@ -1,0 +1,36 @@
+{
+  "_notes": "Furnace smelting (Minecraft Beta 1.7.3 rules). Every recipe takes one input item and cook_ticks game ticks (20 per second) to make one output. Fuel burns for burn_ticks each; one coal (1600) smelts 8 items, one plank/log (300) 1.5 items. Names are blocks.json / items.json ids.",
+  "cook_ticks": 200,
+
+  "recipes": [
+    { "input": "iron_ore"    , "output": "iron_ingot" },
+    { "input": "gold_ore"    , "output": "gold_ingot" },
+    { "input": "diamond_ore" , "output": "diamond" },
+    { "input": "sand"        , "output": "glass" },
+    { "input": "cobblestone" , "output": "stone" },
+    { "input": "raw_porkchop", "output": "cooked_porkchop" },
+    { "input": "raw_fish"    , "output": "cooked_fish" },
+    { "input": "oak_log"     , "output": "coal", "_note": "vanilla gives charcoal - this build has no separate charcoal item, and it works the same as coal" },
+    { "input": "spruce_log"  , "output": "coal" },
+    { "input": "birch_log"   , "output": "coal" }
+  ],
+
+  "fuels": [
+    { "name": "coal"        , "burn_ticks": 1600 },
+    { "name": "oak_log"     , "burn_ticks": 300 },
+    { "name": "spruce_log"  , "burn_ticks": 300 },
+    { "name": "birch_log"   , "burn_ticks": 300 },
+    { "name": "oak_planks"  , "burn_ticks": 300 },
+    { "name": "workbench"   , "burn_ticks": 300 },
+    { "name": "chest"       , "burn_ticks": 300 },
+    { "name": "bookshelf"   , "burn_ticks": 300 },
+    { "name": "note_block"  , "burn_ticks": 300 },
+    { "name": "jukebox"     , "burn_ticks": 300 },
+    { "name": "oak_stairs"  , "burn_ticks": 300 },
+    { "name": "oak_trapdoor", "burn_ticks": 300 },
+    { "name": "oak_slab"    , "burn_ticks": 150 },
+    { "name": "stick"       , "burn_ticks": 100 },
+    { "name": "sapling"     , "burn_ticks": 100 },
+    { "name": "oak_sapling" , "burn_ticks": 100 }
+  ]
+}

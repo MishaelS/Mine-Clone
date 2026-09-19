@@ -201,6 +201,11 @@
     "mouse.left": "Мышь: ЛКМ",
     "mouse.right": "Мышь: ПКМ",
     "mouse.middle": "Мышь: СКМ",
-    "mouse.other": "Мышь: кнопка"
+    "mouse.other": "Мышь: кнопка",
+    "loading.generating": "Генерация мира",
+    "loading.loading": "Загрузка мира",
+    "loading.terrain": "Создание ландшафта",
+    "loading.lighting": "Расчёт освещения",
+    "loading.meshes": "Подготовка мира"
   }
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "player/Inventory.hpp"
+#include "player/Smelting.hpp"
 
 #include "raylib.h"
 
@@ -65,6 +66,11 @@ struct DroppedItemSaveState {
 struct ChestSaveState {
     int x = 0, y = 0, z = 0;
     std::array<ItemStack, INVENTORY_STORAGE_SIZE> slots{};
+};
+
+struct FurnaceSaveState {
+    int x = 0, y = 0, z = 0;
+    FurnaceState state;
 };
 
 namespace WorldSave {
@@ -138,4 +144,11 @@ namespace WorldSave {
     // Empty if the file is missing/corrupted - same "no fallback needed"
     // reasoning as load_dropped_items().
     std::vector<ChestSaveState> load_chests(const std::string& folder_name);
+
+    // saves/<folder_name>/furnaces.json - every furnace's slots and burn/
+    // cook progress (see World::all_furnace_states()), so smelting resumes
+    // exactly where it stopped. Same overwrite/skip-empty behavior as
+    // save_chests()/load_chests().
+    bool save_furnaces(const std::string& folder_name, const std::vector<FurnaceSaveState>& furnaces);
+    std::vector<FurnaceSaveState> load_furnaces(const std::string& folder_name);
 }

@@ -24,6 +24,7 @@
 #include "ui/PauseMenuScreen.hpp"
 #include "ui/InventoryHud.hpp"
 #include "ui/ChatHud.hpp"
+#include "ui/LoadingScreen.hpp"
 #include "world/World.hpp"
 
 // A leaf block found disconnected from every nearby log (see
@@ -192,6 +193,10 @@ private:
     // opened (take_chest_inventory() just returns all-empty then).
     void spill_chest_if_any(int x, int y, int z);
 
+    // Same for a broken Furnace/LitFurnace - its input, fuel and output
+    // slots (World::take_furnace_state()) fall out as dropped items.
+    void spill_furnace_if_any(int x, int y, int z);
+
     // Chat submit (draw()'s own call into chat_hud.update_and_draw()): a
     // "/"-prefixed line goes to execute_chat_command() below, anything else
     // just gets echoed back into the log under the player's own name - see
@@ -238,8 +243,19 @@ private:
 
     // Loads folder_name's WorldInfo, builds a WorldConfig from it plus the
     // current Settings (render/fog distance), constructs the World, and
-    // hands it to the existing set_world() - then enters Playing.
+    // hands it to the existing set_world() - then enters Playing. Shows
+    // loading_screen the whole time the world blocks generating/loading.
+    // Must be called outside any BeginDrawing()/EndDrawing() pair (it draws
+    // its own frames) - the menus queue it via pending_world_folder.
     void start_singleplayer_world(const std::string& folder_name);
+
+    // "Generating/Loading world" screen, drawn from World's load-progress
+    // callback during start_singleplayer_world().
+    LoadingScreen loading_screen;
+    double last_loading_frame_time = 0.0;
+    // Picked in the world list/create screens, started right after that
+    // menu frame ends - see start_singleplayer_world()'s own comment.
+    std::optional<std::string> pending_world_folder;
 
     // "Выйти и сохранить игру" from the pause menu: saves player state
     // (see save_player_state()), destroys the World (~World() flushes any

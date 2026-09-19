@@ -53,6 +53,7 @@ add_executable(${PROJECT_NAME}
     src/player/DroppedItem.cpp
     src/player/DropTable.cpp
     src/player/Recipe.cpp
+    src/player/Smelting.cpp
     src/effects/ParticleSystem.cpp
 
     # World, generation, and rendering
@@ -78,6 +79,7 @@ add_executable(${PROJECT_NAME}
     src/ui/PauseMenuScreen.cpp
     src/ui/InventoryHud.cpp
     src/ui/ChatHud.cpp
+    src/ui/LoadingScreen.cpp
 )
 target_include_directories(${PROJECT_NAME} PRIVATE include)
 

@@ -330,6 +330,46 @@ namespace ui {
         return result;
     }
 
+    namespace {
+        RenderTexture2D blur_target{};
+        Shader blur_shader{};
+        int blur_texel_size_location = -1;
+    }
+
+    void begin_blurred_background() {
+        // Half the screen's size, same downsample the one-off capture uses -
+        // (re)created lazily, and again whenever the window is resized.
+        const int width = std::max(1, GetScreenWidth() / 2);
+        const int height = std::max(1, GetScreenHeight() / 2);
+        if (!IsRenderTextureValid(blur_target) || blur_target.texture.width != width ||
+            blur_target.texture.height != height) {
+            if (IsRenderTextureValid(blur_target)) UnloadRenderTexture(blur_target);
+            blur_target = LoadRenderTexture(width, height);
+            SetTextureFilter(blur_target.texture, TEXTURE_FILTER_BILINEAR);
+        }
+        if (!IsShaderValid(blur_shader)) {
+            blur_shader = LoadShader(nullptr, ASSETS_PATH "shaders/blur.fs");
+            blur_texel_size_location = GetShaderLocation(blur_shader, "texelSize");
+        }
+        BeginTextureMode(blur_target);
+        ClearBackground(BLACK);
+    }
+
+    void end_blurred_background() {
+        EndTextureMode();
+        const float width = static_cast<float>(blur_target.texture.width);
+        const float height = static_cast<float>(blur_target.texture.height);
+        const float texel_size[2] = {1.0f / width, 1.0f / height};
+        SetShaderValue(blur_shader, blur_texel_size_location, texel_size, SHADER_UNIFORM_VEC2);
+        BeginShaderMode(blur_shader);
+        // Render textures are stored upside down - negative source height
+        // flips it back.
+        DrawTexturePro(blur_target.texture, {0.0f, 0.0f, width, -height},
+                       {0.0f, 0.0f, static_cast<float>(GetScreenWidth()), static_cast<float>(GetScreenHeight())},
+                       {0.0f, 0.0f}, 0.0f, WHITE);
+        EndShaderMode();
+    }
+
     void crosshair() {
         Color color = {CROSSHAIR_INTENSITY, CROSSHAIR_INTENSITY, CROSSHAIR_INTENSITY, 255};
         float center_x = GetScreenWidth() / 2.0f;

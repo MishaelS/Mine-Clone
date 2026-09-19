@@ -1494,6 +1494,62 @@ std::vector<World::ChestSnapshot> World::all_chest_inventories() const
     return result;
 }
 
+FurnaceState& World::furnace_state(int x, int y, int z)
+{
+    return furnace_storage[ChestPosKey{x, y, z}];
+}
+
+FurnaceState World::take_furnace_state(int x, int y, int z)
+{
+    auto it = furnace_storage.find(ChestPosKey{x, y, z});
+    if (it == furnace_storage.end()) return {};
+    FurnaceState state = it->second;
+    furnace_storage.erase(it);
+    return state;
+}
+
+std::vector<World::FurnaceSnapshot> World::all_furnace_states() const
+{
+    std::vector<FurnaceSnapshot> result;
+    result.reserve(furnace_storage.size());
+    for (const auto& [key, state] : furnace_storage) {
+        result.push_back({key.x, key.y, key.z, state});
+    }
+    return result;
+}
+
+void World::update_furnaces()
+{
+    for (auto it = furnace_storage.begin(); it != furnace_storage.end();) {
+        const ChestPosKey& pos = it->first;
+        // Only furnaces in loaded chunks run - same as vanilla, where an
+        // unloaded furnace simply pauses until its chunk is back.
+        if (chunk_at(floor_div(pos.x, CHUNK_SIZE), floor_div(pos.z, CHUNK_SIZE)) == nullptr) {
+            ++it;
+            continue;
+        }
+        BlockType block = get_block(pos.x, pos.y, pos.z);
+        if (block != BlockType::Furnace && block != BlockType::LitFurnace) {
+            it = furnace_storage.erase(it);
+            continue;
+        }
+
+        FurnaceState& furnace = it->second;
+        tick_furnace(furnace);
+
+        // Lit <-> unlit swap. Replacing the block clears its stored
+        // facing, so it's written straight back; the furnace's own state
+        // lives in this map by position and isn't touched.
+        BlockType wanted = furnace.burning() ? BlockType::LitFurnace : BlockType::Furnace;
+        if (block != wanted) {
+            HorizontalDirection facing = get_block_orientation(pos.x, pos.y, pos.z);
+            set_block_and_rebuild(pos.x, pos.y, pos.z, wanted);
+            set_block_orientation(pos.x, pos.y, pos.z, facing);
+        }
+        ++it;
+    }
+}
+
 std::vector<std::pair<int, int>> World::loaded_chunk_coordinates() const
 {
     std::vector<std::pair<int, int>> result;
@@ -1632,6 +1688,24 @@ void World::update_chunk_states_blocking(Vector3 observer_position)
     int min_z = std::max(-WORLD_BORDER_CHUNKS, observer_chunk.z - config.loaded_radius_chunks);
     int max_z = std::min(WORLD_BORDER_CHUNKS - 1, observer_chunk.z + config.loaded_radius_chunks);
 
+    // Loading-screen progress (set_load_progress_callback()): terrain
+    // generation is by far the heaviest part, then meshing, then light.
+    constexpr float TERRAIN_SHARE = 0.6f;
+    constexpr float LIGHTING_SHARE = 0.1f;
+    auto report = [this](WorldLoadStage stage, float progress) {
+        if (load_progress) load_progress(stage, progress);
+    };
+    int to_generate = 0;
+    if (load_progress) {
+        for (int cx = min_x; cx <= max_x; ++cx) {
+            for (int cz = min_z; cz <= max_z; ++cz) {
+                if (chunk_at(cx, cz) == nullptr) ++to_generate;
+            }
+        }
+    }
+    int generated = 0;
+    report(WorldLoadStage::Terrain, 0.0f);
+
     for (int cx = min_x; cx <= max_x; ++cx) {
         for (int cz = min_z; cz <= max_z; ++cz) {
             Chunk* chunk = chunk_at(cx, cz);
@@ -1640,6 +1714,8 @@ void World::update_chunk_states_blocking(Vector3 observer_position)
                 chunk = chunk_at(cx, cz);
                 mark_dirty(cx, cz);
                 needs_relight.emplace_back(cx, cz);
+                ++generated;
+                report(WorldLoadStage::Terrain, TERRAIN_SHARE * generated / std::max(1, to_generate));
             }
             chunk->set_state(desired_state_for(cx, cz, observer_chunk));
         }
@@ -1662,12 +1738,20 @@ void World::update_chunk_states_blocking(Vector3 observer_position)
         needs_relight.emplace_back(cx, cz);
     }
 
+    report(WorldLoadStage::Lighting, TERRAIN_SHARE);
     relight_chunks_around(needs_relight);
 
+    const float mesh_start = TERRAIN_SHARE + LIGHTING_SHARE;
+    report(WorldLoadStage::Meshes, mesh_start);
+    int meshed = 0;
     for (int64_t key : needs_mesh) {
         auto [cx, cz] = unpack_chunk_key(key);
         rebuild_mesh(cx, cz);
+        ++meshed;
+        report(WorldLoadStage::Meshes,
+               mesh_start + (1.0f - mesh_start) * meshed / std::max<size_t>(1, needs_mesh.size()));
     }
+    report(WorldLoadStage::Meshes, 1.0f);
 }
 
 void World::set_view_distance(int loaded_radius_chunks, int fog_distance_blocks)

@@ -7,6 +7,7 @@
 #include "core/BlockShape.hpp"
 #include "core/TickMotion.hpp"
 #include "player/Inventory.hpp"
+#include "player/Smelting.hpp"
 
 #include <array>
 #include <cstdint>
@@ -43,6 +44,11 @@ struct WorldConfig {
     int active_radius_chunks = 4; // today's old hardcoded ACTIVE_RADIUS
     int fog_distance_blocks = 102; // today's old derived default (8 chunks * 16 blocks/chunk * 0.8)
 };
+
+// What update_chunk_states_blocking() is doing, for a loading screen - see
+// World::set_load_progress_callback().
+enum class WorldLoadStage : uint8_t { Terrain, Lighting, Meshes };
+using WorldLoadProgress = std::function<void(WorldLoadStage stage, float progress)>;
 
 // Owns every currently-loaded chunk in the world (streamed in/out around an
 // observer position, see update_chunk_states - nothing is loaded up front,
@@ -298,6 +304,13 @@ public:
     // ever starts dispatching background work.
     void update_chunk_states_blocking(Vector3 observer_position);
 
+    // Called from inside update_chunk_states_blocking() (and so from
+    // find_spawn_position()) as it goes - after every chunk generated,
+    // around relighting, after every mesh built - with overall progress
+    // 0..1 for that pass, so a loading screen can draw a frame while the
+    // load still blocks the main thread. Empty (the default) = no reports.
+    void set_load_progress_callback(WorldLoadProgress callback) { load_progress = std::move(callback); }
+
     // Applies a live change to config.loaded_radius_chunks/fog_distance_
     // blocks (Settings' render/fog distance sliders) - GameEngine::tick()
     // calls this once a tick whenever a world exists, so a change made
@@ -439,6 +452,33 @@ public:
     };
     std::vector<ChestSnapshot> all_chest_inventories() const;
 
+    // A Furnace/LitFurnace block's own slots and burn/cook progress, keyed
+    // by its world position - created empty on first look-up (opening it),
+    // same as chest_inventory(). InventoryHud reads/mutates it by
+    // reference; update_furnaces() advances it every game tick whether or
+    // not its screen is open.
+    FurnaceState& furnace_state(int x, int y, int z);
+
+    // Removes and returns a furnace's state (empty if it never had any) -
+    // called when the block is broken, so its items can be spilled.
+    FurnaceState take_furnace_state(int x, int y, int z);
+
+    // Every furnace position furnace_state() has ever created, for
+    // WorldSave::save_furnaces() - same snapshot shape as
+    // all_chest_inventories().
+    struct FurnaceSnapshot {
+        int x, y, z;
+        FurnaceState state;
+    };
+    std::vector<FurnaceSnapshot> all_furnace_states() const;
+
+    // One game tick of smelting for every furnace in a loaded chunk (see
+    // tick_furnace()), switching its block between Furnace and LitFurnace
+    // (keeping its facing) whenever it lights up or burns out, same as
+    // vanilla. A stale entry whose block is no longer a furnace (replaced
+    // by a command) is dropped. Call once per tick from GameEngine::tick().
+    void update_furnaces();
+
     // Every currently loaded chunk's own (chunk_x, chunk_z) - for
     // GameEngine's random-tick dispatcher (update_random_ticks()), which
     // needs to pick a few random block positions inside each one every
@@ -463,6 +503,10 @@ private:
         }
     };
     std::unordered_map<ChestPosKey, std::array<ItemStack, INVENTORY_STORAGE_SIZE>, ChestPosKeyHash> chest_storage;
+    // Same position key as chest_storage - see furnace_state().
+    std::unordered_map<ChestPosKey, FurnaceState, ChestPosKeyHash> furnace_storage;
+
+    WorldLoadProgress load_progress;
 
     // shared_ptr, not unique_ptr: a chunk a ChunkWorkerPool mesh job is
     // still reading (as the target or as a neighbor) must stay alive even

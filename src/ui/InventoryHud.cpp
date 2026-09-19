@@ -5,6 +5,7 @@
 #include "core/TextureManager.hpp"
 #include "player/Item.hpp"
 #include "player/Recipe.hpp"
+#include "player/Smelting.hpp"
 #include "core/WorldSave.hpp"
 #include "rendering/PlayerRenderer.hpp"
 #include "world/World.hpp"
@@ -47,6 +48,13 @@ namespace {
     // two icons belong).
     constexpr Vector2 FUEL_PROGRESS_ORIGIN     = {57.0f, 36.0f};
     constexpr Vector2 SMELTING_PROGRESS_ORIGIN = {79.0f, 34.0f};
+    // The furnace's three slots, measured the same flood-fill way off
+    // container2.png: input above the flame, fuel below it, and the big
+    // 24x24 output slot right of the arrow.
+    constexpr Vector2 FURNACE_INPUT_ORIGIN  = {56.0f, 17.0f};
+    constexpr Vector2 FURNACE_FUEL_ORIGIN   = {56.0f, 53.0f};
+    constexpr Vector2 FURNACE_OUTPUT_ORIGIN = {112.0f, 31.0f};
+    constexpr float   FURNACE_OUTPUT_SIZE_PX = 24.0f;
 
     constexpr float HOTBAR_SCALE    = 2.0f;
     constexpr float INVENTORY_SCALE = 2.0f;
@@ -442,34 +450,53 @@ std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory, GameMod
         draw_player_preview(preview_destination, GetMousePosition());
     }
 
-    if (kind == ContainerKind::Furnace) {
+    // The open furnace's own state (World::furnace_state(), keyed by the
+    // same position chest_x/y/z open_container() stored) - null for every
+    // other kind.
+    FurnaceState* furnace = (kind == ContainerKind::Furnace && world)
+        ? &world->furnace_state(chest_x, chest_y, chest_z) : nullptr;
+
+    if (furnace) {
+        // Both icons are drawn only partly, as progress: the flame from the
+        // bottom up by how much of the current fuel item is left, the arrow
+        // left to right by how far the current item has cooked - the
+        // panel's own art already shows their empty outlines underneath.
         const Texture2D& fuel = TextureManager::get(FUEL_PROGRESS_TEXTURE_PATH);
         const Texture2D& smelting = TextureManager::get(SMELTING_PROGRESS_TEXTURE_PATH);
-        auto draw_icon = [&](const Texture2D& icon, Vector2 origin) {
-            Rectangle icon_source = {0.0f, 0.0f, static_cast<float>(icon.width), static_cast<float>(icon.height)};
-            Rectangle icon_destination = {
-                panel_x + origin.x * inventory_scale, panel_y + origin.y * inventory_scale,
-                static_cast<float>(icon.width) * inventory_scale, static_cast<float>(icon.height) * inventory_scale,
+        auto draw_icon_part = [&](const Texture2D& icon, Vector2 origin, Rectangle source) {
+            if (source.width <= 0.0f || source.height <= 0.0f) return;
+            Rectangle destination = {
+                panel_x + (origin.x + source.x) * inventory_scale, panel_y + (origin.y + source.y) * inventory_scale,
+                source.width * inventory_scale, source.height * inventory_scale,
             };
-            DrawTexturePro(icon, icon_source, icon_destination, {0.0f, 0.0f}, 0.0f, WHITE);
+            DrawTexturePro(icon, source, destination, {0.0f, 0.0f}, 0.0f, WHITE);
         };
-        draw_icon(fuel, FUEL_PROGRESS_ORIGIN);
-        draw_icon(smelting, SMELTING_PROGRESS_ORIGIN);
+        if (furnace->burning() && furnace->burn_ticks_total > 0) {
+            const float h = static_cast<float>(fuel.height);
+            float lit = std::ceil(h * static_cast<float>(furnace->burn_ticks_left) / static_cast<float>(furnace->burn_ticks_total));
+            draw_icon_part(fuel, FUEL_PROGRESS_ORIGIN, {0.0f, h - lit, static_cast<float>(fuel.width), lit});
+        }
+        float cooked = std::floor(static_cast<float>(smelting.width) * static_cast<float>(furnace->cook_ticks) /
+                                  static_cast<float>(smelting_cook_ticks()));
+        draw_icon_part(smelting, SMELTING_PROGRESS_ORIGIN, {0.0f, 0.0f, cooked, static_cast<float>(smelting.height)});
     }
 
     Vector2 mouse = GetMousePosition();
     ItemStack* hovered_slot = nullptr;
     bool hovered_hotbar = false;
-    bool hovered_chest = false;
+    bool hovered_chest = false;     // a container-side slot (chest, furnace) rather than the player's own
+    bool hovered_take_only = false; // furnace output - items can be taken out, never put in
 
-    auto process_slot = [&](ItemStack& stack, Vector2 slot_origin, bool is_hotbar, bool is_chest = false) {
-        const Rectangle bounds = slot_bounds(slot_origin, inventory_scale);
+    auto process_slot = [&](ItemStack& stack, Vector2 slot_origin, bool is_hotbar, bool is_chest = false,
+                            bool take_only = false, float size_px = ITEM_SIZE_PX) {
+        const Rectangle bounds = slot_bounds(slot_origin, inventory_scale, size_px);
         draw_item_stack(bounds, stack, inventory_scale);
 
         if (CheckCollisionPointRec(mouse, bounds)) {
             hovered_slot = &stack;
             hovered_hotbar = is_hotbar;
             hovered_chest = is_chest;
+            hovered_take_only = take_only;
             draw_slot_highlight(bounds);
             if (!stack.empty()) {
                 tooltip.show(stack_name(stack), mouse);
@@ -504,6 +531,13 @@ std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory, GameMod
                 process_slot((*chest_secondary)[i], slot_origin, false, true);
             }
         }
+    }
+
+    if (furnace) {
+        auto origin = [&](Vector2 o) { return Vector2{panel_x + o.x * inventory_scale, panel_y + o.y * inventory_scale}; };
+        process_slot(furnace->input, origin(FURNACE_INPUT_ORIGIN), false, true);
+        process_slot(furnace->fuel, origin(FURNACE_FUEL_ORIGIN), false, true);
+        process_slot(furnace->output, origin(FURNACE_OUTPUT_ORIGIN), false, true, true, FURNACE_OUTPUT_SIZE_PX);
     }
 
     // LargeChest's own container4.png is taller (LARGE_CHEST_GRID_ROWS
@@ -604,6 +638,20 @@ std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory, GameMod
             // overflows into its secondary half once the primary is full.
             transfer_to(*chest);
             if (chest_secondary && !source.empty()) transfer_to(*chest_secondary);
+        } else if (furnace && (smelting_result(source) || fuel_burn_ticks(source) > 0)) {
+            // Into the furnace, vanilla's order: anything smeltable goes
+            // to the input slot (a log smelts before it burns), otherwise
+            // fuel to the fuel slot.
+            ItemStack& slot = smelting_result(source) ? furnace->input : furnace->fuel;
+            if (slot.empty()) {
+                slot = source;
+                source.clear();
+            } else if (same_stack(slot, source) && slot.count < MAX_ITEM_STACK) {
+                int moved = std::min(source.count, MAX_ITEM_STACK - slot.count);
+                slot.count += moved;
+                source.count -= moved;
+                if (source.count <= 0) source.clear();
+            }
         } else if (from_hotbar) {
             transfer_to(inventory.storage);
         } else {
@@ -612,10 +660,32 @@ std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory, GameMod
     };
 
     std::optional<ItemStack> dropped;
-    if (hovered_slot && carried_stack.empty() && IsKeyDown(KEY_LEFT_SHIFT) &&
-        IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+    const bool left_pressed = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+    const bool right_pressed = IsMouseButtonPressed(MOUSE_BUTTON_RIGHT);
+    if (hovered_slot && hovered_take_only && (left_pressed || right_pressed)) {
+        // Furnace output: take-only. Shift+click sends it all to the
+        // inventory; a click takes the stack (right-click half of it), or
+        // tops up a matching stack already on the cursor - nothing can
+        // ever be dropped *into* it.
+        if (hovered_slot->empty()) {
+            // nothing to take
+        } else if (left_pressed && IsKeyDown(KEY_LEFT_SHIFT) && carried_stack.empty()) {
+            quick_move(*hovered_slot, false, true);
+        } else if (carried_stack.empty()) {
+            int amount = left_pressed ? hovered_slot->count : (hovered_slot->count + 1) / 2;
+            carried_stack = *hovered_slot;
+            carried_stack.count = amount;
+            hovered_slot->count -= amount;
+            if (hovered_slot->count <= 0) hovered_slot->clear();
+        } else if (left_pressed && same_stack(*hovered_slot, carried_stack)) {
+            int moved = std::min(hovered_slot->count, MAX_ITEM_STACK - carried_stack.count);
+            carried_stack.count += moved;
+            hovered_slot->count -= moved;
+            if (hovered_slot->count <= 0) hovered_slot->clear();
+        }
+    } else if (hovered_slot && carried_stack.empty() && IsKeyDown(KEY_LEFT_SHIFT) && left_pressed) {
         quick_move(*hovered_slot, hovered_hotbar, hovered_chest);
-    } else if (hovered_slot && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+    } else if (hovered_slot && left_pressed) {
         double now = GetTime();
         bool double_click = last_clicked_slot == hovered_slot && now - last_click_time <= 0.25;
         last_click_time = now;
@@ -649,7 +719,7 @@ std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory, GameMod
         } else {
             std::swap(*hovered_slot, carried_stack);
         }
-    } else if (hovered_slot && IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
+    } else if (hovered_slot && right_pressed) {
         if (carried_stack.empty() && !hovered_slot->empty()) {
             if (hovered_slot->is_tool()) {
                 carried_stack = *hovered_slot;
@@ -671,7 +741,7 @@ std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory, GameMod
         }
     }
 
-    if (hovered_slot && carried_stack.empty()) {
+    if (hovered_slot && carried_stack.empty() && !hovered_take_only) {
         for (int i = 0; i < HOTBAR_SIZE; ++i) {
             if (IsKeyPressed(KEY_ONE + i)) std::swap(*hovered_slot, inventory.hotbar[i]);
         }

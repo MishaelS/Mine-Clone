@@ -201,6 +201,11 @@
     "mouse.left": "Mouse: Left",
     "mouse.right": "Mouse: Right",
     "mouse.middle": "Mouse: Middle",
-    "mouse.other": "Mouse button"
+    "mouse.other": "Mouse button",
+    "loading.generating": "Generating world",
+    "loading.loading": "Loading world",
+    "loading.terrain": "Building terrain",
+    "loading.lighting": "Calculating light",
+    "loading.meshes": "Preparing the world"
   }
 }

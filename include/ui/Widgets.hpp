@@ -62,6 +62,15 @@ namespace ui {
     // Capture the current completed draw batch; caller owns the texture.
     Texture2D capture_blurred_background();
 
+    // Live alternative to capture_blurred_background(), for backgrounds
+    // that should keep moving (the world behind an open inventory):
+    // everything drawn between these two calls goes into a half-resolution
+    // off-screen target, which end_...() then draws to the screen through a
+    // small GPU blur (assets/shaders/blur.fs) - cheap enough every frame.
+    // Call inside BeginDrawing(), never nested.
+    void begin_blurred_background();
+    void end_blurred_background();
+
     // Minecraft-style inverted crosshair, centered in the current window.
     void crosshair();
 
