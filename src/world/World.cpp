@@ -92,8 +92,9 @@ namespace {
     // (Chunk::upload_mesh_data()), the actual limiting factor, so that
     // budget is deliberately small. Both are tunable without touching
     // anything else - see integrate_worker_results()'s own comment.
-    constexpr size_t MAX_GEN_INTEGRATIONS_PER_FRAME = 16;
-    constexpr size_t MAX_MESH_INTEGRATIONS_PER_FRAME = 4;
+    constexpr size_t MAX_GEN_INTEGRATIONS_PER_FRAME = 2;
+    constexpr size_t MAX_MESH_INTEGRATIONS_PER_FRAME = 2;
+    constexpr size_t MAX_GEN_DISPATCHES_PER_UPDATE = 4;
 
     // Safety ceiling on the user-configured fog distance (Settings), not
     // its primary source (see World::draw): fog fully hides everything by
@@ -1655,36 +1656,51 @@ void World::update_chunk_states(Vector3 observer_position)
         static_cast<int>(std::floor(observer_position.z)));
 
     // Nothing can have changed state since the last call if the observer is
-    // still in the same chunk it was in then.
+    // still in the same chunk it was in then. Pending generation tickets are
+    // the exception: they are intentionally paced across ticks.
     if (last_observer_chunk && last_observer_chunk->x == observer_chunk.x && last_observer_chunk->z == observer_chunk.z) {
+        dispatch_pending_generation_jobs();
         return;
     }
     last_observer_chunk = observer_chunk;
+    pending_generation.clear();
 
     // Bring every chunk within LOADED_RADIUS up to its correct state: for
     // an already-loaded chunk that's just the Active/Loaded tick flag - no
     // generation involved, no remesh needed (the chunk's own geometry
     // hasn't changed, only which of Active/Loaded it's ticked as). Anything
-    // not loaded yet is only *dispatched* here (dispatch_gen_job()) - it
-    // doesn't exist, and nothing about its state or neighbors' meshes is
-    // touched, until integrate_worker_results() picks up the finished
-    // GenResult on some later frame and (via its own cascade) schedules
-    // whatever remeshing that actually needs.
+    // not loaded yet becomes a nearest-first generation ticket here; only a
+    // small batch is actually dispatched below, and nothing about that
+    // chunk's state or neighbors' meshes is touched until
+    // integrate_worker_results() picks up the finished GenResult later.
     int min_x = std::max(-WORLD_BORDER_CHUNKS, observer_chunk.x - config.loaded_radius_chunks);
     int max_x = std::min(WORLD_BORDER_CHUNKS - 1, observer_chunk.x + config.loaded_radius_chunks);
     int min_z = std::max(-WORLD_BORDER_CHUNKS, observer_chunk.z - config.loaded_radius_chunks);
     int max_z = std::min(WORLD_BORDER_CHUNKS - 1, observer_chunk.z + config.loaded_radius_chunks);
 
+    std::vector<ChunkCoord> missing;
     for (int cx = min_x; cx <= max_x; ++cx) {
         for (int cz = min_z; cz <= max_z; ++cz) {
             Chunk* chunk = chunk_at(cx, cz);
             if (chunk == nullptr) {
-                dispatch_gen_job(cx, cz);
+                int64_t key = chunk_key(cx, cz);
+                if (generating.count(key) == 0) {
+                    missing.push_back({cx, cz});
+                }
                 continue;
             }
             chunk->set_state(desired_state_for(cx, cz, observer_chunk));
         }
     }
+    std::sort(missing.begin(), missing.end(), [observer_chunk](ChunkCoord a, ChunkCoord b) {
+        int da = std::max(std::abs(a.x - observer_chunk.x), std::abs(a.z - observer_chunk.z));
+        int db = std::max(std::abs(b.x - observer_chunk.x), std::abs(b.z - observer_chunk.z));
+        if (da != db) return da < db;
+        int ma = std::abs(a.x - observer_chunk.x) + std::abs(a.z - observer_chunk.z);
+        int mb = std::abs(b.x - observer_chunk.x) + std::abs(b.z - observer_chunk.z);
+        return ma < mb;
+    });
+    for (ChunkCoord coord : missing) pending_generation.push_back(coord);
 
     // Unload anything still resident that fell outside LOADED_RADIUS - kept
     // synchronous and immediate (cheap: no generation, no meshing, just
@@ -1701,9 +1717,10 @@ void World::update_chunk_states(Vector3 observer_position)
             out_of_range.emplace_back(cx, cz);
         }
     }
+    std::vector<std::pair<int, int>> relight_centers;
     for (auto [cx, cz] : out_of_range) {
         unload_chunk(cx, cz);
-        relight_chunk_neighborhood(cx, cz);
+        relight_centers.emplace_back(cx, cz);
         // A departed neighbor changes how its still-loaded neighbors' own
         // border faces should read (stale AO/light baked in against a
         // chunk that's no longer there) - schedule those for a background
@@ -1717,6 +1734,8 @@ void World::update_chunk_states(Vector3 observer_position)
             }
         }
     }
+    relight_chunks_around(relight_centers);
+    dispatch_pending_generation_jobs();
 }
 
 void World::update_chunk_states_blocking(Vector3 observer_position)
@@ -1839,6 +1858,7 @@ void World::set_view_distance(int loaded_radius_chunks, int fog_distance_blocks)
         // Settings change apply live instead of merely being remembered
         // for the next chunk crossing.
         last_observer_chunk.reset();
+        pending_generation.clear();
     }
     config.fog_distance_blocks = fog_distance_blocks; // draw_opaque() reads this fresh every frame - nothing else to nudge
 }
@@ -1851,14 +1871,21 @@ void World::integrate_worker_results()
     // thread.
     worker_pool->reclaim_pending_destroys();
 
+    std::vector<std::pair<int, int>> relight_centers;
+    std::vector<ChunkCoord> remesh_centers;
     for (ChunkWorkerPool::GenResult& result : worker_pool->drain_gen_results(MAX_GEN_INTEGRATIONS_PER_FRAME)) {
         int64_t key = chunk_key(result.chunk_x, result.chunk_z);
         generating.erase(key);
 
-        // Shouldn't happen - dispatch_gen_job()'s own `generating` dedup
-        // prevents a second in-flight job for the same coordinate - but
+        // Shouldn't happen - generation dispatch's own `generating` dedup
+        // prevents a second in-flight job for the same coordinate, but
         // check rather than assume before inserting.
         if (chunks.find(key) != chunks.end()) continue;
+        if (last_observer_chunk &&
+            chebyshev_distance(result.chunk_x, result.chunk_z,
+                               last_observer_chunk->x, last_observer_chunk->z) > config.loaded_radius_chunks) {
+            continue;
+        }
 
         Chunk* chunk_ptr = result.chunk.get();
         chunks.emplace(key, std::move(result.chunk));
@@ -1866,8 +1893,13 @@ void World::integrate_worker_results()
             chunk_ptr->set_state(desired_state_for(result.chunk_x, result.chunk_z, *last_observer_chunk));
         }
 
-        relight_chunk_neighborhood(result.chunk_x, result.chunk_z);
+        relight_centers.emplace_back(result.chunk_x, result.chunk_z);
+        remesh_centers.push_back({result.chunk_x, result.chunk_z});
+    }
 
+    relight_chunks_around(relight_centers);
+
+    for (ChunkCoord coord : remesh_centers) {
         // Cascade: this chunk's own coordinate, and every neighbor that may
         // have been waiting on it to exist before its own mesh job could
         // pass remesh_neighborhood_ready() - without this, a chunk at the
@@ -1875,7 +1907,7 @@ void World::integrate_worker_results()
         // but never actually meshed.
         for (int dx = -1; dx <= 1; ++dx) {
             for (int dz = -1; dz <= 1; ++dz) {
-                request_remesh(result.chunk_x + dx, result.chunk_z + dz);
+                request_remesh(coord.x + dx, coord.z + dz);
             }
         }
     }
@@ -2002,15 +2034,30 @@ void World::unload_chunk(int chunk_x, int chunk_z)
     // for.
 }
 
-void World::dispatch_gen_job(int chunk_x, int chunk_z)
+void World::dispatch_pending_generation_jobs()
 {
-    int64_t key = chunk_key(chunk_x, chunk_z);
-    if (!generating.insert(key).second) return; // already in flight
+    if (pending_generation.empty()) return;
 
     ChunkCoord observer = last_observer_chunk
         ? ChunkCoord{last_observer_chunk->x, last_observer_chunk->z}
-        : ChunkCoord{chunk_x, chunk_z};
-    worker_pool->submit_gen_jobs({ChunkCoord{chunk_x, chunk_z}}, observer);
+        : pending_generation.front();
+    std::vector<ChunkCoord> batch;
+    batch.reserve(MAX_GEN_DISPATCHES_PER_UPDATE);
+
+    while (!pending_generation.empty() && batch.size() < MAX_GEN_DISPATCHES_PER_UPDATE) {
+        ChunkCoord coord = pending_generation.front();
+        pending_generation.pop_front();
+        int64_t key = chunk_key(coord.x, coord.z);
+
+        if (chunk_at(coord.x, coord.z) != nullptr) continue;
+        if (chebyshev_distance(coord.x, coord.z, observer.x, observer.z) > config.loaded_radius_chunks) continue;
+        if (!generating.insert(key).second) continue;
+        batch.push_back(coord);
+    }
+
+    if (!batch.empty()) {
+        worker_pool->submit_gen_jobs(batch, observer);
+    }
 }
 
 bool World::remesh_neighborhood_ready(int chunk_x, int chunk_z) const

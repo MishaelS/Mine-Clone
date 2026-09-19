@@ -448,6 +448,49 @@ namespace {
         return buckets.back();
     }
 
+    BoundingBox face_rect_for_box(const BoundingBox& box, BlockFace face)
+    {
+        switch (face) {
+            case BlockFace::Top:
+            case BlockFace::Bottom:
+                return {{box.min.x, 0.0f, box.min.z}, {box.max.x, 0.0f, box.max.z}};
+            case BlockFace::North:
+            case BlockFace::South:
+                return {{box.min.x, box.min.y, 0.0f}, {box.max.x, box.max.y, 0.0f}};
+            case BlockFace::East:
+            case BlockFace::West:
+                return {{0.0f, box.min.y, box.min.z}, {0.0f, box.max.y, box.max.z}};
+        }
+        return {};
+    }
+
+    float face_plane_for_box(const BoundingBox& box, BlockFace face)
+    {
+        switch (face) {
+            case BlockFace::Top:    return box.max.y;
+            case BlockFace::Bottom: return box.min.y;
+            case BlockFace::North:  return box.min.z;
+            case BlockFace::South:  return box.max.z;
+            case BlockFace::East:   return box.max.x;
+            case BlockFace::West:   return box.min.x;
+        }
+        return 0.0f;
+    }
+
+    bool shaped_face_on_cell_boundary(const BoundingBox& box, BlockFace face)
+    {
+        constexpr float EPS = 0.0001f;
+        switch (face) {
+            case BlockFace::Top:    return box.max.y >= 1.0f - EPS;
+            case BlockFace::Bottom: return box.min.y <= EPS;
+            case BlockFace::North:  return box.min.z <= EPS;
+            case BlockFace::South:  return box.max.z >= 1.0f - EPS;
+            case BlockFace::East:   return box.max.x >= 1.0f - EPS;
+            case BlockFace::West:   return box.min.x <= EPS;
+        }
+        return false;
+    }
+
     // Appends one face as two triangles (0,1,2) and (0,2,3) - the same quad,
     // split for a Mesh's plain (non-quad) triangle list. `tint` (typically
     // WHITE) is multiplied into each vertex color alongside AO/light
@@ -1716,31 +1759,12 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                     // Stairs/trapdoors/doors/beds/cake: 0-2 boxes from
                     // get_block_shape(), each rendered as its own mini
                     // six-face cube (unit_cube_faces() at that box's own
-                    // half-extents). Flat per-face directional shading
-                    // (FACE_DIRECTION_SHADE, same table an ordinary cube
-                    // face uses) but no vertex AO sampling and no smooth-
-                    // lighting corner blend - one flat sky/block sample for
-                    // the whole block, same simplification the Cross branch
-                    // above already makes for foliage - since these are
-                    // sparse decorative shapes, not terrain-scale geometry.
-                    // No face culling against opaque neighbors either - a
-                    // handful of extra triangles per shaped block is an
-                    // accepted, minor overdraw cost against the complexity
-                    // of clipping box faces exactly against each other.
-                    BlockInstanceState state;
-                    state.facing = get_orientation(x, y, z);
-                    uint16_t packed = get_block_state(x, y, z);
-                    state.open        = (packed & BlockStateBits::OPEN) != 0;
-                    state.top_half    = (packed & BlockStateBits::TOP_HALF) != 0;
-                    state.hinge_right = (packed & BlockStateBits::HINGE_RIGHT) != 0;
-                    state.bite_count  = static_cast<uint8_t>((packed & BlockStateBits::BITE_COUNT_MASK) >> BlockStateBits::BITE_COUNT_SHIFT);
+                    // half-extents). Faces hidden by another box of the
+                    // same shape or by a full opaque neighbor are culled,
+                    // and visible corners get the same AO/smooth-lighting
+                    // sampling ordinary cube faces use.
+                    BlockInstanceState state = unpack_block_state(get_orientation(x, y, z), get_block_state(x, y, z));
                     BlockShapeBoxes shape = get_block_shape(type, state);
-
-                    float sky = static_cast<float>(get_sky_light(x, y, z)) / static_cast<float>(MAX_LIGHT);
-                    float block = static_cast<float>(get_block_light(x, y, z)) / static_cast<float>(MAX_LIGHT);
-                    float sky_fraction[4] = {sky, sky, sky, sky};
-                    float block_fraction[4] = {block, block, block, block};
-                    float ao[4] = {1.0f, 1.0f, 1.0f, 1.0f}; // no occlusion sampling for shaped geometry
 
                     for (int b = 0; b < shape.count; ++b) {
                         const BoundingBox& box = shape.boxes[b];
@@ -1762,21 +1786,50 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                         };
                         std::array<Face, 6> box_faces = unit_cube_faces(half);
                         for (int face = 0; face < 6; ++face) {
+                            BlockFace block_face = static_cast<BlockFace>(face);
+                            BoundingBox face_rect = face_rect_for_box(box, block_face);
+                            if (shape_covers_face(shape.boxes.data(), shape.count, block_face,
+                                                  face_plane_for_box(box, block_face), face_rect)) {
+                                continue;
+                            }
+
+                            const Face& box_face = box_faces[face];
+                            int nx = x + static_cast<int>(box_face.normal.x);
+                            int ny = y + static_cast<int>(box_face.normal.y);
+                            int nz = z + static_cast<int>(box_face.normal.z);
+                            if (shaped_face_on_cell_boundary(box, block_face) &&
+                                !get_block_properties(neighbor_block(nx, ny, nz)).transparent) {
+                                continue;
+                            }
+
                             // Tile choice, crop and orientation all live in
                             // shaped_face_texture() (core/BlockShape.hpp).
                             ShapedFaceTexture texture = shaped_face_texture(
-                                type, state, properties, static_cast<BlockFace>(face), box);
+                                type, state, properties, block_face, box);
                             if (texture.hidden) continue;
                             const float shade_value = texture.flat_shade ? 1.0f : FACE_DIRECTION_SHADE[face];
-                            float shade[4] = {shade_value, shade_value, shade_value, shade_value};
-                            Vector3 face_center = Vector3Subtract(box_center, Vector3Scale(box_faces[face].normal, texture.inset));
-                            Face textured_face = box_faces[face];
+                            Vector3 face_center = Vector3Subtract(box_center, Vector3Scale(box_face.normal, texture.inset));
+                            Face textured_face = box_face;
                             for (int turn = 0; turn < texture.quarter_turns; ++turn) {
                                 Vector3 first = textured_face.v1;
                                 textured_face.v1 = textured_face.v2;
                                 textured_face.v2 = textured_face.v3;
                                 textured_face.v3 = textured_face.v4;
                                 textured_face.v4 = first;
+                            }
+
+                            Vector3 corners[4] = {textured_face.v1, textured_face.v2, textured_face.v3, textured_face.v4};
+                            float shade[4];
+                            float ao[4];
+                            float sky_fraction[4];
+                            float block_fraction[4];
+                            for (int i = 0; i < 4; ++i) {
+                                int ao_level = texture.flat_shade ? 3 : vertex_ao(nb, x, y, z, textured_face.normal, corners[i]);
+                                VertexLight light = vertex_light(nb, x, y, z, textured_face.normal, corners[i]);
+                                shade[i] = shade_value;
+                                ao[i] = AO_BRIGHTNESS[ao_level];
+                                sky_fraction[i] = light.sky;
+                                block_fraction[i] = light.block;
                             }
                             append_face(mesh_data, textured_face, face_center, texture.uv,
                                 shade, sky_fraction, block_fraction, ao, properties.texture_tints[face]);

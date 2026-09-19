@@ -39,7 +39,7 @@ case "$CMD" in
         ;;
     run)
         do_build
-        "$BUILD_DIR/Mine-Clone"
+        "$BUILD_DIR/MineToo"
         ;;
     *)
         usage

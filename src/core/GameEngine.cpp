@@ -224,6 +224,20 @@ namespace {
         return existing_top_half ? local_y < 0.5f : local_y >= 0.5f;
     }
 
+    bool placement_intersects_player(const PlayerController& player, const Camera3D& camera,
+                                     BlockType block, int x, int y, int z, HorizontalDirection facing)
+    {
+        if (player.intersects_block(camera, x, y, z)) return true;
+        if (block == BlockType::OakDoorLower || block == BlockType::IronDoorLower) {
+            return player.intersects_block(camera, x, y + 1, z);
+        }
+        if (block == BlockType::BedHead) {
+            DirectionOffset step = horizontal_direction_offset(facing);
+            return player.intersects_block(camera, x + step.dx, y, z + step.dz);
+        }
+        return false;
+    }
+
     bool has_nearby_log(World& world, int x, int y, int z) {
         for (int lx = -LEAF_DECAY_LOG_RADIUS; lx <= LEAF_DECAY_LOG_RADIUS; ++lx) {
             for (int ly = -LEAF_DECAY_LOG_RADIUS; ly <= LEAF_DECAY_LOG_RADIUS; ++ly) {
@@ -1629,7 +1643,7 @@ void GameEngine::update(float delta_time)
                     int place_x = targeted_block->x + (replace_target ? 0 : static_cast<int>(targeted_block->normal.x));
                     int place_y = targeted_block->y + (replace_target ? 0 : static_cast<int>(targeted_block->normal.y));
                     int place_z = targeted_block->z + (replace_target ? 0 : static_cast<int>(targeted_block->normal.z));
-                    if (!player_controller.intersects_block(camera, place_x, place_y, place_z)) {
+                    if (!placement_intersects_player(player_controller, camera, selected.block, place_x, place_y, place_z, facing)) {
                         // Door/bed are placed as one atomic pair (World::
                         // place_door()/place_bed()) rather than through the
                         // generic single-cell path below - see their own

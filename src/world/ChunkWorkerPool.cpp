@@ -92,7 +92,9 @@ ChunkWorkerPool::ChunkWorkerPool(uint32_t seed, std::optional<std::string> direc
     : world_seed(seed)
     , save_directory(std::move(directory))
 {
-    unsigned int count = worker_count > 0 ? worker_count : std::max(1u, std::thread::hardware_concurrency() - 1);
+    unsigned int hardware_threads = std::max(2u, std::thread::hardware_concurrency());
+    unsigned int default_count = std::clamp(hardware_threads / 2u, 1u, 4u);
+    unsigned int count = worker_count > 0 ? worker_count : default_count;
     workers.reserve(count);
     for (unsigned int i = 0; i < count; ++i) {
         workers.emplace_back([this] { worker_loop(); });

@@ -277,9 +277,9 @@ public:
     // Brings every chunk within config.loaded_radius_chunks/active_radius_chunks chunks of
     // `observer_position` (see the .cpp) up to its correct ChunkState.
     // Async: anything newly in range that isn't generated yet is only
-    // *dispatched* to ChunkWorkerPool here (see dispatch_gen_job()) - the
-    // chunk doesn't actually exist, and nothing about it is meshed, until a
-    // later integrate_worker_results() call picks up the finished result.
+    // queued for ChunkWorkerPool here (see pending_generation) - the chunk
+    // doesn't actually exist, and nothing about it is meshed, until a later
+    // integrate_worker_results() call picks up the finished result.
     // Anything that fell out of range entirely is still unloaded
     // immediately (cheap - see unload_chunk()), and everything whose
     // neighborhood might now look different (a chunk that just finished
@@ -598,12 +598,10 @@ private:
     // inline.
     void request_remesh(int chunk_x, int chunk_z);
 
-    // dispatch_gen_job() on (chunk_x, chunk_z) unless generation is already
-    // in flight for it (`generating` dedupes) - the async counterpart of
-    // generate_chunk() below. Doesn't insert anything into World::chunks;
-    // that happens later in integrate_worker_results() once the background
-    // GenResult comes back.
-    void dispatch_gen_job(int chunk_x, int chunk_z);
+    // Pushes a small nearest-first batch from pending_generation into the
+    // worker pool. This keeps chunk streaming smooth when a chunk-boundary
+    // crossing makes a whole new ring eligible at once.
+    void dispatch_pending_generation_jobs();
 
     // Shared by break_block()/place_block(): writes the new block, marks
     // its chunk modified, and relights/remeshes that chunk's neighborhood.
@@ -684,9 +682,9 @@ private:
     // Unloaded -> Loaded/Active: generates terrain + lighting (world data
     // only, no mesh - see update_chunk_states) for a chunk that doesn't
     // exist yet, synchronously and inline on the calling thread. Used only
-    // by update_chunk_states_blocking() now - the steady-state path uses
-    // dispatch_gen_job() instead, which returns immediately and hands the
-    // actual work to a background worker.
+    // by update_chunk_states_blocking() now - the steady-state path queues
+    // generation tickets instead, then feeds them to background workers in
+    // small batches.
     void generate_chunk(int chunk_x, int chunk_z);
 
     // Loaded/Active -> Unloaded: frees the chunk's GPU mesh and block data
@@ -722,12 +720,18 @@ private:
     ChunkMap chunks;
 
     // Chunk-key coordinates (see chunk_key()) with a background job
-    // currently in flight - dispatch_gen_job()/request_remesh() dedupe
+    // currently in flight - generation dispatch/request_remesh() dedupe
     // against these instead of ever submitting a second job for the same
     // coordinate while one's still running, and integrate_worker_results()
     // erases from them once that coordinate's result comes back.
     std::unordered_set<int64_t> generating;
     std::unordered_set<int64_t> meshing;
+
+    // Not-yet-submitted chunk generation tickets, sorted nearest-first
+    // around last_observer_chunk. update_chunk_states() refills this when
+    // the observer enters a new chunk; dispatch_pending_generation_jobs()
+    // feeds it to ChunkWorkerPool in small batches each tick.
+    std::deque<ChunkCoord> pending_generation;
 
     // Chunk-key coordinates whose data changed again while a mesh job for
     // them was already in flight (request_remesh() marks these instead of
@@ -741,7 +745,7 @@ private:
     // Which chunk update_chunk_states() last computed states around, so it
     // can skip rescanning when the observer hasn't left that chunk since -
     // nothing could have changed state if it hasn't. Also doubles as the
-    // "current observer position" dispatch_gen_job()/request_remesh() pass
+    // "current observer position" generation dispatch/request_remesh() pass
     // to ChunkWorkerPool's own job-priority ordering; std::nullopt only
     // before the very first update_chunk_states()/update_chunk_states_
     // blocking() call, before which nothing has been dispatched yet either.

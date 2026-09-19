@@ -80,10 +80,10 @@ std::shared_ptr<Chunk> generate_chunk_data(int chunk_x, int chunk_z, uint32_t wo
 // mechanism to actually free anything.
 class ChunkWorkerPool {
 public:
-    // `worker_count` overrides the default (hardware_concurrency() - 1,
-    // minimum 1) - 0 means "use the default". Spawns every worker thread
-    // immediately; each sits idle (blocked on the job queue's condition
-    // variable) until work is submitted.
+    // `worker_count` overrides the default (half the hardware threads,
+    // capped at 4, minimum 1) - 0 means "use the default". Spawns every
+    // worker thread immediately; each sits idle (blocked on the job queue's
+    // condition variable) until work is submitted.
     ChunkWorkerPool(uint32_t world_seed, std::optional<std::string> save_directory, unsigned int worker_count = 0);
 
     // Stops every worker thread (see shutdown()) and reclaims anything left
