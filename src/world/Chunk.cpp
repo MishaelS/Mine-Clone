@@ -1849,7 +1849,21 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                     // and visible corners get the same AO/smooth-lighting
                     // sampling ordinary cube faces use.
                     BlockInstanceState state = unpack_block_state(get_orientation(x, y, z), get_block_state(x, y, z));
-                    const bool wall_torch = is_torch_block(type) && state.top_half;
+                    // A wall-mounted torch (BlockInstanceState::attachment -
+                    // see BlockProperties::attach_*) gets the upright model
+                    // leaned out from its wall below; a floor one is the
+                    // plain shape. `torch_outward` points from that wall
+                    // into the cell, the direction it leans.
+                    const bool wall_torch = is_torch_block(type) && state.attachment != BlockFace::Bottom;
+                    HorizontalDirection torch_outward = HorizontalDirection::South;
+                    if (wall_torch) {
+                        switch (state.attachment) {
+                            case BlockFace::West:  torch_outward = HorizontalDirection::East; break;
+                            case BlockFace::East:  torch_outward = HorizontalDirection::West; break;
+                            case BlockFace::North: torch_outward = HorizontalDirection::South; break;
+                            default:               torch_outward = HorizontalDirection::North; break;
+                        }
+                    }
                     BlockShapeBoxes shape = wall_torch ? upright_torch_shape() : get_block_shape(type, state);
 
                     for (int b = 0; b < shape.count; ++b) {
@@ -1910,12 +1924,12 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                             }
                             if (wall_torch) {
                                 Vector3 corners_before[4] = {textured_face.v1, textured_face.v2, textured_face.v3, textured_face.v4};
-                                textured_face.v1 = wall_torch_transform(Vector3Add(local_box_center, corners_before[0]), state.facing);
-                                textured_face.v2 = wall_torch_transform(Vector3Add(local_box_center, corners_before[1]), state.facing);
-                                textured_face.v3 = wall_torch_transform(Vector3Add(local_box_center, corners_before[2]), state.facing);
-                                textured_face.v4 = wall_torch_transform(Vector3Add(local_box_center, corners_before[3]), state.facing);
+                                textured_face.v1 = wall_torch_transform(Vector3Add(local_box_center, corners_before[0]), torch_outward);
+                                textured_face.v2 = wall_torch_transform(Vector3Add(local_box_center, corners_before[1]), torch_outward);
+                                textured_face.v3 = wall_torch_transform(Vector3Add(local_box_center, corners_before[2]), torch_outward);
+                                textured_face.v4 = wall_torch_transform(Vector3Add(local_box_center, corners_before[3]), torch_outward);
                                 std::swap(textured_face.v2, textured_face.v4);
-                                textured_face.normal = Vector3Negate(wall_torch_normal(textured_face.normal, state.facing));
+                                textured_face.normal = Vector3Negate(wall_torch_normal(textured_face.normal, torch_outward));
                                 face_center = center;
                             }
 

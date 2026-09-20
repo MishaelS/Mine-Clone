@@ -31,6 +31,7 @@ namespace {
     constexpr float NINE_PATCH_BORDER = 3.0f;
 
     const char* OPTIONS_BACKGROUND_TEXTURE_PATH = "sprites/gui/optionsBackground.png";
+    const char* MENU_GRADIENT_TEXTURE_PATH = "sprites/gui/titleBlur.png";
     constexpr float OPTIONS_BACKGROUND_TILE_SCALE = 4.0f; // on-screen size of each 16px source tile
 
     // block_button()'s own flat chrome - unrelated to the widget0-2
@@ -332,6 +333,14 @@ namespace ui {
         Rectangle source = {0.0f, 0.0f, screen_w / scaled(OPTIONS_BACKGROUND_TILE_SCALE), screen_h / scaled(OPTIONS_BACKGROUND_TILE_SCALE)};
         Rectangle destination = {0.0f, 0.0f, screen_w, screen_h};
         DrawTexturePro(texture, source, destination, {0.0f, 0.0f}, 0.0f, Color{65, 65, 65, 255});
+
+        // Gradient over the tiles - transparent at the top, black at the
+        // bottom - so menu text/buttons sit on a darker base the lower they
+        // are instead of on a flat, evenly busy dirt pattern. Stretched to
+        // the window, not tiled.
+        const Texture2D& gradient = TextureManager::get(MENU_GRADIENT_TEXTURE_PATH);
+        Rectangle gradient_source = {0.0f, 0.0f, static_cast<float>(gradient.width), static_cast<float>(gradient.height)};
+        DrawTexturePro(gradient, gradient_source, destination, {0.0f, 0.0f}, 0.0f, WHITE);
     }
 
     Texture2D capture_blurred_background() {

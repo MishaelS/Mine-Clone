@@ -6,6 +6,7 @@
 #include "ui/Widgets.hpp"
 
 #include <array>
+#include <vector>
 #include <optional>
 #include <cstdint>
 
@@ -85,6 +86,15 @@ private:
     // World::chest_inventory() update_grid() should read/mutate.
     int chest_x = 0, chest_y = 0, chest_z = 0;
     ItemStack carried_stack;
+
+    // Vanilla's click-and-drag spreading: hold a mouse button with a stack
+    // on the cursor and sweep across slots - left spreads it evenly over
+    // every slot touched, right drops one item in each - instead of having
+    // to click every slot separately. -1 when no drag is in progress,
+    // otherwise the held MOUSE_BUTTON_*; drag_slots are the slots swept so
+    // far, in order.
+    int drag_button = -1;
+    std::vector<ItemStack*> drag_slots;
 
     // Real crafting grids - Inventory's own small 2x2 (always available) and
     // the Workbench's 3x3 (see Recipe.hpp). Furnace/Chest have no crafting

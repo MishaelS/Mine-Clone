@@ -1,9 +1,14 @@
 #include "ui/WorldListScreen.hpp"
 #include "ui/Widgets.hpp"
 #include "ui/Localization.hpp"
+#include "core/TextureManager.hpp"
 
 #include <algorithm>
 #include <cmath>
+
+namespace {
+    const char* WORLD_ICON_TEXTURE_PATH = "sprites/gui/missingWorldIcon.png";
+}
 
 void WorldListScreen::enter()
 {
@@ -54,9 +59,21 @@ WorldListScreen::Action WorldListScreen::update()
             ui::panel(bounds, Color{0, 0, 0, 180});
             DrawRectangleLinesEx(bounds, ui::scaled(2), LIGHTGRAY);
         }
-        ui::label({bounds.x + ui::scaled(6), bounds.y + ui::scaled(4), bounds.width - ui::scaled(12), ui::scaled(26)},
+        // World icon, left of its name - always the "no screenshot yet"
+        // placeholder for now, since nothing captures a per-world image.
+        const Texture2D& icon = TextureManager::get(WORLD_ICON_TEXTURE_PATH);
+        const float icon_size = bounds.height - ui::scaled(8);
+        const Rectangle icon_destination = {
+            bounds.x + ui::scaled(4), bounds.y + (bounds.height - icon_size) * 0.5f, icon_size, icon_size,
+        };
+        DrawTexturePro(icon, {0.0f, 0.0f, static_cast<float>(icon.width), static_cast<float>(icon.height)},
+                       icon_destination, {0.0f, 0.0f}, 0.0f, WHITE);
+
+        const float text_x = icon_destination.x + icon_size + ui::scaled(8);
+        const float text_width = bounds.x + bounds.width - ui::scaled(6) - text_x;
+        ui::label({text_x, bounds.y + ui::scaled(4), text_width, ui::scaled(26)},
                   world.display_name, WHITE, ui::TextAlign::Left);
-        ui::label({bounds.x + ui::scaled(6), bounds.y + ui::scaled(30), bounds.width - ui::scaled(12), ui::scaled(24)},
+        ui::label({text_x, bounds.y + ui::scaled(30), text_width, ui::scaled(24)},
                   ui::tr(world.game_mode == GameMode::Survival ? "mode.survival" : "mode.creative") +
                   " / " + ui::tr("worlds.seed") + ": " + std::to_string(world.seed), GRAY, ui::TextAlign::Left);
     }

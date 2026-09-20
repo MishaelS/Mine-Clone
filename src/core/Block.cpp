@@ -301,6 +301,14 @@ void Load_block_definitions()
         properties.density = static_cast<float>(entry["density"].as_number(physical_defaults.density));
         properties.has_custom_shape = entry["custom_shape"].as_bool(false);
         properties.damages_on_touch = entry["damages_on_touch"].as_bool(false);
+        const std::vector<Json>& attach = entry["attach"].as_array();
+        for (const Json& face : attach) {
+            const std::string name = face.as_string();
+            if (name == "floor") properties.attach_floor = true;
+            else if (name == "wall") properties.attach_wall = true;
+            else if (name == "ceiling") properties.attach_ceiling = true;
+            else throw std::runtime_error("blocks.json: unknown \"attach\" value '" + name + "'");
+        }
         properties.side_inset = static_cast<float>(entry["side_inset"].as_number(0.0)) / static_cast<float>(TILE_PIXELS);
         // Order: Top, Bottom, North, South, East, West.
         properties.texture_uvs[0] = top.uv;
@@ -348,6 +356,25 @@ bool block_is_directional(BlockType type)
 bool block_needs_facing(BlockType type)
 {
     return block_is_directional(type) || type == BlockType::OakStairs || type == BlockType::OakTrapdoor;
+}
+
+FaceOffset block_face_offset(BlockFace face)
+{
+    switch (face) {
+        case BlockFace::Top:    return {0, 1, 0};
+        case BlockFace::Bottom: return {0, -1, 0};
+        case BlockFace::North:  return {0, 0, -1};
+        case BlockFace::South:  return {0, 0, 1};
+        case BlockFace::East:   return {1, 0, 0};
+        case BlockFace::West:   return {-1, 0, 0};
+    }
+    return {0, -1, 0};
+}
+
+bool block_is_attachable(BlockType type)
+{
+    const BlockProperties& properties = get_block_properties(type);
+    return properties.attach_floor || properties.attach_wall || properties.attach_ceiling;
 }
 
 DirectionOffset horizontal_direction_offset(HorizontalDirection direction)

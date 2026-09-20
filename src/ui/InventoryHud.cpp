@@ -242,6 +242,17 @@ namespace {
         DrawRectangleRec(bounds, SELECTION_HIGHLIGHT_COLOR);
     }
 
+    // Two stacks that can merge: never a tool (each keeps its own
+    // durability). A material's `block` field is unused (stays Air) same as
+    // another material's - comparing blocks alone would read any two
+    // different materials as "the same stack", so compare by item type
+    // whenever either side actually holds one.
+    bool same_stack(const ItemStack& a, const ItemStack& b) {
+        if (a.empty() || b.empty() || a.is_tool() || b.is_tool()) return false;
+        if (a.holds_item() || b.holds_item()) return a.tool == b.tool;
+        return a.block == b.block;
+    }
+
     std::string stack_name(const ItemStack& stack) {
         return stack.holds_item() ? ui::item_display_name(stack.tool) : ui::block_display_name(stack.block);
     }
@@ -259,6 +270,8 @@ void InventoryHud::toggle(Inventory& inventory)
 
 void InventoryHud::open_container(ContainerKind new_kind, int x, int y, int z)
 {
+    drag_button = -1;
+    drag_slots.clear();
     kind = new_kind;
     chest_x = x;
     chest_y = y;
@@ -273,6 +286,8 @@ void InventoryHud::close(Inventory& inventory)
         carried_stack.clear();
     }
     last_clicked_slot = nullptr;
+    drag_button = -1;
+    drag_slots.clear();
     open = false;
 }
 
@@ -487,10 +502,40 @@ std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory, GameMod
     bool hovered_chest = false;     // a container-side slot (chest, furnace) rather than the player's own
     bool hovered_take_only = false; // furnace output - items can be taken out, never put in
 
+    // A slot the carried stack could be spread into mid-drag: empty, or
+    // already holding the same thing with room left. Tools never spread -
+    // they don't stack at all.
+    auto accepts_drag = [&](const ItemStack& slot) {
+        if (carried_stack.empty() || carried_stack.is_tool()) return false;
+        return slot.empty() || (same_stack(slot, carried_stack) && slot.count < MAX_ITEM_STACK);
+    };
+    auto already_dragged = [&](const ItemStack* slot) {
+        return std::find(drag_slots.begin(), drag_slots.end(), slot) != drag_slots.end();
+    };
+
     auto process_slot = [&](ItemStack& stack, Vector2 slot_origin, bool is_hotbar, bool is_chest = false,
                             bool take_only = false, float size_px = ITEM_SIZE_PX) {
         const Rectangle bounds = slot_bounds(slot_origin, inventory_scale, size_px);
         draw_item_stack(bounds, stack, inventory_scale);
+
+        // Sweeping over a slot with the button still held adds it to the
+        // drag. A right drag drops its one item as it goes; a left drag
+        // only collects, then splits evenly on release (the share each slot
+        // gets isn't known until the sweep ends).
+        if (drag_button >= 0 && !take_only && CheckCollisionPointRec(mouse, bounds) &&
+            !already_dragged(&stack) && accepts_drag(stack)) {
+            if (drag_button == MOUSE_BUTTON_RIGHT) {
+                if (stack.empty()) {
+                    stack = carried_stack;
+                    stack.count = 1;
+                } else {
+                    ++stack.count;
+                }
+                if (--carried_stack.count <= 0) carried_stack.clear();
+            }
+            drag_slots.push_back(&stack);
+        }
+        if (drag_button >= 0 && already_dragged(&stack)) draw_slot_highlight(bounds);
 
         if (CheckCollisionPointRec(mouse, bounds)) {
             hovered_slot = &stack;
@@ -594,15 +639,6 @@ std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory, GameMod
         }
     }
 
-    auto same_stack = [](const ItemStack& a, const ItemStack& b) {
-        if (a.empty() || b.empty() || a.is_tool() || b.is_tool()) return false;
-        // A material's `block` field is unused (stays Air) same as another
-        // material's - comparing blocks alone would read any two different
-        // materials as "the same stack". Compare by item type instead
-        // whenever either side actually holds one.
-        if (a.holds_item() || b.holds_item()) return a.tool == b.tool;
-        return a.block == b.block;
-    };
     auto quick_move = [&](ItemStack& source, bool from_hotbar, bool from_chest) {
         if (source.empty()) return;
         auto transfer_to = [&](auto& destination) {
@@ -708,16 +744,14 @@ std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory, GameMod
             if (carried_stack.count < MAX_ITEM_STACK) gather(inventory.hotbar);
             if (chest && carried_stack.count < MAX_ITEM_STACK) gather(*chest);
             if (chest_secondary && carried_stack.count < MAX_ITEM_STACK) gather(*chest_secondary);
-        } else if (hovered_slot->empty()) {
-            *hovered_slot = carried_stack;
-            carried_stack.clear();
-        } else if (same_stack(*hovered_slot, carried_stack)) {
-            int moved = std::min(carried_stack.count, MAX_ITEM_STACK - hovered_slot->count);
-            hovered_slot->count += moved;
-            carried_stack.count -= moved;
-            if (carried_stack.count <= 0) carried_stack.clear();
         } else {
-            std::swap(*hovered_slot, carried_stack);
+            // Holding a stack: this press only *starts* a drag. If the
+            // cursor never sweeps a second slot, the release below applies
+            // the ordinary click (drop the stack in, merge, or swap) -
+            // vanilla behaves the same way.
+            drag_button = MOUSE_BUTTON_LEFT;
+            drag_slots.clear();
+            if (accepts_drag(*hovered_slot) && !hovered_take_only) drag_slots.push_back(hovered_slot);
         }
     } else if (hovered_slot && right_pressed) {
         if (carried_stack.empty() && !hovered_slot->empty()) {
@@ -735,10 +769,59 @@ std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory, GameMod
             *hovered_slot = carried_stack;
             if (!carried_stack.is_tool()) hovered_slot->count = 1;
             if (carried_stack.is_tool() || --carried_stack.count <= 0) carried_stack.clear();
+            drag_button = MOUSE_BUTTON_RIGHT;
+            drag_slots.clear();
+            drag_slots.push_back(hovered_slot);
         } else if (same_stack(*hovered_slot, carried_stack) && hovered_slot->count < MAX_ITEM_STACK) {
             ++hovered_slot->count;
             if (--carried_stack.count <= 0) carried_stack.clear();
+            drag_button = MOUSE_BUTTON_RIGHT;
+            drag_slots.clear();
+            drag_slots.push_back(hovered_slot);
         }
+    }
+
+    // Drag finished. A left drag that actually swept several slots splits
+    // the carried stack evenly between them (whatever doesn't divide
+    // stays on the cursor, same as vanilla); one that never left its first
+    // slot is just an ordinary click, applied here on release. A right
+    // drag has already dropped its items slot by slot.
+    if (drag_button == MOUSE_BUTTON_LEFT && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+        if (drag_slots.size() >= 2 && !carried_stack.empty()) {
+            const int share = std::max(1, carried_stack.count / static_cast<int>(drag_slots.size()));
+            for (ItemStack* slot : drag_slots) {
+                if (carried_stack.empty()) break;
+                const int room = slot->empty() ? MAX_ITEM_STACK : MAX_ITEM_STACK - slot->count;
+                const int moved = std::min({share, carried_stack.count, room});
+                if (moved <= 0) continue;
+                if (slot->empty()) {
+                    *slot = carried_stack;
+                    slot->count = moved;
+                } else {
+                    slot->count += moved;
+                }
+                carried_stack.count -= moved;
+                if (carried_stack.count <= 0) carried_stack.clear();
+            }
+        } else if (hovered_slot && !hovered_take_only && !carried_stack.empty()) {
+            if (hovered_slot->empty()) {
+                *hovered_slot = carried_stack;
+                carried_stack.clear();
+            } else if (same_stack(*hovered_slot, carried_stack)) {
+                int moved = std::min(carried_stack.count, MAX_ITEM_STACK - hovered_slot->count);
+                hovered_slot->count += moved;
+                carried_stack.count -= moved;
+                if (carried_stack.count <= 0) carried_stack.clear();
+            } else {
+                std::swap(*hovered_slot, carried_stack);
+            }
+        }
+        drag_button = -1;
+        drag_slots.clear();
+    }
+    if (drag_button == MOUSE_BUTTON_RIGHT && IsMouseButtonReleased(MOUSE_BUTTON_RIGHT)) {
+        drag_button = -1;
+        drag_slots.clear();
     }
 
     if (hovered_slot && carried_stack.empty() && !hovered_take_only) {
@@ -783,7 +866,13 @@ std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory, GameMod
             draw_item_stack(output_bounds, *result, inventory_scale);
             if (hovered_output) {
                 tooltip.show(stack_name(*result), mouse);
-                if (carried_stack.empty() && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                // Vanilla lets you keep crafting with a full cursor as long
+                // as what's on it is the same item and has room for one more
+                // result - only a different item blocks the output.
+                const bool cursor_takes_result = carried_stack.empty() ||
+                    (same_stack(carried_stack, *result) &&
+                     carried_stack.count + result->count <= MAX_ITEM_STACK);
+                if (cursor_takes_result && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                     clicked_output_slot = true;
                     if (IsKeyDown(KEY_LEFT_SHIFT)) {
                         for (int crafted = 0; crafted < MAX_ITEM_STACK; ++crafted) {
@@ -792,7 +881,8 @@ std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory, GameMod
                             consume_recipe_ingredients(grid_snapshot, grid_dim, grid_dim);
                         }
                     } else {
-                        carried_stack = *result;
+                        if (carried_stack.empty()) carried_stack = *result;
+                        else carried_stack.count += result->count;
                         consume_recipe_ingredients(grid_snapshot, grid_dim, grid_dim);
                     }
                     if (is_workbench) {

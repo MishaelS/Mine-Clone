@@ -266,6 +266,32 @@ namespace {
         return false;
     }
 
+    // Mirror of has_centered_top_support() for a ceiling mount: the cell
+    // above has to have a box whose underside is flush with our own top.
+    bool attachment_allowed(const BlockProperties& properties, BlockFace attachment)
+    {
+        if (attachment == BlockFace::Bottom) return properties.attach_floor;
+        if (attachment == BlockFace::Top) return properties.attach_ceiling;
+        return properties.attach_wall;
+    }
+
+    bool has_centered_bottom_support(const World& world, int x, int y, int z)
+    {
+        constexpr float SUPPORT_EPSILON = 0.001f;
+        const float support_y = static_cast<float>(y);
+        const float center_x = static_cast<float>(x) + 0.5f;
+        const float center_z = static_cast<float>(z) + 0.5f;
+        BlockShapeBoxes boxes = world.collision_boxes_at(x, y, z);
+        for (int i = 0; i < boxes.count; ++i) {
+            const BoundingBox& box = boxes.boxes[i];
+            if (std::fabs(box.min.y - support_y) > SUPPORT_EPSILON) continue;
+            if (center_x + SUPPORT_EPSILON < box.min.x || center_x - SUPPORT_EPSILON > box.max.x) continue;
+            if (center_z + SUPPORT_EPSILON < box.min.z || center_z - SUPPORT_EPSILON > box.max.z) continue;
+            return true;
+        }
+        return false;
+    }
+
     bool has_centered_side_support(const World& world, int x, int y, int z, HorizontalDirection side)
     {
         constexpr float SUPPORT_EPSILON = 0.001f;
@@ -305,6 +331,25 @@ namespace {
         if (normal.z > 0.5f) return HorizontalDirection::South;
         if (normal.z < -0.5f) return HorizontalDirection::North;
         return std::nullopt;
+    }
+}
+
+namespace {
+    // Is there something solid on the face `attachment` of this cell to
+    // mount on? The support cell is the neighbor that way, and the face it
+    // has to offer is the one pointing back at us.
+    bool has_support_on(const World& world, int x, int y, int z, BlockFace attachment)
+    {
+        const FaceOffset step = block_face_offset(attachment);
+        const int sx = x + step.dx, sy = y + step.dy, sz = z + step.dz;
+        if (attachment == BlockFace::Bottom) return has_centered_top_support(world, sx, sy, sz);
+        if (attachment == BlockFace::Top) return has_centered_bottom_support(world, sx, sy, sz);
+
+        // A wall: the support's own side face, pointing back toward us.
+        HorizontalDirection toward_block =
+            step.dx > 0 ? HorizontalDirection::West : step.dx < 0 ? HorizontalDirection::East
+            : step.dz > 0 ? HorizontalDirection::North : HorizontalDirection::South;
+        return has_centered_side_support(world, sx, sy, sz, toward_block);
     }
 }
 
@@ -1095,11 +1140,13 @@ bool World::place_block(int x, int y, int z, BlockType type)
         BlockType below = get_block(x, y - 1, z);
         if (below != BlockType::Grass && below != BlockType::Dirt) return false;
     }
-    // Generic placement only handles floor-mounted torches; player
-    // placement uses place_torch() so side-clicks can become wall torches.
-    // Floor torches need an actual centered top face directly underneath.
-    if ((type == BlockType::Torch || type == BlockType::RedstoneTorch || type == BlockType::LitRedstoneTorch) &&
-        !has_centered_top_support(*this, x, y - 1, z)) {
+    // An attachable block (a torch - see BlockProperties::attach_*) placed
+    // through this generic path has no clicked face to mount against, so it
+    // can only stand on the floor, and only where there's a real centered
+    // top face underneath. Player placement goes through
+    // place_attached_block() instead, which can also mount it on a wall.
+    if (block_is_attachable(type) &&
+        (!get_block_properties(type).attach_floor || !has_centered_top_support(*this, x, y - 1, z))) {
         return false;
     }
     set_block_and_rebuild(x, y, z, type);
@@ -1108,46 +1155,40 @@ bool World::place_block(int x, int y, int z, BlockType type)
     return true;
 }
 
-bool World::place_torch(int x, int y, int z, BlockType type, Vector3 hit_normal)
+bool World::place_attached_block(int x, int y, int z, BlockType type, Vector3 hit_normal)
 {
-    if (!is_torch_block(type)) return false;
+    const BlockProperties& properties = get_block_properties(type);
+    if (!block_is_attachable(type)) return false;
     if (y < MIN_WORLD_Y || y >= MIN_WORLD_Y + CHUNK_HEIGHT) return false;
     if (chunk_at(floor_div(x, CHUNK_SIZE), floor_div(z, CHUNK_SIZE)) == nullptr) return false;
     if (!get_block_properties(get_block(x, y, z)).replaceable) return false;
 
-    if (std::optional<HorizontalDirection> side = side_from_normal(hit_normal)) {
-        DirectionOffset step = horizontal_direction_offset(*side);
-        if (!has_centered_side_support(*this, x - step.dx, y, z - step.dz, *side)) return false;
-
-        set_block_and_rebuild(x, y, z, type);
-        set_block_orientation(x, y, z, *side);
-        set_block_state(x, y, z, BlockStateBits::TOP_HALF);
-        schedule_fluid_neighbors(x, y, z);
-        schedule_falling_check(x, y, z);
-        return true;
+    // Whichever surface can actually hold it: the clicked face first, then
+    // the floor as vanilla's own fallback for a side/underside click that
+    // this block can't use.
+    BlockFace clicked = attachment_from_hit_normal(hit_normal);
+    BlockFace attachment = clicked;
+    if (!attachment_allowed(properties, attachment) || !has_support_on(*this, x, y, z, attachment)) {
+        attachment = BlockFace::Bottom;
+        if (!attachment_allowed(properties, attachment) || !has_support_on(*this, x, y, z, attachment)) {
+            return false;
+        }
     }
 
-    if (hit_normal.y < 0.5f || !has_centered_top_support(*this, x, y - 1, z)) return false;
     set_block_and_rebuild(x, y, z, type);
-    set_block_state(x, y, z, 0);
+    set_block_state(x, y, z, with_attachment(get_block_state(x, y, z), attachment));
     schedule_fluid_neighbors(x, y, z);
     schedule_falling_check(x, y, z);
     return true;
 }
 
-bool World::torch_has_support(int x, int y, int z) const
+bool World::attachment_has_support(int x, int y, int z) const
 {
     BlockType type = get_block(x, y, z);
-    if (!is_torch_block(type)) return true;
+    if (!block_is_attachable(type)) return true;
 
-    uint16_t packed = get_block_state(x, y, z);
-    if ((packed & BlockStateBits::TOP_HALF) == 0) {
-        return has_centered_top_support(*this, x, y - 1, z);
-    }
-
-    HorizontalDirection side = get_block_orientation(x, y, z);
-    DirectionOffset step = horizontal_direction_offset(side);
-    return has_centered_side_support(*this, x - step.dx, y, z - step.dz, side);
+    BlockInstanceState state = unpack_block_state(get_block_orientation(x, y, z), get_block_state(x, y, z));
+    return has_support_on(*this, x, y, z, state.attachment);
 }
 
 bool World::combine_oak_slab(int x, int y, int z)

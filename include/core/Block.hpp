@@ -168,6 +168,13 @@ enum class HorizontalDirection : uint8_t {
 // (core/BlockShape.hpp), and a door/bed's paired second half (World::
 // place_door()/place_bed()).
 struct DirectionOffset { int dx, dz; };
+
+// The unit step along a cube face's own outward normal (Top = +Y, Bottom =
+// -Y, North/South = -Z/+Z, East/West = +X/-X - see BlockFace). Used
+// wherever a face has to become an actual neighbor offset: which cell a
+// block is attached to (see BlockProperties::attach_*), which way it looks.
+struct FaceOffset { int dx, dy, dz; };
+FaceOffset block_face_offset(BlockFace face);
 DirectionOffset horizontal_direction_offset(HorizontalDirection direction);
 
 // 90 degrees clockwise as seen from above (North->East->South->West->North) -
@@ -266,6 +273,18 @@ struct BlockProperties {
     // ordinary block. Rendering only - collision is unaffected.
     float side_inset;
 
+    // Where this block may be mounted, vanilla's own AttachFace idea: on
+    // the floor (support below), on a wall (support to the side), on the
+    // ceiling (support above) - blocks.json's own "attach": ["floor",
+    // "wall"]. All false for an ordinary block, which needs no support at
+    // all. A block with any of these placed by the player stores which
+    // face it actually ended up on (BlockInstanceState::attachment) and is
+    // broken off automatically once that support goes away (World::
+    // attachment_has_support()).
+    bool attach_floor;
+    bool attach_wall;
+    bool attach_ceiling;
+
     // True for a block that damages on contact regardless of whether it
     // blocks movement (cactus) - generalizes what used to be a single
     // hardcoded BlockType::Cactus check in PlayerController.cpp's
@@ -324,6 +343,11 @@ bool block_is_directional(BlockType type);
 // place_door()/place_bed()/place_chest()), not as a GameEngine follow-up
 // step the way this predicate drives for every other directional block.
 bool block_needs_facing(BlockType type);
+
+// True for a block that mounts onto something (see BlockProperties::
+// attach_*) - placed through World::place_attached_block() rather than the
+// plain place_block() path.
+bool block_is_attachable(BlockType type);
 
 // The blocks.json "name" a BlockType was loaded from (e.g. "oak_planks"),
 // for display purposes (the debug overlay's "Looking at" line). "air" for

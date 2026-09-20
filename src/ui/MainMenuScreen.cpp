@@ -16,6 +16,8 @@ namespace {
     constexpr float LOGO_WIDTH_FRACTION = 0.5f; // of screen width, before the cap below
     constexpr float LOGO_MAX_WIDTH      = 560.0f;
     constexpr float LOGO_TOP_FRACTION   = 0.10f; // of screen height
+    constexpr float LOGO_BUTTON_GAP     = 16.0f; // least space kept between logo and first button
+    constexpr float BUTTONS_TOP_FRACTION = 0.42f; // of screen height - where the first button starts
 }
 
 MainMenuScreen::Action MainMenuScreen::update()
@@ -25,12 +27,22 @@ MainMenuScreen::Action MainMenuScreen::update()
     const float scale = ui::scale_factor();
 
     const Texture2D& logo = TextureManager::get(LOGO_TEXTURE_PATH);
+    const float logo_aspect = static_cast<float>(logo.height) / static_cast<float>(logo.width);
+    const float logo_top = screen_height * LOGO_TOP_FRACTION;
     float logo_width  = std::min(static_cast<float>(screen_width) * LOGO_WIDTH_FRACTION,
                                  LOGO_MAX_WIDTH * scale);
-    float logo_height = logo_width * (static_cast<float>(logo.height) / static_cast<float>(logo.width));
+    float logo_height = logo_width * logo_aspect;
+    // In a short window the buttons (which start at BUTTONS_TOP_FRACTION)
+    // would otherwise run into the logo - shrink it to whatever room is
+    // actually left above them instead of letting the two overlap.
+    const float room_for_logo = screen_height * BUTTONS_TOP_FRACTION - logo_top - ui::scaled(LOGO_BUTTON_GAP);
+    if (logo_height > room_for_logo) {
+        logo_height = std::max(0.0f, room_for_logo);
+        logo_width = logo_height / logo_aspect;
+    }
     Rectangle logo_source = {0.0f, 0.0f, static_cast<float>(logo.width), static_cast<float>(logo.height)};
     Rectangle logo_destination = {
-        (screen_width - logo_width) / 2.0f, screen_height * LOGO_TOP_FRACTION, logo_width, logo_height,
+        (screen_width - logo_width) / 2.0f, logo_top, logo_width, logo_height,
     };
     DrawTexturePro(logo, logo_source, logo_destination, {0.0f, 0.0f}, 0.0f, WHITE);
 
@@ -38,7 +50,7 @@ MainMenuScreen::Action MainMenuScreen::update()
     const float button_height  = BUTTON_HEIGHT  * scale;
     const float button_spacing = BUTTON_SPACING * scale;
     float x = (screen_width - button_width) / 2.0f;
-    float y = screen_height * 0.42f;
+    float y = screen_height * BUTTONS_TOP_FRACTION;
 
     Action result = Action::None;
 

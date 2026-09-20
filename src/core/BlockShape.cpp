@@ -129,9 +129,12 @@ namespace {
         result.boxes[0] = {{TORCH_NEAR, 0.0f, TORCH_NEAR}, {TORCH_FAR, TORCH_HEIGHT, TORCH_FAR}}; // caps
         result.boxes[1] = {{TORCH_NEAR, 0.0f, 0.0f}, {TORCH_FAR, 1.0f, 1.0f}};                    // West/East planes
         result.boxes[2] = {{0.0f, 0.0f, TORCH_NEAR}, {1.0f, 1.0f, TORCH_FAR}};                    // North/South planes
-        if (!state.top_half) return result;
+        if (state.attachment == BlockFace::Bottom) return result; // floor torch
 
-        DirectionOffset support_to_torch = horizontal_direction_offset(state.facing);
+        // Wall torch: `attachment` points at the wall it hangs on, so the
+        // torch itself sits and leans the opposite way.
+        const FaceOffset to_wall = block_face_offset(state.attachment);
+        const DirectionOffset support_to_torch{-to_wall.dx, -to_wall.dz};
         constexpr float WALL_LOW  =  3.0f / 16.0f;
         constexpr float WALL_HIGH = 13.0f / 16.0f;
         constexpr float WALL_NEAR =  1.0f / 16.0f;
@@ -239,7 +242,27 @@ BlockInstanceState unpack_block_state(HorizontalDirection facing, uint16_t packe
     state.top_half    = (packed & BlockStateBits::TOP_HALF) != 0;
     state.hinge_right = (packed & BlockStateBits::HINGE_RIGHT) != 0;
     state.bite_count  = static_cast<uint8_t>((packed & BlockStateBits::BITE_COUNT_MASK) >> BlockStateBits::BITE_COUNT_SHIFT);
+    const uint16_t attachment = (packed & BlockStateBits::ATTACHMENT_MASK) >> BlockStateBits::ATTACHMENT_SHIFT;
+    state.attachment = attachment == 0 ? BlockFace::Bottom : static_cast<BlockFace>(attachment - 1);
     return state;
+}
+
+uint16_t with_attachment(uint16_t packed, BlockFace attachment)
+{
+    const uint16_t stored = static_cast<uint16_t>(static_cast<uint16_t>(attachment) + 1);
+    return static_cast<uint16_t>((packed & ~BlockStateBits::ATTACHMENT_MASK) |
+                                 (stored << BlockStateBits::ATTACHMENT_SHIFT));
+}
+
+BlockFace attachment_from_hit_normal(Vector3 hit_normal)
+{
+    if (hit_normal.y > 0.5f) return BlockFace::Bottom;  // clicked a top face - stands on it
+    if (hit_normal.y < -0.5f) return BlockFace::Top;    // clicked an underside - hangs from it
+    if (hit_normal.x > 0.5f) return BlockFace::West;
+    if (hit_normal.x < -0.5f) return BlockFace::East;
+    if (hit_normal.z > 0.5f) return BlockFace::North;
+    if (hit_normal.z < -0.5f) return BlockFace::South;
+    return BlockFace::Bottom;
 }
 
 BlockShapeBoxes get_item_shape(BlockType type)
@@ -417,8 +440,9 @@ BlockShapeBoxes get_outline_shape(BlockType type, const BlockInstanceState& stat
     if (type == BlockType::ShortGrass || type == BlockType::OakSapling) return plant_outline_shape();
     if (type == BlockType::Cactus) return cactus_outline_shape();
     if (is_torch(type)) {
-        if (state.top_half) {
-            DirectionOffset support_to_torch = horizontal_direction_offset(state.facing);
+        if (state.attachment != BlockFace::Bottom) {
+            const FaceOffset to_wall = block_face_offset(state.attachment);
+            const DirectionOffset support_to_torch{-to_wall.dx, -to_wall.dz};
             constexpr float WALL_LOW  =  3.0f / 16.0f;
             constexpr float WALL_HIGH = 14.0f / 16.0f;
             constexpr float WALL_NEAR =  1.0f / 16.0f;

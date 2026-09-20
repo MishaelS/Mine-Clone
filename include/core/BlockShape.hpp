@@ -36,6 +36,13 @@ struct BlockInstanceState {
     bool top_half = false;     // trapdoor only (a door's own upper/lower half is a distinct BlockType, not a flag)
     bool hinge_right = false;  // door only - always false for now, see BlockShape.cpp's own comment
     uint8_t bite_count = 0;    // cake only, 0-6
+
+    // Which face of its own cell this block is mounted on, for a block
+    // blocks.json marks attachable (BlockProperties::attach_*): Bottom =
+    // standing on the floor (the default), Top = hanging from the ceiling,
+    // North/South/East/West = on that wall. The support block is the
+    // neighbor in that direction - block_face_offset(attachment).
+    BlockFace attachment = BlockFace::Bottom;
 };
 
 // Packs/unpacks BlockInstanceState's fields that HorizontalDirection can't
@@ -57,7 +64,21 @@ namespace BlockStateBits {
     // Cake, 0-6 - see get_block_shape(BlockType::Cake, ...).
     constexpr uint16_t BITE_COUNT_SHIFT = 5;
     constexpr uint16_t BITE_COUNT_MASK  = 0b111u << BITE_COUNT_SHIFT;
+
+    // BlockInstanceState::attachment, stored as the BlockFace value plus
+    // one so that 0 - every never-written position, and every world saved
+    // before attachments existed - reads back as the plain floor default.
+    constexpr uint16_t ATTACHMENT_SHIFT = 8;
+    constexpr uint16_t ATTACHMENT_MASK  = 0b111u << ATTACHMENT_SHIFT;
 }
+
+// `packed` with its attachment replaced - every other bit is kept.
+uint16_t with_attachment(uint16_t packed, BlockFace attachment);
+
+// Which face of the cell about to be filled touches the block that was
+// clicked: the opposite of the raycast hit's own outward normal. A torch
+// placed against the east side of a wall is attached by its West face.
+BlockFace attachment_from_hit_normal(Vector3 hit_normal);
 
 enum class ChestPart : uint8_t { Single, Primary, Secondary };
 

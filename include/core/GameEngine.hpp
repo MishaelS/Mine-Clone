@@ -151,7 +151,10 @@ private:
     // instant in vanilla too), dropping through the same
     // resolve_block_drops() table a manual break would (bare-handed).
     void check_grass_support_above(int x, int y, int z);
-    void check_torch_support_near(int x, int y, int z);
+    // Called right after a block is removed: anything mounted on it (a
+    // torch on that wall - see BlockProperties::attach_*) has lost its
+    // support and breaks off, dropping as an item, same as vanilla.
+    void check_attachment_support_near(int x, int y, int z);
 
     // Survival-only environmental damage - fall, drowning, lava/fire,
     // cactus, suffocation and the void safety net - checked every frame

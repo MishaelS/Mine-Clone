@@ -214,8 +214,23 @@ public:
     // space.
     // True only when the block was actually placed.
     bool place_block(int x, int y, int z, BlockType type);
-    bool place_torch(int x, int y, int z, BlockType type, Vector3 hit_normal);
-    bool torch_has_support(int x, int y, int z) const;
+    // Places a block that mounts onto something (BlockProperties::
+    // attach_*, e.g. a torch) against whatever face was actually clicked -
+    // `hit_normal` is the raycast hit's own outward normal, so a side click
+    // makes a wall-mounted one and a top click a floor-standing one. The
+    // chosen face has to be one this block allows *and* actually be backed
+    // by a solid surface there, otherwise the placement fails; a click that
+    // can't work as a wall/ceiling mount falls back to the floor. The face
+    // it ended up on is stored in its block state (BlockInstanceState::
+    // attachment) for its own shape and for attachment_has_support().
+    bool place_attached_block(int x, int y, int z, BlockType type, Vector3 hit_normal);
+
+    // Whether the attachable block at this position still has something to
+    // hang on. True for anything that isn't attachable in the first place,
+    // so callers can ask about any position. See GameEngine::
+    // check_attachment_support_near(), which breaks off the ones that
+    // don't after a neighbor is removed.
+    bool attachment_has_support(int x, int y, int z) const;
 
     // Replaces an existing oak slab with its full-block material. Used by
     // placement when the player adds the missing slab half to the same
