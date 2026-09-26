@@ -3,11 +3,11 @@
 #include "core/BlockShape.hpp"
 #include "core/TextureManager.hpp"
 #include "core/Tick.hpp"
-#include "player/Item.hpp"
-#include "player/DropTable.hpp"
-#include "player/Recipe.hpp"
-#include "player/Smelting.hpp"
-#include "player/PlayerController.hpp"
+#include "items/Item.hpp"
+#include "items/DropTable.hpp"
+#include "items/Recipe.hpp"
+#include "items/Smelting.hpp"
+#include "entities/Player.hpp"
 #include "ui/FontManager.hpp"
 #include "ui/Widgets.hpp"
 #include "ui/Localization.hpp"
@@ -130,7 +130,7 @@ namespace {
     constexpr int SUFFOCATION_DAMAGE = 1;
     constexpr float SUFFOCATION_TICK_INTERVAL_SECONDS = 1.0f;
 
-    constexpr int CACTUS_DAMAGE = 1; // per-frame attempt - player_health's own invulnerability window throttles this to ~2/second
+    constexpr int CACTUS_DAMAGE = 1; // per-frame attempt - the player's health's own invulnerability window throttles this to ~2/second
 
     // How far below the world's own floor (MIN_WORLD_Y - see Chunk.hpp) a
     // fall counts as "into the void" - a safety net for however a player
@@ -246,16 +246,16 @@ namespace {
         return existing_top_half ? local_y < 0.5f : local_y >= 0.5f;
     }
 
-    bool placement_intersects_player(const PlayerController& player, const Camera3D& camera,
-                                     BlockType block, int x, int y, int z, HorizontalDirection facing)
+    bool placement_intersects_player(const Player& player, BlockType block, int x, int y, int z,
+                                     HorizontalDirection facing)
     {
-        if (player.intersects_block(camera, x, y, z)) return true;
+        if (player.intersects_block(x, y, z)) return true;
         if (block == BlockType::OakDoorLower || block == BlockType::IronDoorLower) {
-            return player.intersects_block(camera, x, y + 1, z);
+            return player.intersects_block(x, y + 1, z);
         }
         if (block == BlockType::BedHead) {
             DirectionOffset step = horizontal_direction_offset(facing);
-            return player.intersects_block(camera, x + step.dx, y, z + step.dz);
+            return player.intersects_block(x + step.dx, y, z + step.dz);
         }
         return false;
     }
@@ -475,15 +475,15 @@ void GameEngine::set_world(std::unique_ptr<World> new_world)
         // the result - no separate update_chunk_states() call needed here
         // the way there used to be for the old fixed starting position).
         camera.position = world->find_spawn_position();
-        camera.position.y += PlayerController::EYE_HEIGHT;
+        camera.position.y += Player::EYE_HEIGHT;
         // North: -Z in this engine's convention (see Chunk.cpp's
         // CUBE_FACES comment). Level, not angled down - the old downward
         // tilt was there to see a bird's-eye view from high above the
         // world; standing on real ground, a level look is the natural one.
         camera.target = {camera.position.x, camera.position.y, camera.position.z - 10.0f};
         spawn_settle_frames = 3; // see its own comment - 2 measured, +1 margin
-        player_controller.reset();
-        player_health.reset();
+        player.reset(camera);
+        player.health().reset();
         reset_life_timers();
         camera_view = CameraView::FirstPerson;
         // A brand-new world (or a previous world's leftover value, if this
@@ -558,7 +558,7 @@ void GameEngine::update_dropped_items(float delta_time)
         // up nearby items, runs mob AI, etc. right through an open
         // inventory screen too), so pickup/magnet-pull run unconditionally
         // here, same as every other line in update().
-        Vector3 pickup_point = player_controller.closest_hitbox_point(camera, item->get_position());
+        Vector3 pickup_point = player.closest_hitbox_point(item->get_position());
         item->update_magnet_pull(delta_time, pickup_point);
         if (item->can_pick_up() && Vector3Distance(item->get_position(), pickup_point) <= ITEM_PICKUP_RADIUS) {
             const ItemStack& stack = item->get_stack();
@@ -817,32 +817,32 @@ void GameEngine::check_attachment_support_near(int x, int y, int z)
 
 void GameEngine::apply_damage(int amount, DamageSource source)
 {
-    if (player_health.damage(amount, source)) {
+    if (player.health().damage(amount, source)) {
         hurt_flash_seconds = HURT_FLASH_SECONDS;
     }
 }
 
 void GameEngine::update_player_damage(float delta_time)
 {
-    // Fall damage - PlayerController reports this exactly once, the frame
+    // Fall damage - Player reports this exactly once, the frame
     // its feet actually land, regardless of whether that lands inside this
     // function's own "already dead" early state below (apply_damage/
-    // player_health.damage() themselves no-op once dead, so it's harmless
+    // player.health().damage() themselves no-op once dead, so it's harmless
     // to still consume it here rather than leave it queued for a fall that
     // already happened).
-    float landing_fall_distance = player_controller.consume_landing_fall_distance();
+    float landing_fall_distance = player.consume_landing_fall_distance();
     if (landing_fall_distance >= 0.0f) {
         int fall_damage = static_cast<int>(std::floor(landing_fall_distance)) - FALL_DAMAGE_SAFE_BLOCKS;
         if (fall_damage > 0) apply_damage(fall_damage, DamageSource::Fall);
     }
 
-    // Lava: hurts every frame it's touched (player_health's own 0.5s
+    // Lava: hurts every frame it's touched (the player's health's own 0.5s
     // invulnerability window is what actually paces this to real
     // Minecraft's own per-half-second lava tick), and always re-arms the
     // burn timer below to its full duration - a single instant of contact
     // still burns for the whole FIRE_DURATION_FROM_LAVA_SECONDS afterward,
     // same as vanilla.
-    if (player_controller.is_in_lava()) {
+    if (player.is_in_lava()) {
         apply_damage(LAVA_DAMAGE, DamageSource::Lava);
         fire_seconds_remaining = FIRE_DURATION_FROM_LAVA_SECONDS;
     }
@@ -851,7 +851,7 @@ void GameEngine::update_player_damage(float delta_time)
     // otherwise it counts down on its own and hurts once per
     // FIRE_TICK_INTERVAL_SECONDS regardless of whether the player is still
     // anywhere near the lava that started it.
-    if (player_controller.is_in_water()) fire_seconds_remaining = 0.0f;
+    if (player.is_in_water()) fire_seconds_remaining = 0.0f;
     if (fire_seconds_remaining > 0.0f) {
         fire_seconds_remaining = std::max(0.0f, fire_seconds_remaining - delta_time);
         fire_damage_timer += delta_time;
@@ -864,10 +864,10 @@ void GameEngine::update_player_damage(float delta_time)
     }
 
     // Drowning: a breath meter that drains only while the eye position
-    // specifically is submerged (see PlayerController::is_head_submerged())
+    // specifically is submerged (see Player::is_head_submerged())
     // and otherwise recovers - once it runs out, one hit every
     // DROWN_TICK_INTERVAL_SECONDS for as long as the head stays under.
-    if (player_controller.is_head_submerged()) {
+    if (player.is_head_submerged()) {
         air_seconds = std::max(0.0f, air_seconds - delta_time);
         if (air_seconds <= 0.0f) {
             drown_damage_timer += delta_time;
@@ -882,9 +882,9 @@ void GameEngine::update_player_damage(float delta_time)
     }
 
     // Suffocation: a solid, opaque block clipped into the player's own eye
-    // position (see PlayerController::is_suffocating()) - typically a
+    // position (see Player::is_suffocating()) - typically a
     // block placed where the player is standing.
-    if (player_controller.is_suffocating()) {
+    if (player.is_suffocating()) {
         suffocation_damage_timer += delta_time;
         if (suffocation_damage_timer >= SUFFOCATION_TICK_INTERVAL_SECONDS) {
             suffocation_damage_timer -= SUFFOCATION_TICK_INTERVAL_SECONDS;
@@ -896,7 +896,7 @@ void GameEngine::update_player_damage(float delta_time)
 
     // Cactus: same per-frame-attempt/invulnerability-throttled shape as
     // lava above.
-    if (player_controller.is_touching_cactus()) {
+    if (player.is_touching_cactus()) {
         apply_damage(CACTUS_DAMAGE, DamageSource::Cactus);
     }
 
@@ -906,14 +906,14 @@ void GameEngine::update_player_damage(float delta_time)
         apply_damage(VOID_DAMAGE, DamageSource::Void);
     }
 
-    player_health.update(delta_time);
+    player.health().update(delta_time);
     hurt_flash_seconds = std::max(0.0f, hurt_flash_seconds - delta_time);
 
     // Death/respawn: death_respawn_timer is armed exactly once, the frame
     // health first reaches 0 (was_dead_last_frame catches that edge so a
     // second frame of already being dead doesn't keep resetting the
     // countdown back to full).
-    bool dead_now = player_health.is_dead();
+    bool dead_now = player.health().is_dead();
     if (dead_now && !was_dead_last_frame) {
         death_respawn_timer = DEATH_RESPAWN_SECONDS;
     }
@@ -933,20 +933,20 @@ void GameEngine::respawn_player()
     // has no bed/respawn-anchor system, so death always returns to one of
     // these two.
     Vector3 spawn = world_spawn_override.value_or(world->find_spawn_position());
-    spawn.y += PlayerController::EYE_HEIGHT;
+    spawn.y += Player::EYE_HEIGHT;
     Vector3 shift = Vector3Subtract(spawn, camera.position);
     camera.position = spawn;
     camera.target = Vector3Add(camera.target, shift);
 
-    player_controller.reset();
-    player_health.reset();
+    player.reset(camera);
+    player.health().reset();
     reset_life_timers();
     spawn_settle_frames = 3; // same rotation-jump guard set_world() itself uses right after a teleport
 }
 
 void GameEngine::start_sleeping(const World::RaycastHit& bed_hit)
 {
-    if (!world || sleeping || player_health.is_dead()) return;
+    if (!world || sleeping || player.health().is_dead()) return;
 
     uint64_t tick_of_day = game_tick % DayNightCycle::DAY_LENGTH_TICKS;
     if (tick_of_day < SLEEP_ALLOWED_START_TICK) {
@@ -1163,11 +1163,11 @@ void GameEngine::execute_chat_command(const std::string& command)
             push("Координаты должны быть числами.");
             return;
         }
-        Vector3 target = {*x, *y + PlayerController::EYE_HEIGHT, *z};
+        Vector3 target = {*x, *y + Player::EYE_HEIGHT, *z};
         Vector3 shift = Vector3Subtract(target, camera.position);
         camera.position = target;
         camera.target = Vector3Add(camera.target, shift);
-        player_controller.reset();
+        player.reset(camera);
         push("Телепортировано.");
         return;
     }
@@ -1262,7 +1262,7 @@ void GameEngine::execute_chat_command(const std::string& command)
             if (!x || !y || !z) { push("Координаты должны быть числами."); return; }
             spawn = {*x, *y, *z};
         } else {
-            spawn = player_controller.feet_position(camera);
+            spawn = player.feet_position();
         }
         world_spawn_override = spawn;
         push("Точка возрождения мира установлена.");
@@ -1338,7 +1338,7 @@ void GameEngine::execute_chat_command(const std::string& command)
             push("/kill работает только в режиме выживания.");
             return;
         }
-        player_health.kill();
+        player.health().kill();
         push("Вы себя убили.");
         return;
     }
@@ -1370,7 +1370,7 @@ Camera3D GameEngine::make_render_camera() const
 void GameEngine::draw_player_model() const
 {
     if (camera_view == CameraView::FirstPerson) return;
-    Vector3 feet = player_controller.feet_position(camera);
+    Vector3 feet = player.feet_position();
     Vector3 look = Vector3Subtract(camera.target, camera.position);
     if (world) player_renderer.draw(feet, look, *world);
 }
@@ -1514,17 +1514,17 @@ void GameEngine::update(float delta_time)
     }
 
     Vector3 previous_camera_position = camera.position;
-    const bool was_grounded = player_controller.is_grounded();
+    const bool was_grounded = player.is_grounded();
     UpdateCameraPro(&camera, {0.0f, 0.0f, 0.0f}, rotation, 0.0f);
     // Dead: same "no longer takes input" freeze real Minecraft's own death
     // screen imposes, just without the screen itself - see
     // update_player_damage()'s automatic respawn_player() a couple seconds
     // later. Physics (gravity, whatever residual velocity was left) still
     // runs so the body doesn't hang frozen mid-air.
-    bool alive = !player_health.is_dead();
+    bool alive = !player.health().is_dead();
     // Movement input specifically also stops while a UI screen is open -
     // WASD types into chat instead of walking, same as vanilla - but
-    // player_controller.update() below still runs every frame regardless,
+    // player.update_movement() below still runs every frame regardless,
     // zero-input, so gravity/buoyancy/damage keep applying.
     bool accepts_movement_input = alive && !ui_captured;
     if (world) {
@@ -1538,9 +1538,9 @@ void GameEngine::update(float delta_time)
             input.sneak = is_action_down(GameAction::Sneak);
             input.sprint = is_action_down(GameAction::Sprint);
         }
-        player_controller.update(camera, *world, current_game_mode, input, delta_time);
+        player.update_movement(camera, *world, current_game_mode, input, delta_time);
         const Vector3 travelled = Vector3Subtract(camera.position, previous_camera_position);
-        audio.update_water(delta_time, player_controller.is_in_water(),
+        audio.update_water(delta_time, player.is_in_water(),
                            Vector3LengthSqr(travelled) > 0.000025f);
         if (current_game_mode == GameMode::Survival) update_player_damage(delta_time);
     }
@@ -1548,7 +1548,7 @@ void GameEngine::update(float delta_time)
     // Emit by travelled distance, and only near a solid top surface. This
     // keeps the cadence frame-rate independent and prevents dust in flight.
     if (world) {
-        float feet_y = camera.position.y - PlayerController::EYE_HEIGHT;
+        float feet_y = camera.position.y - Player::EYE_HEIGHT;
         int ground_x = static_cast<int>(std::floor(camera.position.x));
         int ground_y = static_cast<int>(std::floor(feet_y - 0.06f));
         int ground_z = static_cast<int>(std::floor(camera.position.z));
@@ -1566,7 +1566,7 @@ void GameEngine::update(float delta_time)
                 break;
             }
         }
-        bool grounded = player_controller.is_grounded() && supported_by_shape;
+        bool grounded = player.is_grounded() && supported_by_shape;
         float dx = camera.position.x - previous_camera_position.x;
         float dz = camera.position.z - previous_camera_position.z;
         float horizontal_distance = std::sqrt(dx * dx + dz * dz);
@@ -1589,8 +1589,8 @@ void GameEngine::update(float delta_time)
         // Jumping and landing are contact events of their own. They must not
         // depend on horizontal distance, otherwise a straight jump/fall is
         // silent even though the feet leave or strike a real block.
-        if (was_grounded && !player_controller.is_grounded()) {
-            float old_feet_y = previous_camera_position.y - PlayerController::EYE_HEIGHT;
+        if (was_grounded && !player.is_grounded()) {
+            float old_feet_y = previous_camera_position.y - Player::EYE_HEIGHT;
             int old_ground_y = static_cast<int>(std::floor(
                 old_feet_y - 0.06f));
             int old_ground_x = static_cast<int>(std::floor(previous_camera_position.x));
@@ -1609,7 +1609,7 @@ void GameEngine::update(float delta_time)
                     break;
                 }
             }
-        } else if (!was_grounded && player_controller.is_grounded() &&
+        } else if (!was_grounded && player.is_grounded() &&
                    supported_by_shape) {
             audio.play_step(ground_type,
                 {camera.position.x, ground_surface_y, camera.position.z}, camera.position);
@@ -1788,7 +1788,7 @@ void GameEngine::update(float delta_time)
                 world->set_block_state(x, partner_y, z, partner_packed);
             }
         } else if (!container_kind && targeted_block && targeted_type == BlockType::Cake &&
-                   current_game_mode == GameMode::Survival && player_health.health() < PlayerHealth::MAX_HEALTH) {
+                   current_game_mode == GameMode::Survival && player.health().current() < PlayerHealth::MAX_HEALTH) {
             // Eating restores HP directly (see CAKE_HEAL_PER_BITE's own
             // comment) instead of vanilla's hunger/saturation restore. No
             // inventory consumption - the cake block itself is what's
@@ -1796,7 +1796,7 @@ void GameEngine::update(float delta_time)
             int x = targeted_block->x, y = targeted_block->y, z = targeted_block->z;
             uint16_t packed = world->get_block_state(x, y, z);
             uint8_t bite_count = static_cast<uint8_t>((packed & BlockStateBits::BITE_COUNT_MASK) >> BlockStateBits::BITE_COUNT_SHIFT);
-            player_health.heal(CAKE_HEAL_PER_BITE);
+            player.health().heal(CAKE_HEAL_PER_BITE);
             if (bite_count >= CAKE_MAX_BITES) {
                 world->break_block(x, y, z);
             } else {
@@ -1822,8 +1822,8 @@ void GameEngine::update(float delta_time)
             // all - you can eat looking at open sky, same as vanilla.
             const ItemProperties* held = selected.holds_item() ? &get_item_properties(selected.tool) : nullptr;
             if (held && held->heal_amount > 0) {
-                if (current_game_mode == GameMode::Survival && player_health.health() < PlayerHealth::MAX_HEALTH) {
-                    player_health.heal(held->heal_amount);
+                if (current_game_mode == GameMode::Survival && player.health().current() < PlayerHealth::MAX_HEALTH) {
+                    player.health().heal(held->heal_amount);
                     if (--selected.count <= 0) selected.clear();
                 }
             } else if (targeted_block && !selected.empty() && !selected.holds_item()) {
@@ -1844,7 +1844,7 @@ void GameEngine::update(float delta_time)
 
                 if (selected.block == BlockType::OakSlab && targeted_type == BlockType::OakSlab &&
                     slab_click_adds_missing_half(*world, *targeted_block)) {
-                    if (!player_controller.intersects_block(camera, targeted_block->x, targeted_block->y, targeted_block->z)) {
+                    if (!player.intersects_block(targeted_block->x, targeted_block->y, targeted_block->z)) {
                         placed = world->combine_oak_slab(targeted_block->x, targeted_block->y, targeted_block->z);
                     }
                 } else {
@@ -1852,7 +1852,7 @@ void GameEngine::update(float delta_time)
                     int place_x = targeted_block->x + (replace_target ? 0 : static_cast<int>(targeted_block->normal.x));
                     int place_y = targeted_block->y + (replace_target ? 0 : static_cast<int>(targeted_block->normal.y));
                     int place_z = targeted_block->z + (replace_target ? 0 : static_cast<int>(targeted_block->normal.z));
-                    if (!placement_intersects_player(player_controller, camera, selected.block, place_x, place_y, place_z, facing)) {
+                    if (!placement_intersects_player(player, selected.block, place_x, place_y, place_z, facing)) {
                         // Door/bed are placed as one atomic pair (World::
                         // place_door()/place_bed()) rather than through the
                         // generic single-cell path below - see their own
@@ -2048,7 +2048,7 @@ void GameEngine::draw()
         DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Color{200, 0, 0, alpha});
     }
 
-    bool show_death_screen = world && player_health.is_dead();
+    bool show_death_screen = world && player.health().is_dead();
     if (!show_death_screen && !inventory_hud.is_open() && sleep_overlay <= 0.0f) ui::crosshair();
 
     if (is_breaking) {
@@ -2067,9 +2067,9 @@ void GameEngine::draw()
         inventory_hud.draw_hotbar(inventory);
         // Creative hides its own health/hunger bars in real Minecraft too -
         // Creative players are invulnerable, so there's nothing meaningful
-        // to show (player_health simply never leaves full health there).
+        // to show (player.health() simply never leaves full health there).
         if (current_game_mode == GameMode::Survival) {
-            inventory_hud.draw_hearts(player_health.health(), PlayerHealth::MAX_HEALTH);
+            inventory_hud.draw_hearts(player.health().current(), PlayerHealth::MAX_HEALTH);
         }
         // Drawn and click-handled together here (not from update()) - the
         // same immediate-mode pattern every menu screen already uses.
@@ -2091,7 +2091,7 @@ void GameEngine::draw()
     if (show_debug_overlay && world) {
         ui::draw_debug_overlay(camera, *world,
             current_game_mode == GameMode::Creative ? CREATIVE_REACH : SURVIVAL_REACH,
-            current_game_mode == GameMode::Creative ? camera_move_speed : player_controller.horizontal_speed(), game_tick);
+            current_game_mode == GameMode::Creative ? camera_move_speed : player.horizontal_speed(), game_tick);
     }
 
     if (sleep_overlay > 0.0f) {
@@ -2374,9 +2374,9 @@ void GameEngine::start_singleplayer_world(const std::string& folder_name)
         camera.target = Vector3Add(camera.position, Vector3Scale(saved->forward, 10.0f));
         inventory = saved->inventory;
         spawn_settle_frames = 3; // see its own comment on set_world()
-        player_controller.reset();
-        player_health.reset();
-        player_health.set_health(saved->health);
+        player.reset(camera);
+        player.health().reset();
+        player.health().set_health(saved->health);
         reset_life_timers();
         camera_view = CameraView::FirstPerson;
         // Resume the day/night cycle (and every random-tick roll) exactly
@@ -2442,7 +2442,7 @@ void GameEngine::save_player_state()
     state.position = camera.position;
     state.forward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
     state.inventory = inventory;
-    state.health = player_health.health();
+    state.health = player.health().current();
     state.game_tick = game_tick;
     WorldSave::save_player_state(current_world_folder, state);
 

@@ -2,7 +2,7 @@
 
 #include "core/Block.hpp"
 #include "core/Keybindings.hpp"
-#include "player/Inventory.hpp"
+#include "items/Inventory.hpp"
 #include "ui/Widgets.hpp"
 
 #include <array>

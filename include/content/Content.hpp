@@ -1,8 +1,8 @@
 #pragma once
 
 #include "core/Block.hpp"
-#include "player/Inventory.hpp" // ItemRef
-#include "player/Item.hpp"
+#include "items/Inventory.hpp" // ItemRef
+#include "items/Item.hpp"
 
 #include "raylib.h"
 
@@ -20,7 +20,7 @@
 //      (Smelting.cpp), and "block.<name>" in assets/translations/*.json.
 //
 // Adding a new item:
-//   1. Append a value to ItemType (player/Item.hpp).
+//   1. Append a value to ItemType (items/Item.hpp).
 //   2. One content::tool/material/food(...) line in src/content/Items.cpp.
 //   3. Optionally: recipes, drops, smelting, and "item.<name>" translations.
 //

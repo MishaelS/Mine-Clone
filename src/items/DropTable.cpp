@@ -1,6 +1,6 @@
-#include "player/DropTable.hpp"
+#include "items/DropTable.hpp"
 #include "content/Content.hpp"
-#include "player/Item.hpp"
+#include "items/Item.hpp"
 
 #include "raylib.h"
 
@@ -25,53 +25,47 @@ namespace {
 
     std::array<std::optional<BlockDropRule>, static_cast<size_t>(BlockType::Count)> drop_table;
 
-    BlockDropRule& rule_for(BlockType block)
-    {
+    BlockDropRule& rule_for(BlockType block) {
         return *drop_table[static_cast<size_t>(block)];
     }
 }
 
 namespace content {
 
-DropRule when_broken(BlockType block)
-{
-    std::optional<BlockDropRule>& rule = drop_table[static_cast<size_t>(block)];
-    if (rule) throw std::runtime_error("drop rule defined twice for block '" + get_block_name(block) + "'");
-    rule.emplace();
-    return DropRule(block);
-}
-
-DropRule& DropRule::needs(ToolKind kind, int min_tier)
-{
-    BlockDropRule& rule = rule_for(block_);
-    rule.requires_tool = kind;
-    rule.min_tier = min_tier;
-    return *this;
-}
-
-DropRule& DropRule::drop(ItemRef what, int count)
-{
-    return drop(what, count, count);
-}
-
-DropRule& DropRule::drop(ItemRef what, int count_min, int count_max)
-{
-    DropEntry entry{what};
-    entry.count_min = std::max(1, count_min);
-    entry.count_max = std::max(entry.count_min, count_max);
-    rule_for(block_).drops.push_back(entry);
-    return *this;
-}
-
-DropRule& DropRule::chance(float probability)
-{
-    BlockDropRule& rule = rule_for(block_);
-    if (rule.drops.empty()) {
-        throw std::runtime_error("drop rule for '" + get_block_name(block_) + "': chance() before any drop()");
+    DropRule when_broken(BlockType block) {
+        std::optional<BlockDropRule>& rule = drop_table[static_cast<size_t>(block)];
+        if (rule) throw std::runtime_error("drop rule defined twice for block '" + get_block_name(block) + "'");
+        rule.emplace();
+        return DropRule(block);
     }
-    rule.drops.back().chance = probability;
-    return *this;
-}
+
+    DropRule& DropRule::needs(ToolKind kind, int min_tier) {
+        BlockDropRule& rule = rule_for(block_);
+        rule.requires_tool = kind;
+        rule.min_tier = min_tier;
+        return *this;
+    }
+
+    DropRule& DropRule::drop(ItemRef what, int count) {
+        return drop(what, count, count);
+    }
+
+    DropRule& DropRule::drop(ItemRef what, int count_min, int count_max) {
+        DropEntry entry{what};
+        entry.count_min = std::max(1, count_min);
+        entry.count_max = std::max(entry.count_min, count_max);
+        rule_for(block_).drops.push_back(entry);
+        return *this;
+    }
+
+    DropRule& DropRule::chance(float probability) {
+        BlockDropRule& rule = rule_for(block_);
+        if (rule.drops.empty()) {
+            throw std::runtime_error("drop rule for '" + get_block_name(block_) + "': chance() before any drop()");
+        }
+        rule.drops.back().chance = probability;
+        return *this;
+    }
 
 } // namespace content
 

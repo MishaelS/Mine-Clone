@@ -6,8 +6,8 @@
 #include "core/Block.hpp"
 #include "core/BlockShape.hpp"
 #include "core/TickMotion.hpp"
-#include "player/Inventory.hpp"
-#include "player/Smelting.hpp"
+#include "items/Inventory.hpp"
+#include "items/Smelting.hpp"
 
 #include <array>
 #include <cstdint>
@@ -451,7 +451,7 @@ public:
     // for a non-solid, non-custom-shape cell (air, torch, rail). The real
     // per-shape list, built from this cell's own facing/block_state, only
     // for a block_has_custom_shape() type - see core/BlockShape.hpp. Used
-    // by PlayerController's collision resolution and (in future shaped-
+    // by Player's collision resolution and (in future shaped-
     // mesh work) Chunk::build_mesh_data().
     BlockShapeBoxes collision_boxes_at(int x, int y, int z) const;
 

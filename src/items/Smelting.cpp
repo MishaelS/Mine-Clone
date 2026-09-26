@@ -1,4 +1,4 @@
-#include "player/Smelting.hpp"
+#include "items/Smelting.hpp"
 #include "content/Content.hpp"
 
 #include <algorithm>
@@ -9,6 +9,7 @@ namespace {
         ItemStack input;  // count unused - one input item per smelt
         ItemStack output;
     };
+
     struct Fuel {
         ItemStack item;   // count unused
         int burn_ticks = 0;
@@ -20,45 +21,39 @@ namespace {
     std::vector<SmeltingRecipe> recipes;
     std::vector<Fuel> fuels;
 
-    bool same_item(const ItemStack& a, const ItemStack& b)
-    {
+    bool same_item(const ItemStack& a, const ItemStack& b) {
         if (a.empty() || b.empty()) return false;
         if (a.holds_item() || b.holds_item()) return a.tool == b.tool;
         return a.block == b.block;
     }
 
-    int max_stack(const ItemStack& stack)
-    {
+    int max_stack(const ItemStack& stack) {
         return stack.is_tool() ? 1 : MAX_ITEM_STACK;
     }
 
     // Whether the input can be smelted right now: something smeltable is
     // in, and the output slot can take its result.
-    bool can_smelt(const FurnaceState& furnace)
-    {
+    bool can_smelt(const FurnaceState& furnace) {
         std::optional<ItemStack> result = smelting_result(furnace.input);
         if (!result) return false;
         if (furnace.output.empty()) return true;
         return same_item(furnace.output, *result) && furnace.output.count + result->count <= max_stack(*result);
     }
 
-    void take_one(ItemStack& stack)
-    {
+    void take_one(ItemStack& stack) {
         if (--stack.count <= 0) stack.clear();
     }
 }
 
 namespace content {
 
-void smelt(ItemRef input, ItemRef output, int count)
-{
-    recipes.push_back({input.stack(1), output.stack(std::max(1, count))});
-}
+    void smelt(ItemRef input, ItemRef output, int count) {
+        recipes.push_back({input.stack(1), output.stack(std::max(1, count))});
+    }
 
-void fuel(ItemRef what, int burn_ticks)
-{
-    if (burn_ticks > 0) fuels.push_back({what.stack(1), burn_ticks});
-}
+    void fuel(ItemRef what, int burn_ticks) {
+        if (burn_ticks > 0) fuels.push_back({what.stack(1), burn_ticks});
+    }
 
 } // namespace content
 

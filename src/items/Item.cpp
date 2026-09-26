@@ -1,4 +1,4 @@
-#include "player/Item.hpp"
+#include "items/Item.hpp"
 #include "content/Content.hpp"
 #include "core/TextureManager.hpp"
 
@@ -24,24 +24,27 @@ namespace {
             (tile.y + 1) * TILE_PIXELS > item_atlas_texture->height) {
             throw std::runtime_error("'" + owner + "': sprite tile coordinates outside the item atlas");
         }
+
         return {
             static_cast<float>(tile.x * TILE_PIXELS), static_cast<float>(tile.y * TILE_PIXELS),
             static_cast<float>(TILE_PIXELS), static_cast<float>(TILE_PIXELS),
         };
     }
 
-    ItemProperties& define(ItemType type, const char* name, content::Tile sprite)
-    {
+    ItemProperties& define(ItemType type, const char* name, content::Tile sprite) {
         size_t index = static_cast<size_t>(type);
         if (type == ItemType::None || type == ItemType::Count) {
             throw std::runtime_error(std::string("item '") + name + "': not a definable ItemType");
         }
+
         if (!item_names[index].empty()) {
             throw std::runtime_error("ItemType defined twice: '" + item_names[index] + "' and '" + name + "'");
         }
+
         if (item_type_from_name(name)) {
             throw std::runtime_error(std::string("duplicate item name '") + name + "'");
         }
+
         item_names[index] = name;
         item_table[index] = ItemProperties{};
         item_table[index].atlas_source = sprite_rect(name, sprite);

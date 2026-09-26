@@ -1,7 +1,7 @@
 #include "ui/Localization.hpp"
 #include "core/Block.hpp"
 #include "core/Json.hpp"
-#include "player/Item.hpp"
+#include "items/Item.hpp"
 
 #include "raylib.h"
 

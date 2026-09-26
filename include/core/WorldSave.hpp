@@ -1,7 +1,7 @@
 #pragma once
 
-#include "player/Inventory.hpp"
-#include "player/Smelting.hpp"
+#include "items/Inventory.hpp"
+#include "items/Smelting.hpp"
 
 #include "raylib.h"
 
@@ -34,7 +34,7 @@ struct PlayerSaveState {
     Vector3 forward  = {0.0f, 0.0f, -1.0f};    // normalized look direction - camera.target is reconstructed from this on load
     Inventory inventory;
     // Half-heart units, same as PlayerHealth::MAX_HEALTH (kept as a plain
-    // int here rather than including player/PlayerHealth.hpp, which this
+    // int here rather than including entities/PlayerHealth.hpp, which this
     // header has no other reason to depend on). Missing in an older save
     // defaults to full health - see WorldSave::load_player_state().
     int health = 20;

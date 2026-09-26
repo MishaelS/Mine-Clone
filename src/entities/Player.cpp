@@ -1,4 +1,4 @@
-#include "player/PlayerController.hpp"
+#include "entities/Player.hpp"
 #include "core/Block.hpp"
 #include "core/BlockShape.hpp"
 #include "core/Tick.hpp"
@@ -10,7 +10,7 @@
 #include <cmath>
 
 namespace {
-    constexpr float HALF_WIDTH = PlayerController::WIDTH * 0.5f;
+    constexpr float HALF_WIDTH = Player::WIDTH * 0.5f;
     constexpr float COLLISION_EPSILON = 0.001f;
     constexpr float GROUND_PROBE = 0.05f;
 
@@ -60,7 +60,7 @@ namespace {
     {
         BoundingBox player_box{
             {feet.x - HALF_WIDTH + COLLISION_EPSILON, feet.y + COLLISION_EPSILON, feet.z - HALF_WIDTH + COLLISION_EPSILON},
-            {feet.x + HALF_WIDTH - COLLISION_EPSILON, feet.y + PlayerController::HEIGHT - COLLISION_EPSILON, feet.z + HALF_WIDTH - COLLISION_EPSILON},
+            {feet.x + HALF_WIDTH - COLLISION_EPSILON, feet.y + Player::HEIGHT - COLLISION_EPSILON, feet.z + HALF_WIDTH - COLLISION_EPSILON},
         };
         int min_x = static_cast<int>(std::floor(player_box.min.x));
         int max_x = static_cast<int>(std::floor(player_box.max.x));
@@ -86,7 +86,7 @@ namespace {
         const int min_x = static_cast<int>(std::floor(feet.x - HALF_WIDTH + COLLISION_EPSILON));
         const int max_x = static_cast<int>(std::floor(feet.x + HALF_WIDTH - COLLISION_EPSILON));
         const int min_y = static_cast<int>(std::floor(feet.y + COLLISION_EPSILON));
-        const int max_y = static_cast<int>(std::floor(feet.y + PlayerController::HEIGHT - COLLISION_EPSILON));
+        const int max_y = static_cast<int>(std::floor(feet.y + Player::HEIGHT - COLLISION_EPSILON));
         const int min_z = static_cast<int>(std::floor(feet.z - HALF_WIDTH + COLLISION_EPSILON));
         const int max_z = static_cast<int>(std::floor(feet.z + HALF_WIDTH - COLLISION_EPSILON));
         for (int x = min_x; x <= max_x; ++x) {
@@ -94,7 +94,7 @@ namespace {
                 for (int z = min_z; z <= max_z; ++z) {
                     if (world.get_block(x, y, z) == BlockType::Water &&
                         feet.y < y + WATER_SURFACE_HEIGHT &&
-                        feet.y + PlayerController::HEIGHT > y) {
+                        feet.y + Player::HEIGHT > y) {
                         return true;
                     }
                 }
@@ -108,7 +108,7 @@ namespace {
         const int min_x = static_cast<int>(std::floor(feet.x - HALF_WIDTH + COLLISION_EPSILON));
         const int max_x = static_cast<int>(std::floor(feet.x + HALF_WIDTH - COLLISION_EPSILON));
         const int min_y = static_cast<int>(std::floor(feet.y + COLLISION_EPSILON));
-        const int max_y = static_cast<int>(std::floor(feet.y + PlayerController::HEIGHT - COLLISION_EPSILON));
+        const int max_y = static_cast<int>(std::floor(feet.y + Player::HEIGHT - COLLISION_EPSILON));
         const int min_z = static_cast<int>(std::floor(feet.z - HALF_WIDTH + COLLISION_EPSILON));
         const int max_z = static_cast<int>(std::floor(feet.z + HALF_WIDTH - COLLISION_EPSILON));
 
@@ -119,7 +119,7 @@ namespace {
                 for (int z = min_z; z <= max_z; ++z) {
                     if (world.get_block(x, y, z) != BlockType::Water ||
                         feet.y >= y + WATER_SURFACE_HEIGHT ||
-                        feet.y + PlayerController::HEIGHT <= y) {
+                        feet.y + Player::HEIGHT <= y) {
                         continue;
                     }
 
@@ -143,7 +143,7 @@ namespace {
         const int min_x = static_cast<int>(std::floor(feet.x - HALF_WIDTH + COLLISION_EPSILON));
         const int max_x = static_cast<int>(std::floor(feet.x + HALF_WIDTH - COLLISION_EPSILON));
         const int min_y = static_cast<int>(std::floor(feet.y + COLLISION_EPSILON));
-        const int max_y = static_cast<int>(std::floor(feet.y + PlayerController::HEIGHT - COLLISION_EPSILON));
+        const int max_y = static_cast<int>(std::floor(feet.y + Player::HEIGHT - COLLISION_EPSILON));
         const int min_z = static_cast<int>(std::floor(feet.z - HALF_WIDTH + COLLISION_EPSILON));
         const int max_z = static_cast<int>(std::floor(feet.z + HALF_WIDTH - COLLISION_EPSILON));
         for (int x = min_x; x <= max_x; ++x) {
@@ -171,7 +171,7 @@ namespace {
         const int min_x = static_cast<int>(std::floor(feet.x - HALF_WIDTH - MARGIN + COLLISION_EPSILON));
         const int max_x = static_cast<int>(std::floor(feet.x + HALF_WIDTH + MARGIN - COLLISION_EPSILON));
         const int min_y = static_cast<int>(std::floor(feet.y + COLLISION_EPSILON));
-        const int max_y = static_cast<int>(std::floor(feet.y + PlayerController::HEIGHT - COLLISION_EPSILON));
+        const int max_y = static_cast<int>(std::floor(feet.y + Player::HEIGHT - COLLISION_EPSILON));
         const int min_z = static_cast<int>(std::floor(feet.z - HALF_WIDTH - MARGIN + COLLISION_EPSILON));
         const int max_z = static_cast<int>(std::floor(feet.z + HALF_WIDTH + MARGIN - COLLISION_EPSILON));
         for (int x = min_x; x <= max_x; ++x) {
@@ -238,11 +238,11 @@ namespace {
     }
 }
 
-void PlayerController::reset()
+void Player::reset(const Camera3D& eyes)
 {
-    horizontal_velocity = {0.0f, 0.0f, 0.0f};
-    vertical_velocity = 0.0f;
+    velocity = {0.0f, 0.0f, 0.0f};
     step_visual_offset = 0.0f;
+    position = feet_under(eyes);
     grounded = false;
     touching_water = false;
     touching_lava = false;
@@ -254,8 +254,8 @@ void PlayerController::reset()
     landing_fall_distance = 0.0f;
 }
 
-void PlayerController::update(Camera3D& eyes, const World& world, GameMode mode,
-                              const PlayerInput& input, float delta_time)
+void Player::update_movement(Camera3D& eyes, const World& world, GameMode mode,
+                             const PlayerInput& input, float delta_time)
 {
     delta_time = std::min(delta_time, 0.1f);
     Vector3 forward = horizontal_basis_forward(eyes);
@@ -264,7 +264,10 @@ void PlayerController::update(Camera3D& eyes, const World& world, GameMode mode,
     if (Vector3LengthSqr(wish) > 1.0f) wish = Vector3Normalize(wish);
 
     Vector3 previous = eyes.position;
-    Vector3 feet = feet_position(eyes);
+    // The eye camera is where the player actually is - anything that moved
+    // it since the last frame (a teleport not followed by reset()) is
+    // picked up here rather than snapping back.
+    Vector3 feet = feet_under(eyes);
     touching_water = box_touches_water(world, feet);
     touching_lava = box_touches_lava(world, feet);
     touching_cactus = box_touches_damaging_block(world, feet);
@@ -274,9 +277,9 @@ void PlayerController::update(Camera3D& eyes, const World& world, GameMode mode,
         delta.y = ((input.jump ? 1.0f : 0.0f) - (input.sneak ? 1.0f : 0.0f)) * speed * delta_time;
         eyes.position = Vector3Add(eyes.position, delta);
         eyes.target = Vector3Add(eyes.target, delta);
-        horizontal_velocity = {0.0f, 0.0f, 0.0f};
-        vertical_velocity = 0.0f;
+        velocity = {0.0f, 0.0f, 0.0f};
         step_visual_offset = 0.0f;
+        position = feet_under(eyes);
         grounded = false;
         // Creative is invulnerable (GameEngine never reads these while in
         // that mode), but keep them from holding a stale true from before
@@ -300,32 +303,32 @@ void PlayerController::update(Camera3D& eyes, const World& world, GameMode mode,
     Vector3 desired = Vector3Scale(wish, desired_speed);
     float acceleration = grounded ? GROUND_ACCELERATION : AIR_ACCELERATION;
     if (Vector3LengthSqr(wish) < 0.000001f && grounded) acceleration = GROUND_DECELERATION;
-    horizontal_velocity.x = move_towards(horizontal_velocity.x, desired.x, acceleration * delta_time);
-    horizontal_velocity.z = move_towards(horizontal_velocity.z, desired.z, acceleration * delta_time);
+    velocity.x = move_towards(velocity.x, desired.x, acceleration * delta_time);
+    velocity.z = move_towards(velocity.z, desired.z, acceleration * delta_time);
     if (in_water) {
         Vector3 flow = box_water_flow(world, feet);
         if (Vector3LengthSqr(flow) > 0.000001f) {
             Vector3 flow_target = Vector3Scale(flow, WATER_FLOW_MAX_SPEED);
-            horizontal_velocity.x = move_towards(horizontal_velocity.x, desired.x + flow_target.x,
+            velocity.x = move_towards(velocity.x, desired.x + flow_target.x,
                                                  WATER_FLOW_ACCELERATION * delta_time);
-            horizontal_velocity.z = move_towards(horizontal_velocity.z, desired.z + flow_target.z,
+            velocity.z = move_towards(velocity.z, desired.z + flow_target.z,
                                                  WATER_FLOW_ACCELERATION * delta_time);
         }
     }
 
     if (in_water) {
         float target_vertical = input.jump ? WATER_SPEED : input.sneak ? -WATER_SPEED : -0.35f;
-        vertical_velocity = move_towards(vertical_velocity, target_vertical, 10.0f * delta_time);
-    } else if (grounded && vertical_velocity <= 0.0f) {
-        vertical_velocity = input.jump ? JUMP_VELOCITY : 0.0f;
+        velocity.y = move_towards(velocity.y, target_vertical, 10.0f * delta_time);
+    } else if (grounded && velocity.y <= 0.0f) {
+        velocity.y = input.jump ? JUMP_VELOCITY : 0.0f;
         if (input.jump) grounded = false;
     } else {
-        vertical_velocity = std::max(TERMINAL_VELOCITY, vertical_velocity - GRAVITY * delta_time);
-        vertical_velocity *= std::pow(VERTICAL_DRAG_PER_TICK, delta_time * TICKS_PER_SECOND);
+        velocity.y = std::max(TERMINAL_VELOCITY, velocity.y - GRAVITY * delta_time);
+        velocity.y *= std::pow(VERTICAL_DRAG_PER_TICK, delta_time * TICKS_PER_SECOND);
     }
 
-    bool blocked_x = move_axis(world, feet, horizontal_velocity.x * delta_time, 0);
-    bool blocked_z = move_axis(world, feet, horizontal_velocity.z * delta_time, 2);
+    bool blocked_x = move_axis(world, feet, velocity.x * delta_time, 0);
+    bool blocked_z = move_axis(world, feet, velocity.z * delta_time, 2);
     // Dry-land stepping and water-bank climbing are deliberately separate:
     // applying both the positional step and the fluid exit impulse in one
     // frame would double the vertical motion and visibly pop the player.
@@ -333,31 +336,31 @@ void PlayerController::update(Camera3D& eyes, const World& world, GameMode mode,
     const float step_height = NORMAL_STEP_HEIGHT;
     float feet_y_before_step = feet.y;
     float step_x = blocked_x && may_step
-        ? rise_towards_step(world, feet, horizontal_velocity.x * delta_time, 0, step_height)
+        ? rise_towards_step(world, feet, velocity.x * delta_time, 0, step_height)
         : 0.0f;
     if (step_x > 0.0f) {
-        blocked_x = move_axis(world, feet, horizontal_velocity.x * delta_time, 0);
+        blocked_x = move_axis(world, feet, velocity.x * delta_time, 0);
     }
     float step_z = blocked_z && may_step
-        ? rise_towards_step(world, feet, horizontal_velocity.z * delta_time, 2, step_height)
+        ? rise_towards_step(world, feet, velocity.z * delta_time, 2, step_height)
         : 0.0f;
     if (step_z > 0.0f) {
-        blocked_z = move_axis(world, feet, horizontal_velocity.z * delta_time, 2);
+        blocked_z = move_axis(world, feet, velocity.z * delta_time, 2);
     }
     float stepped_height = feet.y - feet_y_before_step;
     if (stepped_height > 0.0f) {
         step_visual_offset = std::min(NORMAL_STEP_HEIGHT, step_visual_offset + stepped_height);
     }
     if (in_water && input.jump && (blocked_x || blocked_z)) {
-        vertical_velocity = std::max(vertical_velocity, WATER_EXIT_VELOCITY);
+        velocity.y = std::max(velocity.y, WATER_EXIT_VELOCITY);
     }
     float feet_y_before_vertical = feet.y;
-    bool blocked_y = move_axis(world, feet, vertical_velocity * delta_time, 1);
-    if (blocked_x) horizontal_velocity.x = 0.0f;
-    if (blocked_z) horizontal_velocity.z = 0.0f;
+    bool blocked_y = move_axis(world, feet, velocity.y * delta_time, 1);
+    if (blocked_x) velocity.x = 0.0f;
+    if (blocked_z) velocity.z = 0.0f;
     if (blocked_y) {
-        if (vertical_velocity < 0.0f) grounded = true;
-        vertical_velocity = 0.0f;
+        if (velocity.y < 0.0f) grounded = true;
+        velocity.y = 0.0f;
     }
 
     // Fall-distance bookkeeping (real Minecraft's own rule): resets the
@@ -372,7 +375,7 @@ void PlayerController::update(Camera3D& eyes, const World& world, GameMode mode,
         fall_distance = 0.0f;
     } else if (descended > 0.0f) {
         fall_distance += descended;
-    } else if (vertical_velocity > 0.0f) {
+    } else if (velocity.y > 0.0f) {
         fall_distance = 0.0f;
     }
     just_landed = grounded && !prev_grounded;
@@ -382,6 +385,7 @@ void PlayerController::update(Camera3D& eyes, const World& world, GameMode mode,
     }
 
     step_visual_offset = std::max(0.0f, step_visual_offset - STEP_SMOOTH_SPEED * delta_time);
+    position = feet;
     eyes.position = {feet.x, feet.y + EYE_HEIGHT - step_visual_offset, feet.z};
     Vector3 shift = Vector3Subtract(eyes.position, previous);
     eyes.target = Vector3Add(eyes.target, shift);
@@ -403,37 +407,35 @@ void PlayerController::update(Camera3D& eyes, const World& world, GameMode mode,
     head_submerged = eye_block == BlockType::Water && eyes.position.y < eye_y + WATER_SURFACE_HEIGHT;
 }
 
-float PlayerController::consume_landing_fall_distance()
+float Player::consume_landing_fall_distance()
 {
     if (!just_landed) return -1.0f;
     just_landed = false;
     return landing_fall_distance;
 }
 
-Vector3 PlayerController::feet_position(const Camera3D& eyes) const
+Vector3 Player::feet_under(const Camera3D& eyes) const
 {
     return {eyes.position.x, eyes.position.y - EYE_HEIGHT + step_visual_offset, eyes.position.z};
 }
 
-Vector3 PlayerController::closest_hitbox_point(const Camera3D& eyes, Vector3 point) const
+Vector3 Player::closest_hitbox_point(Vector3 point) const
 {
-    Vector3 feet = feet_position(eyes);
     return {
-        std::clamp(point.x, feet.x - HALF_WIDTH, feet.x + HALF_WIDTH),
-        std::clamp(point.y, feet.y, feet.y + HEIGHT),
-        std::clamp(point.z, feet.z - HALF_WIDTH, feet.z + HALF_WIDTH),
+        std::clamp(point.x, position.x - HALF_WIDTH, position.x + HALF_WIDTH),
+        std::clamp(point.y, position.y, position.y + HEIGHT),
+        std::clamp(point.z, position.z - HALF_WIDTH, position.z + HALF_WIDTH),
     };
 }
 
-bool PlayerController::intersects_block(const Camera3D& eyes, int x, int y, int z) const
+bool Player::intersects_block(int x, int y, int z) const
 {
-    Vector3 feet = feet_position(eyes);
-    return feet.x + HALF_WIDTH > x && feet.x - HALF_WIDTH < x + 1.0f &&
-           feet.y + HEIGHT > y && feet.y < y + 1.0f &&
-           feet.z + HALF_WIDTH > z && feet.z - HALF_WIDTH < z + 1.0f;
+    return position.x + HALF_WIDTH > x && position.x - HALF_WIDTH < x + 1.0f &&
+           position.y + HEIGHT > y && position.y < y + 1.0f &&
+           position.z + HALF_WIDTH > z && position.z - HALF_WIDTH < z + 1.0f;
 }
 
-float PlayerController::horizontal_speed() const
+float Player::horizontal_speed() const
 {
-    return std::sqrt(horizontal_velocity.x * horizontal_velocity.x + horizontal_velocity.z * horizontal_velocity.z);
+    return std::sqrt(velocity.x * velocity.x + velocity.z * velocity.z);
 }

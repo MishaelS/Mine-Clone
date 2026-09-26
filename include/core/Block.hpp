@@ -190,7 +190,7 @@ constexpr float FACE_DIRECTION_SHADE[6] = {1.0f, 0.5f, 0.8f, 0.8f, 0.6f, 0.6f};
 
 // Which tool a block is efficiently mined with - see BlockProperties::
 // effective_tool and GameEngine.cpp's break_seconds_required(). Lives here,
-// not in player/Item.hpp, because "what this block needs" is a property of
+// not in items/Item.hpp, because "what this block needs" is a property of
 // the block, not of any particular tool; ItemProperties::tool_kind (Item.hpp)
 // reuses this same enum for "what kind of tool this item is".
 enum class ToolKind : uint8_t { None, Sword, Pickaxe, Shovel, Axe, Hoe };
@@ -283,7 +283,7 @@ struct BlockProperties {
 
     // True for a block that damages on contact regardless of whether it
     // blocks movement (cactus) - generalizes what used to be a single
-    // hardcoded BlockType::Cactus check in PlayerController.cpp's
+    // hardcoded BlockType::Cactus check in entities/Player.cpp's
     // box_touches_cactus() into a data-driven one any future block can opt
     // into by name alone.
     bool damages_on_touch;

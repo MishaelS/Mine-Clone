@@ -66,7 +66,7 @@ public:
     // through instead.
     void kill();
 
-    int health() const { return current_health; }
+    int current() const { return current_health; }
     bool is_dead() const { return current_health <= 0; }
     bool is_invulnerable() const { return invulnerable_seconds > 0.0f; }
     DamageSource last_damage_source() const { return last_source; }

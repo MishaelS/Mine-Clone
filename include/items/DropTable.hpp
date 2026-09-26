@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/Block.hpp"
-#include "player/Inventory.hpp"
+#include "items/Inventory.hpp"
 
 #include <vector>
 

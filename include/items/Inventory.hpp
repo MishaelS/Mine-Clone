@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/Block.hpp"
-#include "player/Item.hpp"
+#include "items/Item.hpp"
 
 #include <array>
 #include <vector>

@@ -1,5 +1,5 @@
-#include "player/DroppedItem.hpp"
-#include "player/Item.hpp"
+#include "entities/DroppedItem.hpp"
+#include "items/Item.hpp"
 #include "world/World.hpp"
 #include "rendering/BlockMesh.hpp"
 #include "rendering/EntityLighting.hpp"

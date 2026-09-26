@@ -1,6 +1,6 @@
 #pragma once
 
-#include "player/Inventory.hpp"
+#include "items/Inventory.hpp"
 
 #include <optional>
 #include <vector>

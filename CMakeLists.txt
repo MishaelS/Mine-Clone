@@ -44,16 +44,20 @@ add_executable(${PROJECT_NAME}
     src/core/WorldSave.cpp
     src/audio/AudioSystem.cpp
 
-    # Player-domain state and world-visible effects
-    src/player/Entity.cpp
-    src/player/Inventory.cpp
-    src/player/PlayerController.cpp
-    src/player/PlayerHealth.cpp
-    src/player/Item.cpp
-    src/player/DroppedItem.cpp
-    src/player/DropTable.cpp
-    src/player/Recipe.cpp
-    src/player/Smelting.cpp
+    # Entities: dynamic actors in the world (the player, dropped items)
+    src/entities/Entity.cpp
+    src/entities/Player.cpp
+    src/entities/PlayerHealth.cpp
+    src/entities/DroppedItem.cpp
+
+    # Items: item/tool stats, inventory, drops, crafting and smelting
+    src/items/Item.cpp
+    src/items/Inventory.cpp
+    src/items/DropTable.cpp
+    src/items/Recipe.cpp
+    src/items/Smelting.cpp
+
+    # World-visible effects
     src/effects/ParticleSystem.cpp
 
     # Game content: every block, item, drop, recipe and smelting rule

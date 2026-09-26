@@ -1,7 +1,7 @@
 #pragma once
 
-#include "player/Entity.hpp"
-#include "player/Inventory.hpp" // ItemStack
+#include "entities/Entity.hpp"
+#include "items/Inventory.hpp" // ItemStack
 #include "core/TickMotion.hpp"
 
 #include <optional>

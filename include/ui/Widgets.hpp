@@ -4,7 +4,7 @@
 
 #include "raylib.h"
 #include "core/Block.hpp"
-#include "player/Item.hpp"
+#include "items/Item.hpp"
 
 #include <cstddef>
 #include <functional>

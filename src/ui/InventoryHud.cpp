@@ -3,9 +3,9 @@
 #include "ui/Localization.hpp"
 #include "ui/FontManager.hpp"
 #include "core/TextureManager.hpp"
-#include "player/Item.hpp"
-#include "player/Recipe.hpp"
-#include "player/Smelting.hpp"
+#include "items/Item.hpp"
+#include "items/Recipe.hpp"
+#include "items/Smelting.hpp"
 #include "core/WorldSave.hpp"
 #include "rendering/PlayerRenderer.hpp"
 #include "world/World.hpp"
@@ -20,12 +20,11 @@ namespace {
     const char* HOTBAR_TEXTURE_PATH = "sprites/gui/hotbar.png";
     const char* HOTBAR_SELECTOR_TEXTURE_PATH = "sprites/gui/hotbarSelector.png";
 
-    const char* container_texture_path(InventoryHud::ContainerKind kind)
-    {
+    const char* container_texture_path(InventoryHud::ContainerKind kind) {
         switch (kind) {
-            case InventoryHud::ContainerKind::Workbench: return "sprites/gui/container/container1.png";
-            case InventoryHud::ContainerKind::Furnace:   return "sprites/gui/container/container2.png";
-            case InventoryHud::ContainerKind::Chest:     return "sprites/gui/container/container3.png";
+            case InventoryHud::ContainerKind::Workbench : return "sprites/gui/container/container1.png";
+            case InventoryHud::ContainerKind::Furnace   : return "sprites/gui/container/container2.png";
+            case InventoryHud::ContainerKind::Chest     : return "sprites/gui/container/container3.png";
             case InventoryHud::ContainerKind::LargeChest: return "sprites/gui/container/container4.png";
             case InventoryHud::ContainerKind::Inventory:
             default:
@@ -59,14 +58,14 @@ namespace {
     constexpr float HOTBAR_SCALE    = 2.0f;
     constexpr float INVENTORY_SCALE = 2.0f;
 
-    constexpr float ITEM_SIZE_PX           = 16.0f;
+    constexpr float ITEM_SIZE_PX             = 16.0f;
     constexpr float CONTAINER_SLOT_STRIDE_PX = 18.0f;
 
     // These origins are the gray INTERIOR of each cell, not its bevel.
     // Interiors are 16x16 with an 18px pitch; confusing size with pitch
     // makes icons and hover overlays spill onto the next cell's border.
-    constexpr Vector2 MAIN_GRID_ORIGIN = {8.0f, 84.0f};
     constexpr int MAIN_GRID_COLUMNS = 9;
+    constexpr Vector2 MAIN_GRID_ORIGIN        = {8.0f, 84.0f};
     constexpr Vector2 INVENTORY_HOTBAR_ORIGIN = {8.0f, 142.0f};
 
     // Crafting grid/output slot positions - measured directly off each
@@ -95,7 +94,7 @@ namespace {
     // instead of 3, and the player-storage/hotbar section shifts down by
     // that same 56px from MAIN_GRID_ORIGIN/INVENTORY_HOTBAR_ORIGIN below.
     constexpr Vector2 LARGE_CHEST_MAIN_GRID_ORIGIN = {8.0f, 140.0f};
-    constexpr Vector2 LARGE_CHEST_HOTBAR_ORIGIN = {8.0f, 198.0f};
+    constexpr Vector2 LARGE_CHEST_HOTBAR_ORIGIN    = {8.0f, 198.0f};
 
     // The player-model preview box - container0.png's own art leaves this
     // rectangle solid black (flood-filled to find these exact bounds),
@@ -106,12 +105,12 @@ namespace {
     // Fixed resolution for the render-to-texture preview - a little denser
     // than the box's own native pixel size so the 3D model reads smoothly
     // rather than blocky, while staying cheap (a few hundred pixels).
-    constexpr int PREVIEW_RENDER_WIDTH = 140;
+    constexpr int PREVIEW_RENDER_WIDTH  = 140;
     constexpr int PREVIEW_RENDER_HEIGHT = 200;
 
     constexpr float PREVIEW_MOUSE_SENSITIVITY = 0.4f; // screen pixels of mouse offset -> degrees of rotation
-    constexpr float PREVIEW_MAX_YAW = 70.0f;
-    constexpr float PREVIEW_MAX_PITCH = 25.0f;
+    constexpr float PREVIEW_MAX_YAW          = 70.0f;
+    constexpr float PREVIEW_MAX_PITCH        = 25.0f;
 
     // Renders the player model into a small off-screen texture, rotated to
     // follow the mouse (same idea as real Minecraft's own inventory
@@ -121,8 +120,7 @@ namespace {
     // reused every call - LoadRenderTexture()/UnloadRenderTexture() every
     // frame would be wasteful for something drawn every frame the
     // inventory screen is open.
-    void draw_player_preview(Rectangle destination, Vector2 mouse)
-    {
+    void draw_player_preview(Rectangle destination, Vector2 mouse) {
         static RenderTexture2D target = LoadRenderTexture(PREVIEW_RENDER_WIDTH, PREVIEW_RENDER_HEIGHT);
 
         Vector2 box_center = {destination.x + destination.width / 2.0f, destination.y + destination.height / 2.0f};
@@ -130,10 +128,10 @@ namespace {
         float pitch = std::clamp((mouse.y - box_center.y) * PREVIEW_MOUSE_SENSITIVITY, -PREVIEW_MAX_PITCH, PREVIEW_MAX_PITCH);
 
         Camera3D camera{};
-        camera.position = {0.0f, 1.6f, 4.3f};
-        camera.target = {0.0f, 0.9f, 0.0f};
-        camera.up = {0.0f, 1.0f, 0.0f};
-        camera.fovy = 25.0f;
+        camera.position   = {0.0f, 1.6f, 4.3f};
+        camera.target     = {0.0f, 0.9f, 0.0f};
+        camera.up         = {0.0f, 1.0f, 0.0f};
+        camera.fovy       = 25.0f;
         camera.projection = CAMERA_PERSPECTIVE;
 
         BeginTextureMode(target);
@@ -165,9 +163,9 @@ namespace {
     const char* HEART_FULL_TEXTURE_PATH  = "sprites/gui/hearts/heart0.png";
     const char* HEART_HALF_TEXTURE_PATH  = "sprites/gui/hearts/heart1.png";
     const char* HEART_EMPTY_TEXTURE_PATH = "sprites/gui/hearts/heart2.png";
-    constexpr float HEART_ICON_PX = 9.0f;
+    constexpr float HEART_ICON_PX   = 9.0f;
     constexpr float HEART_STRIDE_PX = 8.0f;
-    constexpr float HEART_ROW_GAP = 5.0f; // above the hotbar's own top edge
+    constexpr float HEART_ROW_GAP   = 5.0f; // above the hotbar's own top edge
 
     constexpr Color SELECTION_HIGHLIGHT_COLOR = {255, 255, 255, 80};
     constexpr int STACK_COUNT_FONT_SIZE = 13;

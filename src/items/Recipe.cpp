@@ -1,6 +1,6 @@
-#include "player/Recipe.hpp"
+#include "items/Recipe.hpp"
 #include "content/Content.hpp"
-#include "player/Item.hpp"
+#include "items/Item.hpp"
 
 #include <algorithm>
 #include <optional>
@@ -27,80 +27,79 @@ namespace {
 
     std::vector<Recipe> recipes;
 
-    std::string describe(ItemRef what)
-    {
+    std::string describe(ItemRef what) {
         return what.is_item() ? get_item_name(what.item) : get_block_name(what.block);
     }
 }
 
 namespace content {
 
-void shaped(ItemRef output, int count, std::initializer_list<const char*> pattern, std::initializer_list<Key> keys)
-{
-    std::vector<std::string> rows(pattern.begin(), pattern.end());
-    auto row_empty = [](const std::string& row) {
-        return row.find_first_not_of(' ') == std::string::npos;
-    };
-    // Trim fully empty rows/columns around the pattern, so it matches
-    // wherever it's placed in the grid (Minecraft's own behavior).
-    while (!rows.empty() && row_empty(rows.back())) rows.pop_back();
-    while (!rows.empty() && row_empty(rows.front())) rows.erase(rows.begin());
-    size_t first_col = std::string::npos;
-    size_t last_col = 0;
-    for (const std::string& row : rows) {
-        size_t first = row.find_first_not_of(' ');
-        if (first == std::string::npos) continue;
-        first_col = std::min(first_col, first);
-        last_col = std::max(last_col, row.find_last_not_of(' '));
-    }
-    if (rows.empty()) {
-        throw std::runtime_error("shaped recipe for '" + describe(output) + "': empty pattern");
-    }
+    void shaped(ItemRef output, int count, std::initializer_list<const char*> pattern, std::initializer_list<Key> keys) {
+        std::vector<std::string> rows(pattern.begin(), pattern.end());
+        auto row_empty = [](const std::string& row) {
+            return row.find_first_not_of(' ') == std::string::npos;
+        };
 
-    Recipe recipe;
-    recipe.output = output.stack(std::max(1, count));
-    recipe.pattern_rows = static_cast<int>(rows.size());
-    recipe.pattern_cols = static_cast<int>(last_col - first_col + 1);
-    recipe.grid_size = recipe.pattern_rows > 2 || recipe.pattern_cols > 2 ? 3 : 2;
-    if (recipe.pattern_rows > 3 || recipe.pattern_cols > 3) {
-        throw std::runtime_error("shaped recipe for '" + describe(output) + "': pattern larger than 3x3");
-    }
-    for (const std::string& row : rows) {
-        for (size_t col = first_col; col <= last_col; ++col) {
-            char symbol = col < row.size() ? row[col] : ' ';
-            if (symbol == ' ') {
-                recipe.pattern.push_back(std::nullopt);
-                continue;
-            }
-            const Key* key = std::find_if(keys.begin(), keys.end(),
-                                          [symbol](const Key& k) { return k.symbol == symbol; });
-            if (key == keys.end()) {
-                throw std::runtime_error("shaped recipe for '" + describe(output) + "': no key for '" +
-                                         std::string(1, symbol) + "'");
-            }
-            recipe.pattern.push_back(key->what);
+        // Trim fully empty rows/columns around the pattern, so it matches
+        // wherever it's placed in the grid (Minecraft's own behavior).
+        while (!rows.empty() && row_empty(rows.back())) rows.pop_back();
+        while (!rows.empty() && row_empty(rows.front())) rows.erase(rows.begin());
+        size_t first_col = std::string::npos;
+        size_t last_col = 0;
+        for (const std::string& row : rows) {
+            size_t first = row.find_first_not_of(' ');
+            if (first == std::string::npos) continue;
+            first_col = std::min(first_col, first);
+            last_col = std::max(last_col, row.find_last_not_of(' '));
         }
-    }
-    recipes.push_back(std::move(recipe));
-}
 
-void shaped(ItemRef output, std::initializer_list<const char*> pattern, std::initializer_list<Key> keys)
-{
-    shaped(output, 1, pattern, keys);
-}
+        if (rows.empty()) {
+            throw std::runtime_error("shaped recipe for '" + describe(output) + "': empty pattern");
+        }
 
-void shapeless(ItemRef output, int count, std::initializer_list<ItemRef> ingredients)
-{
-    if (ingredients.size() == 0 || ingredients.size() > 9) {
-        throw std::runtime_error("shapeless recipe for '" + describe(output) + "': needs 1-9 ingredients");
+        Recipe recipe;
+        recipe.output = output.stack(std::max(1, count));
+        recipe.pattern_rows = static_cast<int>(rows.size());
+        recipe.pattern_cols = static_cast<int>(last_col - first_col + 1);
+        recipe.grid_size = recipe.pattern_rows > 2 || recipe.pattern_cols > 2 ? 3 : 2;
+        if (recipe.pattern_rows > 3 || recipe.pattern_cols > 3) {
+            throw std::runtime_error("shaped recipe for '" + describe(output) + "': pattern larger than 3x3");
+        }
+
+        for (const std::string& row : rows) {
+            for (size_t col = first_col; col <= last_col; ++col) {
+                char symbol = col < row.size() ? row[col] : ' ';
+                if (symbol == ' ') {
+                    recipe.pattern.push_back(std::nullopt);
+                    continue;
+                }
+                const Key* key = std::find_if(keys.begin(), keys.end(),
+                                            [symbol](const Key& k) { return k.symbol == symbol; });
+                if (key == keys.end()) {
+                    throw std::runtime_error("shaped recipe for '" + describe(output) + "': no key for '" +
+                                            std::string(1, symbol) + "'");
+                }
+                recipe.pattern.push_back(key->what);
+            }
+        }
+        recipes.push_back(std::move(recipe));
     }
-    Recipe recipe;
-    recipe.output = output.stack(std::max(1, count));
-    recipe.shapeless = true;
-    recipe.grid_size = ingredients.size() > 4 ? 3 : 2;
-    recipe.shapeless_ingredients.assign(ingredients.begin(), ingredients.end());
-    recipes.push_back(std::move(recipe));
-}
+
+    void shaped(ItemRef output, std::initializer_list<const char*> pattern, std::initializer_list<Key> keys) {
+        shaped(output, 1, pattern, keys);
+    }
+
+    void shapeless(ItemRef output, int count, std::initializer_list<ItemRef> ingredients) {
+        if (ingredients.size() == 0 || ingredients.size() > 9) {
+            throw std::runtime_error("shapeless recipe for '" + describe(output) + "': needs 1-9 ingredients");
+        }
+        Recipe recipe;
+        recipe.output = output.stack(std::max(1, count));
+        recipe.shapeless = true;
+        recipe.grid_size = ingredients.size() > 4 ? 3 : 2;
+        recipe.shapeless_ingredients.assign(ingredients.begin(), ingredients.end());
+        recipes.push_back(std::move(recipe));
+    }
 
 } // namespace content
 

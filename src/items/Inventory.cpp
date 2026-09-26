@@ -1,4 +1,4 @@
-#include "player/Inventory.hpp"
+#include "items/Inventory.hpp"
 
 #include <algorithm>
 

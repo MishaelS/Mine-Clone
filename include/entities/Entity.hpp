@@ -2,9 +2,10 @@
 
 #include "core/GameObject.hpp"
 
-// Dynamic actors: dropped items today, more later. Just a velocity holder
-// on top of GameObject - each subclass runs its own physics however suits
-// it (DroppedItem's is tick-based; see its own tick_physics()/TickMotion).
+// Dynamic actors: the player and dropped items today, mobs later. Just a
+// velocity holder on top of GameObject - each subclass runs its own physics
+// however suits it (Player's is per-frame, see update_movement();
+// DroppedItem's is tick-based, see its own tick_physics()/TickMotion).
 class Entity : public GameObject {
 public:
     explicit Entity(Vector3 position = {0.0f, 0.0f, 0.0f});
