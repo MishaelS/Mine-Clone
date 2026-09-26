@@ -1,6 +1,7 @@
 #include "world/Chunk.hpp"
 #include "core/BlockShape.hpp"
 #include "core/TerrainNoise.hpp"
+#include "worldgen/WorldType.hpp"
 
 #include "raymath.h"
 
@@ -112,6 +113,25 @@ namespace {
     // terrain, the one place this generator lets a biome's own surface
     // block depend on height rather than purely on position.
     constexpr int HILLS_STONE_LINE = 95 - MIN_WORLD_Y;
+
+    // WorldType::Mountains: above these world heights any land turns to
+    // bare rock, then to snow-capped rock - the tall peaks it adds would
+    // look wrong grassed all the way to the top.
+    constexpr int MOUNTAIN_STONE_LINE = 125 - MIN_WORLD_Y;
+    constexpr int MOUNTAIN_SNOW_LINE = 175 - MIN_WORLD_Y;
+
+    // WorldType::Sky: islands float around cloud height (Skybox's CLOUD_Y,
+    // world Y 160), each region higher or lower by up to
+    // SKY_ISLAND_ALTITUDE_RANGE. An island's top rises up to
+    // SKY_ISLAND_TOP_HEIGHT above that middle line and its underside hangs
+    // up to SKY_ISLAND_DEPTH below it - deepest under the island's middle,
+    // so each one tapers to a rough point underneath.
+    constexpr float SKY_ISLAND_CENTER_Y = 155.0f - MIN_WORLD_Y;
+    constexpr float SKY_ISLAND_ALTITUDE_RANGE = 45.0f;
+    constexpr float SKY_ISLAND_TOP_HEIGHT = 8.0f;
+    constexpr float SKY_ISLAND_TOP_DETAIL = 4.0f;
+    constexpr float SKY_ISLAND_DEPTH = 26.0f;
+    constexpr float SKY_ISLAND_UNDERSIDE_ROUGHNESS = 7.0f;
 
     // Rivers: TerrainNoise::river() is an ordinary noise field (roughly
     // [-1, 1]) - wherever its *absolute value* drops under RIVER_WIDTH, the
@@ -795,6 +815,12 @@ Chunk::~Chunk()
 
 void Chunk::generate_terrain(const TerrainNoise& noise)
 {
+    if (noise.world_type() == WorldType::Sky) {
+        generate_sky_islands(noise);
+        return;
+    }
+
+    const float mountain_height = noise.params().mountain_height;
     Vector3 origin = get_position();
 
     for (int x = 0; x < CHUNK_SIZE; ++x) {
@@ -834,6 +860,18 @@ void Chunk::generate_terrain(const TerrainNoise& noise)
 
             float sample = noise.height(world_x * NOISE_FREQUENCY, world_z * NOISE_FREQUENCY, NOISE_OCTAVES);
             float height_f = base_height + sample * height_variation;
+
+            // Mountains: whole ranges rise out of the land (never out of
+            // Sea/Ocean - scaled by how much of the column is land), with
+            // ridged crests on top so they read as mountains, not domes.
+            if (mountain_height > 0.0f) {
+                float land = weights.plains + weights.forest + weights.desert + weights.hills;
+                float mountain = noise.mountain(world_x, world_z) * land;
+                if (mountain > 0.0f) {
+                    float ridge = noise.ridge(world_x, world_z);
+                    height_f += mountain * mountain_height * (0.55f + 0.45f * ridge);
+                }
+            }
 
             // Rivers: pull the blended height above down toward RIVER_BED
             // wherever the river noise is close to 0, smoothly (so its
@@ -889,6 +927,10 @@ void Chunk::generate_terrain(const TerrainNoise& noise)
             BlockType subsurface_block = terrain.subsurface_block;
             if (dominant == Biome::Hills && height > HILLS_STONE_LINE) {
                 surface_block = BlockType::Stone;
+                subsurface_block = BlockType::Stone;
+            }
+            if (mountain_height > 0.0f && height > MOUNTAIN_STONE_LINE) {
+                surface_block = height > MOUNTAIN_SNOW_LINE ? BlockType::SnowBlock : BlockType::Stone;
                 subsurface_block = BlockType::Stone;
             }
 
@@ -977,6 +1019,54 @@ void Chunk::generate_terrain(const TerrainNoise& noise)
     }
 }
 
+void Chunk::generate_sky_islands(const TerrainNoise& noise)
+{
+    Vector3 origin = get_position();
+
+    for (int x = 0; x < CHUNK_SIZE; ++x) {
+        for (int z = 0; z < CHUNK_SIZE; ++z) {
+            float world_x = origin.x + x;
+            float world_z = origin.z + z;
+
+            BiomeWeights weights = noise.biome_weights(world_x, world_z);
+            column_grass_tint[z * CHUNK_SIZE + x] = grass_tint_for_weights(weights);
+            column_foliage_tint[z * CHUNK_SIZE + x] = foliage_tint_for_weights(weights);
+
+            float strength = noise.sky_island(world_x, world_z);
+            if (strength <= 0.0f) continue; // open sky - nothing in this column at all
+
+            float middle = SKY_ISLAND_CENTER_Y + noise.sky_altitude(world_x, world_z) * SKY_ISLAND_ALTITUDE_RANGE;
+            float detail = noise.height(world_x * NOISE_FREQUENCY, world_z * NOISE_FREQUENCY, NOISE_OCTAVES);
+            float underside = noise.height(world_x / 24.0f + 500.0f, world_z / 24.0f + 500.0f, 2) * 0.5f + 0.5f;
+
+            float top_f = middle + std::sqrt(strength) * SKY_ISLAND_TOP_HEIGHT + detail * SKY_ISLAND_TOP_DETAIL * strength;
+            float bottom_f = middle - std::pow(strength, 1.2f) * SKY_ISLAND_DEPTH
+                           - underside * SKY_ISLAND_UNDERSIDE_ROUGHNESS * strength;
+            int top = std::clamp(static_cast<int>(std::lround(top_f)), 1, CHUNK_HEIGHT - 1);
+            int bottom = std::clamp(static_cast<int>(std::lround(bottom_f)), 1, top);
+
+            // Sea and Ocean have no meaning up here - their columns become
+            // ordinary grassland instead.
+            Biome dominant = dominant_biome(weights);
+            if (dominant == Biome::Sea || dominant == Biome::Ocean) dominant = Biome::Plains;
+            BiomeTerrain terrain = biome_terrain(dominant);
+            BlockType surface_block = terrain.surface_block;
+            // Sand over open air would fall the moment anything updates it -
+            // a desert island keeps sand only on top, over sandstone.
+            BlockType subsurface_block = terrain.subsurface_block == BlockType::Sand
+                ? BlockType::Sandstone : terrain.subsurface_block;
+
+            for (int y = bottom; y <= top; ++y) {
+                BlockType type;
+                if (y == top) type = surface_block;
+                else if (y > top - terrain.surface_depth) type = subsurface_block;
+                else type = BlockType::Stone;
+                set_block(x, y, z, type);
+            }
+        }
+    }
+}
+
 namespace {
     // --- Cave generation: Beta 1.7.3-style "Perlin worms" ---
     //
@@ -988,21 +1078,15 @@ namespace {
     // early Alpha through 1.17, before 1.18 replaced it with 3D
     // noise-density "cheese/spaghetti" caves.
 
-    // How far, in chunks, a tunnel's *origin* can be from the chunk
-    // actually being carved and still possibly reach into it. A tunnel
-    // starting further away than this and somehow still reaching in would
-    // simply not get carved - an acceptable trade-off for how rarely a
-    // single tunnel runs longer than this many chunks.
-    constexpr int CAVE_CHUNK_RADIUS = 4;
-
-    // How many chunks, on average, go by between one that actually
-    // originates a cave system - most don't. Tuned empirically (a first
-    // pass using Beta's own reported triple-nested-random.nextInt formula
-    // for the count averaged nearly 5 systems per origin chunk, riddling
-    // ~80% of the underground with exposed voids and making initial
-    // world load ~9x slower) rather than by trying to reproduce that
-    // formula exactly.
-    constexpr int CAVE_CHUNK_RARITY = 6;
+    // How often a chunk originates a cave system, and how far (in chunks)
+    // a tunnel may reach from its origin, are per world preset - see
+    // WorldTypeParams::cave_chunk_rarity/cave_chunk_radius. A tunnel
+    // starting further away than that radius and somehow still reaching in
+    // simply isn't carved - an acceptable trade-off for how rarely a
+    // single tunnel runs that long. The Normal rarity (1 in 6) was tuned
+    // empirically: Beta's own triple-nested-random.nextInt count formula
+    // averaged nearly 5 systems per origin chunk, riddling ~80% of the
+    // underground with exposed voids and making world load ~9x slower.
 
     // How many blocks of world Y a tunnel's random starting height is
     // drawn from, added to MIN_WORLD_Y - biased toward the *bottom* of
@@ -1087,7 +1171,7 @@ namespace {
     // past the starting point (heading, length, how the radius tapers) is
     // decided here from `rng`, which the caller has already seeded
     // deterministically, so replaying this from any chunk within
-    // CAVE_CHUNK_RADIUS reproduces the identical path.
+    // the cave radius (WorldTypeParams::cave_chunk_radius) reproduces the identical path.
     void carve_tunnel(Chunk& chunk, int chunk_x, int chunk_z, std::mt19937_64& rng,
                        double x, double y, double z, float radius_scale, int length) {
         double yaw = cave_random_double(rng) * 2.0 * PI;
@@ -1130,21 +1214,22 @@ namespace {
     // is the chunk actually being written to right now, which may or may
     // not be the same chunk.
     void carve_cave_system(Chunk& chunk, int carve_chunk_x, int carve_chunk_z,
-                            int origin_chunk_x, int origin_chunk_z, std::mt19937_64& rng) {
+                            int origin_chunk_x, int origin_chunk_z, std::mt19937_64& rng,
+                            const WorldTypeParams& params) {
         double start_x = origin_chunk_x * CHUNK_SIZE + cave_random_double(rng) * CHUNK_SIZE;
         double start_y = cave_start_y(rng);
         double start_z = origin_chunk_z * CHUNK_SIZE + cave_random_double(rng) * CHUNK_SIZE;
 
         int branch_count = 1;
         float radius_scale = 1.0f;
-        if (cave_random_int(rng, 4) == 0) {
-            radius_scale = static_cast<float>(cave_random_double(rng) * 6.0 + 1.0); // one big cavern instead
+        if (cave_random_int(rng, params.cavern_chance) == 0) {
+            radius_scale = static_cast<float>(cave_random_double(rng) * (params.cavern_max_scale - 1.0) + 1.0); // one big cavern instead
         } else {
             branch_count = 1 + cave_random_int(rng, 4);
         }
 
         for (int branch = 0; branch < branch_count; ++branch) {
-            int length = 25 + cave_random_int(rng, 15);
+            int length = 25 + cave_random_int(rng, 15) + params.tunnel_extra_length;
             if (cave_random_int(rng, 6) == 0) {
                 length += cave_random_int(rng, 100); // a rare, much longer system
             }
@@ -1160,11 +1245,10 @@ namespace {
     // does and starting closer to the surface - often breaking through
     // into a visible open-air gorge rather than staying safely buried.
 
-    // How many chunks, on average, go by between one that actually
-    // originates a ravine - deliberately much rarer than a cave system
-    // (see CAVE_CHUNK_RARITY above), since a ravine is meant to read as a
-    // rare, striking find rather than a common feature.
-    constexpr int RAVINE_CHUNK_RARITY = 30; // 60;
+    // How often a chunk originates a ravine is per world preset too
+    // (WorldTypeParams::ravine_chunk_rarity) - in a Normal world much rarer
+    // than a cave system, since a ravine is meant to read as a rare,
+    // striking find rather than a common feature.
 
     // Ravines are biased toward starting higher up than caves are (see
     // cave_start_y's own deep bias) - real ravines commonly cut close to
@@ -1186,13 +1270,13 @@ namespace {
     // cross-section - narrow horizontally, stretched tall vertically, so
     // it carves like a canyon rather than a round tunnel.
     void carve_ravine(Chunk& chunk, int chunk_x, int chunk_z, std::mt19937_64& rng,
-                          double x,    double y,    double z, int length) {
+                          double x,    double y,    double z, int length, double depth_scale) {
         double yaw      = cave_random_double(rng) * 2.0 * PI;
         double pitch    = (cave_random_double(rng) - 0.5) * 0.15;
         double yaw_velocity   = 0.0;
         double pitch_velocity = 0.0;
         double horizontal_scale = cave_random_double(rng) * 1.5 + 1.0; // stays narrow
-        double vertical_scale   = cave_random_double(rng) * 3.0 + 4.0; // but tall
+        double vertical_scale   = (cave_random_double(rng) * 3.0 + 4.0) * depth_scale; // but tall
 
         for (int step = 0; step < length; ++step) {
             double taper = std::sin(PI * step / length);
@@ -1332,15 +1416,16 @@ namespace {
     constexpr int BLOB_RADIUS_MAX = 4;
 }
 
-void Chunk::generate_ores(uint32_t world_seed, int chunk_x, int chunk_z)
+void Chunk::generate_ores(uint32_t world_seed, int chunk_x, int chunk_z, const WorldTypeParams& params)
 {
+    const int offset = params.ore_y_offset;
     std::mt19937_64 rng(cave_chunk_seed(world_seed ^ ORE_SEED_SALT, chunk_x, chunk_z));
 
     for (const OreVein& vein : ORE_VEINS) {
         for (int i = 0; i < vein.veins_per_chunk; ++i) {
             bool common_band = cave_random_double(rng) < ORE_COMMON_BAND_CHANCE;
-            int y_min = common_band ? vein.y_common_min : vein.y_min;
-            int y_max = common_band ? vein.y_common_max : vein.y_max;
+            int y_min = (common_band ? vein.y_common_min : vein.y_min) + offset;
+            int y_max = (common_band ? vein.y_common_max : vein.y_max) + offset;
             if (cave_random_double(rng) < BLOB_VEIN_CHANCE) {
                 int radius = BLOB_RADIUS_MIN + cave_random_int(rng, BLOB_RADIUS_MAX - BLOB_RADIUS_MIN + 1);
                 place_blob_vein(*this, rng, vein.type, y_min, y_max, radius);
@@ -1354,34 +1439,41 @@ void Chunk::generate_ores(uint32_t world_seed, int chunk_x, int chunk_z)
     for (const FillerPatch& patch : FILLER_PATCHES) {
         for (int i = 0; i < patch.patches_per_chunk; ++i) {
             int size = 1 + cave_random_int(rng, patch.max_patch_size);
-            place_vein(*this, rng, patch.type, patch.y_min, patch.y_max, size);
+            place_vein(*this, rng, patch.type, patch.y_min + offset, patch.y_max + offset, size);
         }
     }
 }
 
-void Chunk::carve_caves(uint32_t world_seed, int chunk_x, int chunk_z)
+void Chunk::carve_caves(uint32_t world_seed, int chunk_x, int chunk_z, const WorldTypeParams& params)
 {
-    for (int origin_x = chunk_x - CAVE_CHUNK_RADIUS; origin_x <= chunk_x + CAVE_CHUNK_RADIUS; ++origin_x) {
-        for (int origin_z = chunk_z - CAVE_CHUNK_RADIUS; origin_z <= chunk_z + CAVE_CHUNK_RADIUS; ++origin_z) {
-            std::mt19937_64 rng(cave_chunk_seed(world_seed, origin_x, origin_z));
+    if (params.cave_chunk_rarity <= 0 && params.ravine_chunk_rarity <= 0) return;
 
+    const int radius = params.cave_chunk_radius;
+    for (int origin_x = chunk_x - radius; origin_x <= chunk_x + radius; ++origin_x) {
+        for (int origin_z = chunk_z - radius; origin_z <= chunk_z + radius; ++origin_z) {
             // Most chunks originate nothing at all.
-            if (cave_random_int(rng, CAVE_CHUNK_RARITY) == 0) {
-                int system_count = 1 + cave_random_int(rng, 3);
-                for (int i = 0; i < system_count; ++i) {
-                    carve_cave_system(*this, chunk_x, chunk_z, origin_x, origin_z, rng);
+            if (params.cave_chunk_rarity > 0) {
+                std::mt19937_64 rng(cave_chunk_seed(world_seed, origin_x, origin_z));
+                if (cave_random_int(rng, params.cave_chunk_rarity) == 0) {
+                    int system_count = 1 + cave_random_int(rng, 3);
+                    for (int i = 0; i < system_count; ++i) {
+                        carve_cave_system(*this, chunk_x, chunk_z, origin_x, origin_z, rng, params);
+                    }
                 }
             }
 
             // A separate RNG stream (own salted seed) so a chunk's ravine
             // roll isn't the same coin flip as its cave roll above.
-            std::mt19937_64 ravine_rng(cave_chunk_seed(world_seed ^ RAVINE_SEED_SALT, origin_x, origin_z));
-            if (cave_random_int(ravine_rng, RAVINE_CHUNK_RARITY) == 0) {
-                double start_x = origin_x * CHUNK_SIZE + cave_random_double(ravine_rng) * CHUNK_SIZE;
-                double start_y = ravine_start_y(ravine_rng);
-                double start_z = origin_z * CHUNK_SIZE + cave_random_double(ravine_rng) * CHUNK_SIZE;
-                int length = 40 + cave_random_int(ravine_rng, 40);
-                carve_ravine(*this, chunk_x, chunk_z, ravine_rng, start_x, start_y, start_z, length);
+            if (params.ravine_chunk_rarity > 0) {
+                std::mt19937_64 ravine_rng(cave_chunk_seed(world_seed ^ RAVINE_SEED_SALT, origin_x, origin_z));
+                if (cave_random_int(ravine_rng, params.ravine_chunk_rarity) == 0) {
+                    double start_x = origin_x * CHUNK_SIZE + cave_random_double(ravine_rng) * CHUNK_SIZE;
+                    double start_y = ravine_start_y(ravine_rng);
+                    double start_z = origin_z * CHUNK_SIZE + cave_random_double(ravine_rng) * CHUNK_SIZE;
+                    int length = params.ravine_min_length + cave_random_int(ravine_rng, params.ravine_extra_length);
+                    carve_ravine(*this, chunk_x, chunk_z, ravine_rng, start_x, start_y, start_z, length,
+                                 params.ravine_depth_scale);
+                }
             }
         }
     }

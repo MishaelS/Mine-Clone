@@ -313,6 +313,16 @@
     "biome.desert": "Пустыня",
     "biome.hills": "Холмы",
     "biome.ocean": "Океан",
-    "biome.sea": "Море"
+    "biome.sea": "Море",
+
+    "create.world_type": "Тип мира: {0}",
+    "world_type.normal": "Обычный",
+    "world_type.normal.description": "Привычный мир: равнины, леса, холмы и моря",
+    "world_type.mountains": "Больше гор",
+    "world_type.mountains.description": "Огромные горные хребты со снежными вершинами",
+    "world_type.underground": "Подземный мир",
+    "world_type.underground.description": "Большие пещеры и глубокие овраги",
+    "world_type.sky": "Небесный мир",
+    "world_type.sky.description": "Парящие острова на высоте облаков"
   }
 }

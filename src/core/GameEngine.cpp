@@ -2123,6 +2123,7 @@ bool GameEngine::open_world(const std::string& folder_name, const GameLoadProgre
 
     WorldConfig config;
     config.seed = info->seed;
+    config.world_type = info->world_type;
     config.save_directory = WorldSave::world_directory(folder_name);
     config.loaded_radius_chunks = settings.render_distance_chunks;
     config.fog_distance_blocks = settings.fog_distance_blocks;

@@ -8,6 +8,7 @@
 #include "core/TickMotion.hpp"
 #include "items/Inventory.hpp"
 #include "items/Smelting.hpp"
+#include "worldgen/WorldType.hpp"
 
 #include <array>
 #include <cstdint>
@@ -33,6 +34,7 @@ enum class Biome : uint8_t;
 // default would be. A constructor argument makes that impossible.
 struct WorldConfig {
     uint32_t seed = 0;
+    WorldType world_type = WorldType::Normal; // generator preset - see worldgen/WorldType.hpp
 
     // saves/<world>/ (see core/WorldSave.hpp) - nullopt disables
     // persistence entirely (nothing is loaded from or saved to disk; every

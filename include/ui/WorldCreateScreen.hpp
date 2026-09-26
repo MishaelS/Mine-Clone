@@ -5,7 +5,8 @@
 
 #include <string>
 
-// World name + seed + game mode, "Создать мир" / "Отмена". Reachable from
+// World name + seed + game mode + world type (generator preset),
+// "Создать мир" / "Отмена". Reachable from
 // WorldListScreen's "Создать мир" button.
 class WorldCreateScreen {
 public:
@@ -25,6 +26,7 @@ private:
     ui::TextInputState name_field;
     ui::TextInputState seed_field;
     GameMode selected_mode = GameMode::Creative;
+    WorldType selected_type = WorldType::Normal;
     bool allow_commands = false;
     int focused_field = 0; // 0 = name, 1 = seed
     std::string error_message;

@@ -355,8 +355,8 @@ namespace {
 
 World::World(WorldConfig config)
     : config(std::move(config))
-    , terrain_noise(std::make_unique<TerrainNoise>(this->config.seed))
-    , worker_pool(std::make_unique<ChunkWorkerPool>(this->config.seed, this->config.save_directory))
+    , terrain_noise(std::make_unique<TerrainNoise>(this->config.seed, this->config.world_type))
+    , worker_pool(std::make_unique<ChunkWorkerPool>(this->config.seed, this->config.world_type, this->config.save_directory))
 {
     // Active must never exceed Loaded - desired_state_for() assumes this
     // ordering, and Settings only actually exposes render distance to the
@@ -2133,6 +2133,11 @@ Vector3 World::find_spawn_position()
     // covers roughly half the world, so this alone already succeeds on the
     // very first or second ring tried in practice.
     auto is_land = [this](int x, int z) {
+        // Sky world: land means "well inside a floating island" - its
+        // edges are thin rims over the void, not somewhere to appear.
+        if (config.world_type == WorldType::Sky) {
+            return terrain_noise->sky_island(static_cast<float>(x), static_cast<float>(z)) > 0.5f;
+        }
         Biome biome = get_biome(x, z);
         return biome != Biome::Sea && biome != Biome::Ocean;
     };

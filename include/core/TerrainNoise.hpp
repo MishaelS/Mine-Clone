@@ -2,6 +2,7 @@
 
 #include "core/Biome.hpp"
 #include "core/PerlinNoise.hpp"
+#include "worldgen/WorldType.hpp"
 
 #include <cstdint>
 
@@ -21,9 +22,15 @@
 // crossing a border changes terrain gradually instead of at a seam, and
 // adds a river map on top that carves a winding channel through the blend
 // independent of all of that.
+//
+// Also carries the world's generator preset (WorldType), since every place
+// that generates terrain already has a TerrainNoise at hand.
 class TerrainNoise {
 public:
-    explicit TerrainNoise(uint32_t seed);
+    explicit TerrainNoise(uint32_t seed, WorldType type = WorldType::Normal);
+
+    WorldType world_type() const { return type; }
+    const WorldTypeParams& params() const { return type_params; }
 
     // Multi-octave (fractal) height noise, roughly in [-1, 1] - the same
     // shape as before, just factored out so it can be scaled/offset
@@ -59,6 +66,24 @@ public:
     // river's own bed instead of a beach.
     float gravel(float world_x, float world_z) const;
 
+    // WorldType::Mountains: how mountainous a column is, 0 (ordinary land)
+    // to 1 (the heart of a range) - large-scale, so ranges span whole
+    // regions with ordinary land between them.
+    float mountain(float world_x, float world_z) const;
+
+    // WorldType::Mountains: 0 in a valley, 1 on a sharp ridge line - adds
+    // crests and gullies on top of mountain()'s broad shape.
+    float ridge(float world_x, float world_z) const;
+
+    // WorldType::Sky: how solidly a column belongs to a floating island,
+    // 0 (open sky) to 1 (the island's middle) - its edges fall off to 0,
+    // so islands are separated by gaps of open air.
+    float sky_island(float world_x, float world_z) const;
+
+    // WorldType::Sky: roughly [-1, 1], very low frequency - how far above
+    // or below cloud height the islands around this column float.
+    float sky_altitude(float world_x, float world_z) const;
+
 private:
     // Wavelength ~900 blocks: biomes need to span whole regions, not
     // flicker chunk to chunk, so this samples much lower frequency than
@@ -86,6 +111,17 @@ private:
     // Same idea as CLAY_FREQUENCY, for gravel patches in a river bed.
     static constexpr float GRAVEL_FREQUENCY = 1.0f / 10.0f;
 
+    static constexpr float MOUNTAIN_FREQUENCY = 1.0f / 520.0f;
+    static constexpr float RIDGE_FREQUENCY = 1.0f / 140.0f;
+    static constexpr float SKY_ISLAND_FREQUENCY = 1.0f / 110.0f;
+    static constexpr float SKY_ALTITUDE_FREQUENCY = 1.0f / 600.0f;
+    // Island noise values under this are open sky - higher means smaller,
+    // more widely spaced islands.
+    static constexpr float SKY_ISLAND_THRESHOLD = 0.18f;
+
+    WorldType type;
+    WorldTypeParams type_params;
+
     PerlinNoise height_noise;
     PerlinNoise temperature_noise;
     PerlinNoise humidity_noise;
@@ -94,4 +130,8 @@ private:
     PerlinNoise coast_noise;
     PerlinNoise clay_noise;
     PerlinNoise gravel_noise;
+    PerlinNoise mountain_noise;
+    PerlinNoise ridge_noise;
+    PerlinNoise sky_island_noise;
+    PerlinNoise sky_altitude_noise;
 };

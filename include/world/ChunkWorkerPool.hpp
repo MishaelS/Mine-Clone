@@ -1,6 +1,7 @@
 #pragma once
 
 #include "world/Chunk.hpp"
+#include "worldgen/WorldType.hpp"
 
 #include <array>
 #include <atomic>
@@ -84,7 +85,8 @@ public:
     // capped at 4, minimum 1) - 0 means "use the default". Spawns every
     // worker thread immediately; each sits idle (blocked on the job queue's
     // condition variable) until work is submitted.
-    ChunkWorkerPool(uint32_t world_seed, std::optional<std::string> save_directory, unsigned int worker_count = 0);
+    ChunkWorkerPool(uint32_t world_seed, WorldType world_type, std::optional<std::string> save_directory,
+                    unsigned int worker_count = 0);
 
     // Stops every worker thread (see shutdown()) and reclaims anything left
     // in pending_destroy - World's own destructor calls shutdown()
@@ -166,6 +168,7 @@ private:
     void resort_jobs_locked(ChunkCoord observer_chunk);
 
     uint32_t world_seed;
+    WorldType world_type;
     std::optional<std::string> save_directory;
 
     std::vector<std::thread> workers;

@@ -8,6 +8,7 @@ void WorldCreateScreen::enter()
     seed_field = {};
     seed_field.max_codepoints = 24;
     selected_mode = GameMode::Creative;
+    selected_type = WorldType::Normal;
     allow_commands = false;
     focused_field = 0;
     error_message.clear();
@@ -37,8 +38,19 @@ WorldCreateScreen::Action WorldCreateScreen::update()
         allow_commands = !allow_commands;
     }
 
+    // World type: each click cycles to the next generator preset, with a
+    // one-line description of the current one underneath.
+    const float type_y = ui::scaled(320) + height + gap;
+    const std::string type_id = world_type_id(selected_type);
+    if (ui::button({x, type_y, width, height},
+                   ui::tr_format("create.world_type", {ui::tr("world_type." + type_id)}))) {
+        selected_type = next_world_type(selected_type);
+    }
+    ui::label({x, type_y + height + ui::scaled(4), width, ui::scaled(22)},
+              ui::tr("world_type." + type_id + ".description"), LIGHTGRAY);
+
     if (!error_message.empty())
-        ui::label({x, ui::scaled(376), width, height}, ui::tr("create.required"), RED);
+        ui::label({x, type_y + height + ui::scaled(30), width, ui::scaled(24)}, ui::tr("create.required"), RED);
 
     const float bottom = GetScreenHeight() - ui::scaled(68);
     if (ui::button({x, bottom, half, height}, ui::tr("worlds.create"))) {
@@ -51,6 +63,7 @@ WorldCreateScreen::Action WorldCreateScreen::update()
             info.seed = WorldSave::derive_seed(name_field.text, seed_field.text);
             info.game_mode = selected_mode;
             info.allow_commands = allow_commands;
+            info.world_type = selected_type;
             return {ActionType::Create, info};
         }
     }

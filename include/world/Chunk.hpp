@@ -3,6 +3,7 @@
 #include "raylib.h"
 #include "core/GameObject.hpp"
 #include "core/Block.hpp"
+#include "worldgen/WorldType.hpp"
 
 #include <array>
 #include <cstdint>
@@ -227,6 +228,9 @@ public:
     // surface/subsurface blocks, stone below that, and bedrock at y=0.
     // `noise` is sampled at this chunk's world-space X/Z so both terrain
     // height and biome are continuous across chunk borders.
+    // The shape depends on noise.world_type(): Mountains raises ranges of
+    // tall, rocky, snow-capped peaks out of the normal land; Sky replaces
+    // the whole thing with floating islands (generate_sky_islands()).
     void generate_terrain(const TerrainNoise& noise);
 
     // Scatters ore veins (Coal/Iron/Gold/Lapis/Redstone/Diamond) plus
@@ -241,7 +245,9 @@ public:
     // carve_caves(), so a cave carved afterward can naturally expose (or
     // partially destroy) a vein it happens to cut through, instead of
     // veins only ever appearing in solid, unreachable stone.
-    void generate_ores(uint32_t world_seed, int chunk_x, int chunk_z);
+    // `params` shifts the ore bands for presets whose stone isn't at the
+    // usual depth (see WorldTypeParams::ore_y_offset).
+    void generate_ores(uint32_t world_seed, int chunk_x, int chunk_z, const WorldTypeParams& params);
 
     // Carves cave tunnels (and, much more rarely, ravines) into this
     // chunk's already-generated terrain, Beta 1.7.3-style: a "Perlin worm"
@@ -263,7 +269,9 @@ public:
     // compute_lighting() (so sky/block light correctly floods into the
     // new voids) - never carves Water, Air, or Bedrock, so it can't drain
     // a lake or breach the world floor.
-    void carve_caves(uint32_t world_seed, int chunk_x, int chunk_z);
+    // How common/large caves and ravines are comes from `params` (see
+    // WorldTypeParams) - the defaults are the Normal world's.
+    void carve_caves(uint32_t world_seed, int chunk_x, int chunk_z, const WorldTypeParams& params);
 
     // Full sky+block light recompute via BFS flood fill. Call after the block
     // layout is set. Incremental (BFS-from-the-change-only) updates for
@@ -501,6 +509,10 @@ public:
 
 private:
     static int index(int x, int y, int z);
+
+    // WorldType::Sky's generate_terrain(): floating islands around cloud
+    // height over an open void - no bedrock, no sea.
+    void generate_sky_islands(const TerrainNoise& noise);
 
     // Chunk-local opacity check for light propagation (transparent blocks,
     // including air, let light pass through). Out-of-range counts as open.

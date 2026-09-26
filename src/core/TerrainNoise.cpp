@@ -1,11 +1,16 @@
 #include "core/TerrainNoise.hpp"
 
-TerrainNoise::TerrainNoise(uint32_t seed)
+#include <algorithm>
+#include <cmath>
+
+TerrainNoise::TerrainNoise(uint32_t seed, WorldType type)
     // Distinct seeds so the layers don't sample identical patterns - small,
     // deterministic offsets are enough: FastNoise2's permutation table
     // already looks completely different for any two distinct seeds,
     // however close together.
-    : height_noise(seed)
+    : type(type)
+    , type_params(world_type_params(type))
+    , height_noise(seed)
     , temperature_noise(seed + 1)
     , humidity_noise(seed + 2)
     , continent_noise(seed + 3)
@@ -13,6 +18,10 @@ TerrainNoise::TerrainNoise(uint32_t seed)
     , coast_noise(seed + 5)
     , clay_noise(seed + 6)
     , gravel_noise(seed + 7)
+    , mountain_noise(seed + 8)
+    , ridge_noise(seed + 9)
+    , sky_island_noise(seed + 10)
+    , sky_altitude_noise(seed + 11)
 {
 }
 
@@ -48,4 +57,31 @@ float TerrainNoise::clay(float world_x, float world_z) const
 float TerrainNoise::gravel(float world_x, float world_z) const
 {
     return gravel_noise.noise(world_x * GRAVEL_FREQUENCY, world_z * GRAVEL_FREQUENCY);
+}
+
+float TerrainNoise::mountain(float world_x, float world_z) const
+{
+    // Only the upper part of the noise range becomes mountains, eased in,
+    // so ranges rise out of ordinary land instead of covering everything.
+    float value = mountain_noise.fractal(world_x * MOUNTAIN_FREQUENCY, world_z * MOUNTAIN_FREQUENCY, 3);
+    float t = std::clamp((value + 0.1f) / 0.6f, 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
+float TerrainNoise::ridge(float world_x, float world_z) const
+{
+    // "Ridged" noise: 1 - |noise| peaks sharply along the noise's zero line.
+    float value = ridge_noise.fractal(world_x * RIDGE_FREQUENCY, world_z * RIDGE_FREQUENCY, 4);
+    return 1.0f - std::min(1.0f, std::fabs(value) * 1.6f);
+}
+
+float TerrainNoise::sky_island(float world_x, float world_z) const
+{
+    float value = sky_island_noise.fractal(world_x * SKY_ISLAND_FREQUENCY, world_z * SKY_ISLAND_FREQUENCY, 4);
+    return std::clamp((value - SKY_ISLAND_THRESHOLD) / (0.6f - SKY_ISLAND_THRESHOLD), 0.0f, 1.0f);
+}
+
+float TerrainNoise::sky_altitude(float world_x, float world_z) const
+{
+    return sky_altitude_noise.fractal(world_x * SKY_ALTITUDE_FREQUENCY, world_z * SKY_ALTITUDE_FREQUENCY, 2);
 }

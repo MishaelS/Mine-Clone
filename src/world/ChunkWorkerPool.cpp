@@ -79,8 +79,8 @@ std::shared_ptr<Chunk> generate_chunk_data(int chunk_x, int chunk_z, uint32_t wo
     bool loaded_from_disk = save_directory && chunk->load_from_file(worker_chunk_file_path(*save_directory, chunk_x, chunk_z));
     if (!loaded_from_disk) {
         chunk->generate_terrain(noise);
-        chunk->generate_ores(world_seed, chunk_x, chunk_z);
-        chunk->carve_caves(world_seed, chunk_x, chunk_z);
+        chunk->generate_ores(world_seed, chunk_x, chunk_z, noise.params());
+        chunk->carve_caves(world_seed, chunk_x, chunk_z, noise.params());
         StructureGenerator(world_seed).generate(*chunk, noise, chunk_x, chunk_z);
     }
     chunk->compute_lighting(); // never persisted - cheap to rebuild either way
@@ -88,8 +88,10 @@ std::shared_ptr<Chunk> generate_chunk_data(int chunk_x, int chunk_z, uint32_t wo
     return chunk;
 }
 
-ChunkWorkerPool::ChunkWorkerPool(uint32_t seed, std::optional<std::string> directory, unsigned int worker_count)
+ChunkWorkerPool::ChunkWorkerPool(uint32_t seed, WorldType type, std::optional<std::string> directory,
+                                 unsigned int worker_count)
     : world_seed(seed)
+    , world_type(type)
     , save_directory(std::move(directory))
 {
     unsigned int hardware_threads = std::max(2u, std::thread::hardware_concurrency());
@@ -215,7 +217,7 @@ void ChunkWorkerPool::worker_loop()
         }
 
         if (job.kind == Job::Kind::Generate) {
-            if (!local_noise.has_value()) local_noise.emplace(world_seed);
+            if (!local_noise.has_value()) local_noise.emplace(world_seed, world_type);
             std::shared_ptr<Chunk> chunk = generate_chunk_data(job.chunk_x, job.chunk_z, world_seed, save_directory, *local_noise);
 
             std::lock_guard<std::mutex> lock(results_mutex);

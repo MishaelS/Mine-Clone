@@ -187,7 +187,8 @@ namespace WorldSave {
         out << "  \"display_name\": \"" << json_escape(info.display_name) << "\",\n";
         out << "  \"seed\": " << info.seed << ",\n";
         out << "  \"game_mode\": \"" << game_mode_json_value(info.game_mode) << "\",\n";
-        out << "  \"allow_commands\": " << (info.allow_commands ? "true" : "false") << "\n";
+        out << "  \"allow_commands\": " << (info.allow_commands ? "true" : "false") << ",\n";
+        out << "  \"world_type\": \"" << world_type_id(info.world_type) << "\"\n";
         out << "}\n";
 
         return static_cast<bool>(out);
@@ -226,6 +227,7 @@ namespace WorldSave {
             info.seed = static_cast<uint32_t>(root["seed"].as_number(0));
             info.game_mode = game_mode_from_json_value(root["game_mode"].as_string("creative"));
             info.allow_commands = root["allow_commands"].as_bool(true);
+            info.world_type = world_type_from_id(root["world_type"].as_string("normal"));
             return info;
         } catch (const std::exception&) {
             return std::nullopt;

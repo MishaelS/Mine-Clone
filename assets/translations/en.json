@@ -313,6 +313,16 @@
     "biome.desert": "Desert",
     "biome.hills": "Hills",
     "biome.ocean": "Ocean",
-    "biome.sea": "Sea"
+    "biome.sea": "Sea",
+
+    "create.world_type": "World Type: {0}",
+    "world_type.normal": "Default",
+    "world_type.normal.description": "The usual world: plains, forests, hills and seas",
+    "world_type.mountains": "More Mountains",
+    "world_type.mountains.description": "Huge mountain ranges with snowy peaks",
+    "world_type.underground": "Underground",
+    "world_type.underground.description": "Huge caves and deep ravines",
+    "world_type.sky": "Sky Islands",
+    "world_type.sky.description": "Floating islands at cloud height"
   }
 }
