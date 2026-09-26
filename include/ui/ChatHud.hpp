@@ -8,7 +8,9 @@
 
 // The in-game chat/command line - a scrollback log plus one text entry
 // box, opened with T (empty) or "/" (pre-filled with the slash), submitted
-// with Enter or by clicking away, cancelled with Escape. Single-player
+// with Enter or by clicking away, cancelled with Escape. Up/Down step
+// through the lines sent earlier this session, like a terminal's own
+// command history. Single-player
 // only for now: a plain message just echoes straight back into the log
 // under the player's own name (there's no one else here to send it to
 // yet), and a "/"-prefixed line is handed to GameEngine::
@@ -43,8 +45,9 @@ public:
     std::optional<std::string> update_and_draw();
 
     // Commands shown as vanilla-like suggestions while the user types a
-    // "/" line. Each string may include usage/description after the first
-    // token; matching and Tab completion use that first command token.
+    // "/" line, as translation keys. Each translated line may include
+    // usage/description after the first token; matching and Tab completion
+    // use that first command token.
     void set_command_suggestions(std::vector<std::string> suggestions);
 
     // Appends one already-formatted line to the scrollback, trimming the
@@ -59,6 +62,10 @@ private:
     };
 
     std::vector<std::string> matching_command_suggestions() const;
+
+    // Up (`older` = true) / Down through `history` - see history_index.
+    void browse_history(bool older);
+    void remember_sent_line(const std::string& text);
     void draw_messages(float x, float bottom_y, float width, float line_height) const;
     void draw_command_suggestions(float x, float input_y, float width, float line_height,
                                   const std::vector<std::string>& suggestions) const;
@@ -67,4 +74,12 @@ private:
     ui::TextInputState input;
     std::vector<Message> messages;
     std::vector<std::string> command_suggestions;
+
+    // Lines sent this session (messages and commands), oldest first.
+    std::vector<std::string> history;
+    // Which history entry the box currently shows - history.size() means
+    // none: the player's own not-yet-sent line, kept in history_draft
+    // while they browse so Down past the newest entry brings it back.
+    size_t history_index = 0;
+    std::string history_draft;
 };

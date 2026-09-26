@@ -8,7 +8,6 @@
 
 #include "raylib.h"
 #include "core/GameObject.hpp"
-#include "core/GameState.hpp"
 #include "core/Settings.hpp"
 #include "items/Inventory.hpp"
 #include "entities/DroppedItem.hpp"
@@ -16,15 +15,11 @@
 #include "effects/ParticleSystem.hpp"
 #include "rendering/PlayerRenderer.hpp"
 #include "audio/AudioSystem.hpp"
-#include "ui/MainMenuScreen.hpp"
-#include "ui/WorldListScreen.hpp"
-#include "ui/WorldCreateScreen.hpp"
-#include "ui/SettingsScreen.hpp"
-#include "ui/PauseMenuScreen.hpp"
 #include "ui/InventoryHud.hpp"
 #include "ui/ChatHud.hpp"
-#include "ui/LoadingScreen.hpp"
 #include "world/World.hpp"
+
+#include <functional>
 
 // A leaf block found disconnected from every nearby log (see
 // GameEngine::check_leaf_decay_near) - not removed on the spot, just
@@ -42,31 +37,67 @@ struct PendingLeafDecay {
     int remaining_ticks;
 };
 
-// Owns the window, the main loop, every GameObject in the game, and the
-// voxel World terrain (kept separate from the GameObject list since camera
-// interaction with it - aiming, breaking blocks - needs to reach across
-// chunk borders in a way a single GameObject's update()/draw() can't). Also
-// owns the pre-game menu flow (GameState/the ui:: screen classes) - the
-// menu exists entirely before a World does, so it lives here rather than on
-// World itself.
+// Loading-screen feed for GameEngine::open_world(): whether the world is
+// being generated for the first time (vs. loaded back from a save), and
+// World's own load stage/progress.
+using GameLoadProgress = std::function<void(bool generating, WorldLoadStage stage, float progress)>;
+
+// The game itself: the voxel World, the player, every GameObject and
+// dropped item, the fixed-rate simulation, and the in-game HUD drawn over
+// the world (hotbar, inventory, chat, death/sleep overlays). Knows nothing
+// about the window or the menus around it - Application owns those, and
+// drives this one frame at a time while a world is being played.
 class GameEngine {
 public:
-    GameEngine(int screen_width, int screen_height, const char* title);
+    // Loads the block/item/recipe content and the chunk shader - needs a
+    // GL context, so construct only after the window exists. `settings`
+    // and `audio` belong to Application and outlive this.
+    GameEngine(const Settings& settings, AudioSystem& audio);
     ~GameEngine();
 
-    void run();
+    // Loads folder_name's WorldInfo, builds a WorldConfig from it plus the
+    // current Settings (render/fog distance), constructs the World and
+    // resumes the saved player (or spawns fresh on a brand-new world).
+    // Blocks until the world around the player is ready, reporting
+    // progress through `progress` - which may draw whole frames, so call
+    // this outside any BeginDrawing()/EndDrawing() pair. False (nothing
+    // changed) if the folder has no world.json.
+    bool open_world(const std::string& folder_name, const GameLoadProgress& progress);
+
+    // Saves the player/world state (see save_player_state()), destroys the
+    // World (~World() flushes any modified chunks still resident, same as
+    // quitting the app outright) and clears everything tied to it.
+    void close_world();
+
+    // One Playing frame's simulation: however many fixed 20Hz ticks the
+    // elapsed time covers (see tick()), then the per-frame input/player
+    // update.
+    void update_frame(float delta_time);
+
+    // The world and the in-game HUD. Called between the caller's own
+    // BeginDrawing()/EndDrawing().
+    void draw();
+
+    // True once after the player asked for the pause menu (Esc, or the
+    // sleep screen's menu button).
+    bool take_pause_request();
+
+    // The blurred world frame captured the frame a pause was requested
+    // (an invalid texture if none was) - ownership passes to the caller.
+    Texture2D take_pause_snapshot();
 
     void add_object(std::unique_ptr<GameObject> object);
-    void set_world(std::unique_ptr<World> new_world);
 
 private:
+    void set_world(std::unique_ptr<World> new_world);
+
     // Fixed-rate game-logic step, called exactly 20 times per second of real
-    // time regardless of the render frame rate (see run()) - Minecraft's own
+    // time regardless of the render frame rate (see update_frame()) - Minecraft's own
     // tick rate, and the same clock game_tick/DayNightCycle's sun and moon
     // advance on. Every piece of world simulation that isn't purely visual
     // hangs off this clock: chunk streaming, fluids, falling blocks,
     // dropped-item physics, leaf decay, sapling/crop random ticks. Called
-    // unconditionally from run() whenever state == GameState::Playing,
+    // unconditionally from update_frame() every Playing frame,
     // regardless of whether a UI screen (inventory, chat) currently owns
     // input in update() - so the world keeps existing (chunks load, water
     // flows, a planted sapling keeps getting its random-tick chance to grow)
@@ -188,7 +219,7 @@ private:
 
     // Zeroes every per-life timer (burning, breath, suffocation, the hurt
     // flash, the death/respawn countdown) - shared by set_world(),
-    // start_singleplayer_world()'s saved-state path and respawn_player(),
+    // open_world()'s saved-state path and respawn_player(),
     // everywhere a life is starting fresh. Doesn't touch player.health()
     // itself - callers decide separately whether that means reset() (full
     // health) or restoring a specific saved value (set_health()).
@@ -233,74 +264,24 @@ private:
     Camera3D make_render_camera() const;
     void draw_player_model() const;
 
-    void draw();
-
-    // Draws/updates whichever menu screen `state` currently is (anything
-    // but Playing) - its own BeginDrawing()/EndDrawing() pair, since
-    // run()'s Playing branch already has its own. Dispatches each screen's
-    // returned action to enter_state()/start_singleplayer_world()/
-    // quit_requested.
-    void update_and_draw_menu();
-
-    // Switches `state`, plus whatever side effect that transition needs:
-    // DisableCursor() only when entering Playing (a menu needs a visible,
-    // clickable cursor - EnableCursor() otherwise), and refreshing
-    // WorldListScreen/WorldCreateScreen's own state when they become
-    // active.
-    void enter_state(GameState new_state);
-
-    // Loads folder_name's WorldInfo, builds a WorldConfig from it plus the
-    // current Settings (render/fog distance), constructs the World, and
-    // hands it to the existing set_world() - then enters Playing. Shows
-    // loading_screen the whole time the world blocks generating/loading.
-    // Must be called outside any BeginDrawing()/EndDrawing() pair (it draws
-    // its own frames) - the menus queue it via pending_world_folder.
-    void start_singleplayer_world(const std::string& folder_name);
-
-    // "Generating/Loading world" screen, drawn from World's load-progress
-    // callback during start_singleplayer_world().
-    LoadingScreen loading_screen;
-    double last_loading_frame_time = 0.0;
-    // Picked in the world list/create screens, started right after that
-    // menu frame ends - see start_singleplayer_world()'s own comment.
-    std::optional<std::string> pending_world_folder;
-
-    // "Выйти и сохранить игру" from the pause menu: saves player state
-    // (see save_player_state()), destroys the World (~World() flushes any
-    // modified chunks still resident, same as quitting the app outright)
-    // and returns to MainMenu.
-    void return_to_main_menu();
-
     // Writes camera position/facing + the current Inventory to
     // saves/<current_world_folder>/player.json (WorldSave::save_player_state)
-    // - called from return_to_main_menu() and, since that's not the only
-    // way a World can go away, from the destructor too, whenever a World
-    // is actually loaded. No-op if !world (nothing to save).
+    // - called from close_world() and, since that's not the only way a
+    // World can go away, from the destructor too, whenever a World is
+    // actually loaded. No-op if !world (nothing to save).
     void save_player_state();
 
-    GameState state = GameState::MainMenu;
-    Settings settings;
-    AudioSystem audio;
-    MainMenuScreen main_menu_screen;
-    WorldListScreen world_list_screen;
-    WorldCreateScreen world_create_screen;
-    SettingsScreen settings_screen;
-    PauseMenuScreen pause_menu_screen;
+    const Settings& settings;
+    AudioSystem& audio;
 
-    // Frozen, downsampled and softly blurred copy of the last gameplay
-    // frame. The pause menu draws this instead of the dirt background.
+    // Set by update()/draw() when the player asks for the pause menu - see
+    // take_pause_request(). pause_snapshot is captured in draw() that same
+    // frame, before the HUD goes on top.
+    bool pause_requested = false;
     Texture2D pause_snapshot{};
-    bool pause_snapshot_pending = false;
-
-    // Where SettingsScreen's own "Назад" button returns to - MainMenu when
-    // Settings was reached from there, Paused when reached via the in-game
-    // Esc menu instead. Set right before every enter_state(Settings) call.
-    GameState settings_return_state = GameState::MainMenu;
-
-    bool quit_requested = false; // set by "Закрыть игру" - checked alongside WindowShouldClose() in run()
 
     // Which saves/<folder>/ the current `world` was loaded from - empty
-    // when no world is loaded. Set by start_singleplayer_world(), read by
+    // when no world is loaded. Set by open_world(), read by
     // save_player_state().
     std::string current_world_folder;
     GameMode current_game_mode = GameMode::Creative;
@@ -349,13 +330,13 @@ private:
     float sleep_tick_rate       = 0.0f;
     float sleep_tick_budget     = 0.0f;
     float sleep_overlay         = 0.0f;
-    Vector3 sleep_return_position = {0.0f, 0.0f, 0.0f};
+    Vector3 sleep_return_position = {0.0f, 0.0f,  0.0f};
     Vector3 sleep_return_target   = {0.0f, 0.0f, -1.0f};
-    Vector3 sleep_return_up       = {0.0f, 1.0f, 0.0f};
+    Vector3 sleep_return_up       = {0.0f, 1.0f,  0.0f};
     Vector3 sleep_start_forward   = {0.0f, 0.0f, -1.0f};
-    Vector3 sleep_pose_position   = {0.0f, 0.0f, 0.0f};
+    Vector3 sleep_pose_position   = {0.0f, 0.0f,  0.0f};
     Vector3 sleep_pose_forward    = {0.0f, 0.0f, -1.0f};
-    Vector3 sleep_pose_up         = {0.0f, 1.0f, 0.0f};
+    Vector3 sleep_pose_up         = {0.0f, 1.0f,  0.0f};
 
 
     enum class CameraView : uint8_t { FirstPerson, ThirdPersonBack, ThirdPersonFront };
@@ -390,7 +371,7 @@ private:
     // the exact orientation just set.
     int spawn_settle_frames = 0;
 
-    // Fixed-timestep accumulator (see run()): seconds of real frame time not
+    // Fixed-timestep accumulator (see update_frame()): seconds of real frame time not
     // yet consumed by a tick. Carries any leftover fraction of a tick
     // forward to the next frame instead of dropping it, so the tick rate
     // averages out to exactly 20/second over time rather than drifting.

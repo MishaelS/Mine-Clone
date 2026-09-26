@@ -3,12 +3,14 @@
 #include "core/Keybindings.hpp"
 
 #include <cstdint>
+#include <initializer_list>
 #include <string>
 #include <string_view>
 #include <vector>
 
 enum class BlockType : uint8_t;
 enum class ItemType : uint8_t;
+enum class Biome : uint8_t;
 
 namespace ui {
 
@@ -48,10 +50,18 @@ const std::string& language();
 // The active language's text for `key` -> English -> the key itself.
 const std::string& tr(std::string_view key);
 
+// tr(key) with "{0}", "{1}", ... replaced by `args` in order - every
+// message that mixes words with numbers or names goes through this, so
+// each language decides its own word order:
+//   "command.fill.done": "Blocks placed: {0}"
+//   ui::tr_format("command.fill.done", {std::to_string(placed)})
+std::string tr_format(std::string_view key, std::initializer_list<std::string> args);
+
 // Display text only; persistent block/item IDs remain language-independent.
 // An untranslated block/item falls back to a readable form of its ID.
 std::string block_display_name(BlockType type);
 std::string item_display_name(ItemType type);
+std::string biome_display_name(Biome biome);
 
 // Settings > Controls captions.
 std::string game_action_display_name(GameAction action);

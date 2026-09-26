@@ -1,14 +1,12 @@
 #include "core/GameEngine.hpp"
 #include "core/Block.hpp"
 #include "core/BlockShape.hpp"
-#include "core/TextureManager.hpp"
 #include "core/Tick.hpp"
 #include "items/Item.hpp"
 #include "items/DropTable.hpp"
 #include "items/Recipe.hpp"
 #include "items/Smelting.hpp"
 #include "entities/Player.hpp"
-#include "ui/FontManager.hpp"
 #include "ui/Widgets.hpp"
 #include "ui/Localization.hpp"
 #include "core/Keybindings.hpp"
@@ -61,13 +59,13 @@ namespace {
     constexpr Color IN_GAME_MENU_OVERLAY = {0, 0, 0, 105};
 
     constexpr uint64_t SLEEP_ALLOWED_START_TICK = 12542; // roughly 18:30, vanilla's night-sleep threshold
-    constexpr float SLEEP_RAMP_SECONDS = 1.6f;
-    constexpr float SLEEP_SLOWDOWN_TICKS = 1800.0f;
+    constexpr float SLEEP_RAMP_SECONDS         = 1.6f;
+    constexpr float SLEEP_SLOWDOWN_TICKS       = 1800.0f;
     constexpr float SLEEP_MIN_TICKS_PER_SECOND = 80.0f;
     constexpr float SLEEP_MAX_TICKS_PER_SECOND = 1800.0f;
     constexpr int SLEEP_MAX_TICKS_PER_FRAME = 260;
     constexpr unsigned char SLEEP_OVERLAY_ALPHA = 170;
-    constexpr unsigned char SLEEP_PANEL_ALPHA = 175;
+    constexpr unsigned char SLEEP_PANEL_ALPHA   = 175;
 
     // How much darker shadow gets at the brightness slider's own minimum
     // (settings.brightness == 10) - see set_chunk_brightness()'s own
@@ -338,123 +336,71 @@ namespace {
         "summon", "spawnpoint", "kick", "op", "execute",
     };
 
-    const char* unsupported_command_reason(const std::string& command) {
-        if (command == "enchant") return "нет системы зачарований";
-        if (command == "effect") return "нет системы эффектов/зелий";
-        if (command == "xp") return "нет системы опыта";
-        if (command == "gamerule") return "нет системы игровых правил";
-        if (command == "weather") return "нет погодной системы";
-        if (command == "difficulty") return "нет уровней сложности";
-        if (command == "summon") return "нет существ/мобов";
-        if (command == "spawnpoint") return "нет системы точек возрождения игрока (см. /setworldspawn для точки мира)";
-        if (command == "kick") return "нет мультиплеера";
-        if (command == "op") return "нет мультиплеера";
-        if (command == "execute") return "слишком сложная команда для текущей реализации";
-        return "не реализовано";
+    // Translation key naming what's missing for an UNSUPPORTED_COMMANDS entry.
+    std::string unsupported_command_reason_key(const std::string& command) {
+        if (command == "kick" || command == "op") return "command.unsupported.multiplayer";
+        if (UNSUPPORTED_COMMANDS.count(command)) return "command.unsupported." + command;
+        return "command.unsupported.other";
     }
 
-    const char* CHAT_HELP_LINES[] = {
-        "Доступные команды:",
-        "/tp x y z - телепортация",
-        "/give предмет [кол-во] - выдать предмет",
-        "/clear - очистить инвентарь",
-        "/gamemode survival|creative - сменить режим игры",
-        "/time set day|night|noon|midnight|<тики> - время суток",
-        "/setworldspawn [x y z] - точка возрождения мира",
-        "/setblock x y z блок - поставить блок",
-        "/fill x1 y1 z1 x2 y2 z2 блок - залить область",
-        "/clone x1 y1 z1 x2 y2 z2 x y z - скопировать область",
-        "/kill - убить себя",
-        "/say текст - сообщение в чат",
+    // /help output, one translation key per line - also the chat's
+    // command suggestions (every line after the title starts with its own
+    // "/command").
+    const char* CHAT_HELP_KEYS[] = {
+        "command.help.title",
+        "command.help.tp",
+        "command.help.give",
+        "command.help.clear",
+        "command.help.gamemode",
+        "command.help.time",
+        "command.help.setworldspawn",
+        "command.help.setblock",
+        "command.help.fill",
+        "command.help.clone",
+        "command.help.kill",
+        "command.help.say",
     };
 
-    std::vector<std::string> chat_command_suggestion_lines() {
-        return std::vector<std::string>(std::begin(CHAT_HELP_LINES) + 1, std::end(CHAT_HELP_LINES));
+    std::vector<std::string> chat_command_suggestion_keys() {
+        return std::vector<std::string>(std::begin(CHAT_HELP_KEYS) + 1, std::end(CHAT_HELP_KEYS));
     }
 }
 
-GameEngine::GameEngine(int screen_width, int screen_height, const char* title)
-    : settings(SettingsIO::load()), camera_move_speed(CAMERA_MOVE_SPEED_DEFAULT)
+GameEngine::GameEngine(const Settings& settings, AudioSystem& audio)
+    : settings(settings), audio(audio), camera_move_speed(CAMERA_MOVE_SPEED_DEFAULT)
 {
-    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
-    InitWindow(settings.window_width > 0 ? settings.window_width : screen_width,
-               settings.window_height > 0 ? settings.window_height : screen_height, title);
-    SetWindowMinSize(960, 540);
-
-    // Esc defaults to closing the window (WindowShouldClose()'s other
-    // trigger) - disabled so SettingsScreen can use it to cancel a
-    // keybind-rebind-in-progress instead of quitting the whole game out
-    // from under it. The only quit paths left are "Закрыть игру"
-    // (quit_requested) and the OS window-close control.
-    SetExitKey(KEY_NULL);
-
-    // First-launch loading splash: titleIntroLogo.png, up for exactly as
-    // long as the synchronous loads just below actually take. There's no
-    // background-loading thread here - the loads block the same as they
-    // always did: this just puts a frame on screen before that block
-    // starts instead of leaving the window whatever the OS painted it as
-    // (usually blank/black) for the whole duration.
-    {
-        const Texture2D& splash = TextureManager::get("sprites/gui/titleIntroLogo.png");
-        BeginDrawing();
-        ClearBackground(BLACK);
-        Rectangle source      = {0.0f, 0.0f, static_cast<float>(splash.width), static_cast<float>(splash.height)};
-        Rectangle destination = {0.0f, 0.0f, static_cast<float>(GetScreenWidth()), static_cast<float>(GetScreenHeight())};
-        DrawTexturePro(splash, source, destination, {0.0f, 0.0f}, 0.0f, WHITE);
-        EndDrawing();
-    }
-
-    SetTargetFPS(settings.target_fps);
-
     Load_block_definitions(); // needs a GL context, so only after InitWindow
     Load_item_definitions();
     Load_drop_table(); // needs both name tables above ready to resolve against
     Load_recipes();
     Load_smelting(); // same name tables as recipes
-    audio.initialize();
-    ui::load_translations(); // before FontManager::get() below - the font bakes their glyphs
-    ui::set_language(settings.language);
-    ui::set_sound_callback([this](ui::SoundEvent event) {
-        if (event == ui::SoundEvent::Click) audio.play_ui_click();
-        else if (event == ui::SoundEvent::Hover) audio.play_ui_hover();
-    });
-    chat_hud.set_command_suggestions(chat_command_suggestion_lines());
+    chat_hud.set_command_suggestions(chat_command_suggestion_keys());
     SetTextureFilter(get_block_atlas_texture(),
                       settings.texture_filter == TextureFilterMode::Bilinear ? TEXTURE_FILTER_BILINEAR : TEXTURE_FILTER_POINT);
-    FontManager::get(); // load the game's text font up front, same reason
     load_chunk_shader(); // same reason
 
     // position/target are placeholders until set_world() actually has a
     // World to find real ground in - everything else here doesn't depend
     // on one.
-    camera.position = {0.0f, 100.0f, 0.0f};
-    camera.target = {0.0f, 100.0f, -1.0f};
-    camera.up = {0.0f, 1.0f, 0.0f};
-    camera.fovy = 60.0f;
+    camera.position   = {0.0f, 100.0f, 0.0f};
+    camera.target     = {0.0f, 100.0f, -1.0f};
+    camera.up         = {0.0f, 1.0f, 0.0f};
+    camera.fovy       = 60.0f;
     camera.projection = CAMERA_PERSPECTIVE;
-
-    // No DisableCursor() here - the game starts on MainMenu, which needs a
-    // visible, clickable cursor. enter_state() disables it only when
-    // actually transitioning into Playing.
 }
 
 GameEngine::~GameEngine()
 {
     // Covers quitting the app outright while a World is loaded (the OS
-    // window-close control, or force-quit) - return_to_main_menu() covers
-    // the other exit path (the pause menu), but this one has no earlier
-    // hook to call it from.
+    // window-close control, or force-quit) - close_world() covers the
+    // other exit path (the pause menu), but this one has no earlier hook
+    // to call it from.
     if (inventory_hud.is_open()) inventory_hud.close(inventory);
     save_player_state();
+    world.reset(); // while the GL context still exists - ~World() frees chunk meshes
 
-    EnableCursor();
-    ui::set_sound_callback({});
     if (IsTextureValid(pause_snapshot)) UnloadTexture(pause_snapshot);
-    TextureManager::unload_all();
-    FontManager::unload();
     unload_chunk_fog_shader();
-    audio.shutdown();
-    CloseWindow();
 }
 
 void GameEngine::add_object(std::unique_ptr<GameObject> object)
@@ -488,7 +434,7 @@ void GameEngine::set_world(std::unique_ptr<World> new_world)
         camera_view = CameraView::FirstPerson;
         // A brand-new world (or a previous world's leftover value, if this
         // isn't the app's first one this session) starts fresh at dawn -
-        // start_singleplayer_world()'s own saved-state branch overrides
+        // open_world()'s own saved-state branch overrides
         // this with whatever was actually persisted, for a world that's
         // been played before.
         game_tick = 0;
@@ -1092,7 +1038,7 @@ void GameEngine::handle_chat_submit(const std::string& text)
     } else {
         // No other player exists yet to actually send this to - see
         // ChatHud's own comment on the local-echo/future-multiplayer split.
-        chat_hud.push_message("<Игрок> " + text);
+        chat_hud.push_message(ui::tr_format("chat.player_message", {ui::tr("chat.player_name"), text}));
     }
 }
 
@@ -1100,12 +1046,12 @@ void GameEngine::execute_chat_command(const std::string& command)
 {
     std::vector<std::string> tokens = split_whitespace(command);
     if (tokens.empty()) {
-        chat_hud.push_message("Пустая команда.");
+        chat_hud.push_message(ui::tr("command.empty"));
         return;
     }
 
     if (!current_world_allows_commands) {
-        chat_hud.push_message("Команды отключены в настройках этого мира.");
+        chat_hud.push_message(ui::tr("command.disabled"));
         return;
     }
 
@@ -1121,21 +1067,25 @@ void GameEngine::execute_chat_command(const std::string& command)
         if (start != std::string::npos) rest = command.substr(start);
     }
 
-    auto push = [this](const std::string& message) { chat_hud.push_message(message); };
+    // Every reply is a translation key, plus the values its "{0}", "{1}",
+    // ... placeholders take - see ui::tr_format().
+    auto push = [this](std::string_view key, std::initializer_list<std::string> args = {}) {
+        chat_hud.push_message(ui::tr_format(key, args));
+    };
 
     if (UNSUPPORTED_COMMANDS.count(name)) {
-        push(std::string("Команда /") + name + " пока не поддерживается: " + unsupported_command_reason(name) + ".");
+        push("command.unsupported", {name, ui::tr(unsupported_command_reason_key(name))});
         return;
     }
 
     if (name == "help" || name == "?") {
-        for (const char* line : CHAT_HELP_LINES) push(line);
+        for (const char* key : CHAT_HELP_KEYS) push(key);
         return;
     }
 
     if (name == "say") {
-        if (rest.empty()) { push("Использование: /say <текст>"); return; }
-        push("[Сервер] " + rest);
+        if (rest.empty()) { push("command.say.usage"); return; }
+        push("chat.server_message", {rest});
         return;
     }
 
@@ -1143,7 +1093,7 @@ void GameEngine::execute_chat_command(const std::string& command)
     // means anything without one loaded (chat can't even open without
     // `world` either, but a belt-and-suspenders check costs nothing).
     if (!world) {
-        push("Мир не загружен.");
+        push("command.no_world");
         return;
     }
 
@@ -1153,14 +1103,14 @@ void GameEngine::execute_chat_command(const std::string& command)
         // here (there's only ever the one player to move).
         size_t coord_index = args.size() == 4 ? 1 : 0;
         if (args.size() != 3 && args.size() != 4) {
-            push("Использование: /tp <x> <y> <z>");
+            push("command.tp.usage");
             return;
         }
         std::optional<float> x = parse_float(args[coord_index]);
         std::optional<float> y = parse_float(args[coord_index + 1]);
         std::optional<float> z = parse_float(args[coord_index + 2]);
         if (!x || !y || !z) {
-            push("Координаты должны быть числами.");
+            push("command.error.coordinates");
             return;
         }
         Vector3 target = {*x, *y + Player::EYE_HEIGHT, *z};
@@ -1168,22 +1118,22 @@ void GameEngine::execute_chat_command(const std::string& command)
         camera.position = target;
         camera.target = Vector3Add(camera.target, shift);
         player.reset(camera);
-        push("Телепортировано.");
+        push("command.tp.done");
         return;
     }
 
     if (name == "give") {
-        if (args.empty()) { push("Использование: /give <предмет> [количество]"); return; }
+        if (args.empty()) { push("command.give.usage"); return; }
         int count = 1;
         if (args.size() >= 2) {
             std::optional<int> parsed = parse_int(args[1]);
-            if (!parsed || *parsed <= 0) { push("Количество должно быть положительным целым числом."); return; }
+            if (!parsed || *parsed <= 0) { push("command.give.bad_count"); return; }
             count = *parsed;
         }
         if (std::optional<BlockType> block = block_type_from_name(args[0])) {
             int leftover = inventory.add(*block, count);
-            push("Выдано: " + ui::block_display_name(*block) + " x" + std::to_string(count - leftover) +
-                 (leftover > 0 ? " (не поместилось: " + std::to_string(leftover) + ")" : ""));
+            push(leftover > 0 ? "command.give.done_partial" : "command.give.done",
+                 {ui::block_display_name(*block), std::to_string(count - leftover), std::to_string(leftover)});
         } else if (std::optional<ItemType> item = item_type_from_name(args[0])) {
             const ItemProperties& properties = get_item_properties(*item);
             if (properties.category == ItemCategory::Tool) {
@@ -1192,15 +1142,15 @@ void GameEngine::execute_chat_command(const std::string& command)
                     if (!inventory.add_tool(*item)) break;
                     ++given;
                 }
-                push("Выдано: " + ui::item_display_name(*item) + " x" + std::to_string(given) +
-                     (given < count ? " (инвентарь переполнен)" : ""));
+                push(given < count ? "command.give.done_inventory_full" : "command.give.done",
+                     {ui::item_display_name(*item), std::to_string(given)});
             } else {
                 int leftover = inventory.add_item(*item, count);
-                push("Выдано: " + ui::item_display_name(*item) + " x" + std::to_string(count - leftover) +
-                     (leftover > 0 ? " (не поместилось: " + std::to_string(leftover) + ")" : ""));
+                push(leftover > 0 ? "command.give.done_partial" : "command.give.done",
+                     {ui::item_display_name(*item), std::to_string(count - leftover), std::to_string(leftover)});
             }
         } else {
-            push("Неизвестный предмет или блок: " + args[0]);
+            push("command.give.unknown", {args[0]});
         }
         return;
     }
@@ -1208,33 +1158,33 @@ void GameEngine::execute_chat_command(const std::string& command)
     if (name == "clear") {
         for (ItemStack& stack : inventory.hotbar) stack.clear();
         for (ItemStack& stack : inventory.storage) stack.clear();
-        push("Инвентарь очищен.");
+        push("command.clear.done");
         return;
     }
 
     if (name == "gamemode") {
-        if (args.empty()) { push("Использование: /gamemode survival|creative"); return; }
+        if (args.empty()) { push("command.gamemode.usage"); return; }
         if (args[0] == "survival") {
             current_game_mode = GameMode::Survival;
             current_world_info.game_mode = current_game_mode;
             WorldSave::save_world_info(current_world_info);
-            push("Режим игры: выживание.");
+            push("command.gamemode.survival");
         } else if (args[0] == "creative") {
             current_game_mode = GameMode::Creative;
             current_world_info.game_mode = current_game_mode;
             WorldSave::save_world_info(current_world_info);
-            push("Режим игры: творческий.");
+            push("command.gamemode.creative");
         } else if (args[0] == "adventure" || args[0] == "spectator") {
-            push("Режим \"" + args[0] + "\" пока не реализован (нет соответствующей игровой системы).");
+            push("command.gamemode.unsupported", {args[0]});
         } else {
-            push("Неизвестный режим игры: " + args[0]);
+            push("command.gamemode.unknown", {args[0]});
         }
         return;
     }
 
     if (name == "time") {
         if (args.size() < 2 || args[0] != "set") {
-            push("Использование: /time set day|night|noon|midnight|<тики>");
+            push("command.time.usage");
             return;
         }
         uint64_t target_tick;
@@ -1244,12 +1194,12 @@ void GameEngine::execute_chat_command(const std::string& command)
         else if (args[1] == "midnight") target_tick = 18000;
         else {
             std::optional<int> parsed = parse_int(args[1]);
-            if (!parsed || *parsed < 0) { push("Неизвестное значение времени: " + args[1]); return; }
+            if (!parsed || *parsed < 0) { push("command.time.unknown", {args[1]}); return; }
             target_tick = static_cast<uint64_t>(*parsed) % DayNightCycle::DAY_LENGTH_TICKS;
         }
         uint64_t day = game_tick / DayNightCycle::DAY_LENGTH_TICKS;
         game_tick = day * DayNightCycle::DAY_LENGTH_TICKS + target_tick;
-        push("Время установлено.");
+        push("command.time.done");
         return;
     }
 
@@ -1259,39 +1209,39 @@ void GameEngine::execute_chat_command(const std::string& command)
             std::optional<float> x = parse_float(args[0]);
             std::optional<float> y = parse_float(args[1]);
             std::optional<float> z = parse_float(args[2]);
-            if (!x || !y || !z) { push("Координаты должны быть числами."); return; }
+            if (!x || !y || !z) { push("command.error.coordinates"); return; }
             spawn = {*x, *y, *z};
         } else {
             spawn = player.feet_position();
         }
         world_spawn_override = spawn;
-        push("Точка возрождения мира установлена.");
+        push("command.setworldspawn.done");
         return;
     }
 
     if (name == "setblock") {
-        if (args.size() < 4) { push("Использование: /setblock <x> <y> <z> <блок>"); return; }
+        if (args.size() < 4) { push("command.setblock.usage"); return; }
         std::optional<int> x = parse_int(args[0]);
         std::optional<int> y = parse_int(args[1]);
         std::optional<int> z = parse_int(args[2]);
-        if (!x || !y || !z) { push("Координаты должны быть целыми числами."); return; }
+        if (!x || !y || !z) { push("command.error.integer_coordinates"); return; }
         std::optional<BlockType> block = block_type_from_name(args[3]);
-        if (!block) { push("Неизвестный блок: " + args[3]); return; }
-        if (world->command_fill_region(*x, *y, *z, *x, *y, *z, *block) > 0) push("Блок установлен.");
-        else push("Не удалось установить блок (вне загруженной области?).");
+        if (!block) { push("command.error.unknown_block", {args[3]}); return; }
+        if (world->command_fill_region(*x, *y, *z, *x, *y, *z, *block) > 0) push("command.setblock.done");
+        else push("command.setblock.failed");
         return;
     }
 
     if (name == "fill") {
-        if (args.size() < 7) { push("Использование: /fill <x1> <y1> <z1> <x2> <y2> <z2> <блок>"); return; }
+        if (args.size() < 7) { push("command.fill.usage"); return; }
         std::optional<int> coords[6];
         for (int i = 0; i < 6; ++i) coords[i] = parse_int(args[i]);
         if (std::any_of(std::begin(coords), std::end(coords), [](auto& c) { return !c.has_value(); })) {
-            push("Координаты должны быть целыми числами.");
+            push("command.error.integer_coordinates");
             return;
         }
         std::optional<BlockType> block = block_type_from_name(args[6]);
-        if (!block) { push("Неизвестный блок: " + args[6]); return; }
+        if (!block) { push("command.error.unknown_block", {args[6]}); return; }
         int min_x = std::min(*coords[0], *coords[3]), max_x = std::max(*coords[0], *coords[3]);
         int min_y = std::min(*coords[1], *coords[4]), max_y = std::max(*coords[1], *coords[4]);
         int min_z = std::min(*coords[2], *coords[5]), max_z = std::max(*coords[2], *coords[5]);
@@ -1299,21 +1249,20 @@ void GameEngine::execute_chat_command(const std::string& command)
                             static_cast<long long>(max_y - min_y + 1) *
                             static_cast<long long>(max_z - min_z + 1);
         if (volume > COMMAND_VOLUME_LIMIT) {
-            push("Слишком большая область: " + std::to_string(volume) + " блоков (максимум " +
-                 std::to_string(COMMAND_VOLUME_LIMIT) + ").");
+            push("command.error.too_large", {std::to_string(volume), std::to_string(COMMAND_VOLUME_LIMIT)});
             return;
         }
         int placed = world->command_fill_region(min_x, min_y, min_z, max_x, max_y, max_z, *block);
-        push("Установлено блоков: " + std::to_string(placed));
+        push("command.fill.done", {std::to_string(placed)});
         return;
     }
 
     if (name == "clone") {
-        if (args.size() < 9) { push("Использование: /clone <x1> <y1> <z1> <x2> <y2> <z2> <x> <y> <z>"); return; }
+        if (args.size() < 9) { push("command.clone.usage"); return; }
         std::optional<int> coords[9];
         for (int i = 0; i < 9; ++i) coords[i] = parse_int(args[i]);
         if (std::any_of(std::begin(coords), std::end(coords), [](auto& c) { return !c.has_value(); })) {
-            push("Координаты должны быть целыми числами.");
+            push("command.error.integer_coordinates");
             return;
         }
         int min_x = std::min(*coords[0], *coords[3]), max_x = std::max(*coords[0], *coords[3]);
@@ -1323,27 +1272,26 @@ void GameEngine::execute_chat_command(const std::string& command)
                             static_cast<long long>(max_y - min_y + 1) *
                             static_cast<long long>(max_z - min_z + 1);
         if (volume > COMMAND_VOLUME_LIMIT) {
-            push("Слишком большая область: " + std::to_string(volume) + " блоков (максимум " +
-                 std::to_string(COMMAND_VOLUME_LIMIT) + ").");
+            push("command.error.too_large", {std::to_string(volume), std::to_string(COMMAND_VOLUME_LIMIT)});
             return;
         }
         int dest_x = *coords[6], dest_y = *coords[7], dest_z = *coords[8];
         int placed = world->command_clone_region(min_x, min_y, min_z, max_x, max_y, max_z, dest_x, dest_y, dest_z);
-        push("Скопировано блоков: " + std::to_string(placed));
+        push("command.clone.done", {std::to_string(placed)});
         return;
     }
 
     if (name == "kill") {
         if (current_game_mode != GameMode::Survival) {
-            push("/kill работает только в режиме выживания.");
+            push("command.kill.survival_only");
             return;
         }
         player.health().kill();
-        push("Вы себя убили.");
+        push("command.kill.done");
         return;
     }
 
-    push("Неизвестная команда: /" + name + ". Наберите /help для списка команд.");
+    push("command.unknown", {name});
 }
 
 Camera3D GameEngine::make_render_camera() const
@@ -1416,7 +1364,7 @@ void GameEngine::update(float delta_time)
         inventory_hud.close(inventory);
         DisableCursor();
     } else if (world && !chat_open && IsKeyPressed(KEY_ESCAPE)) {
-        enter_state(GameState::Paused);
+        pause_requested = true;
         return;
     }
     chat_open = chat_hud.is_open(); // may have just changed above
@@ -1915,7 +1863,6 @@ void GameEngine::update(float delta_time)
 
 void GameEngine::draw()
 {
-    BeginDrawing();
     ClearBackground(RAYWHITE);
 
     // Inventory screens (hotbar grid, chest/furnace/workbench) keep the
@@ -1924,7 +1871,7 @@ void GameEngine::draw()
     // resolution into an off-screen target and drawn back through a small
     // GPU blur (ui::begin_blurred_background()), cheap enough every frame.
     // The Esc pause menu still uses a one-time snapshot instead (see
-    // pause_snapshot_pending below) - it draws over its own menu loop, not
+    // pause_requested below) - Application draws it behind its own menu, not
     // this one.
     const bool blur_world = inventory_hud.is_open();
     if (blur_world) ui::begin_blurred_background();
@@ -2032,10 +1979,11 @@ void GameEngine::draw()
         DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), IN_GAME_MENU_OVERLAY);
     }
 
-    if (pause_snapshot_pending) {
+    // Esc was pressed this frame: keep a blurred copy of the world (no HUD
+    // yet) for the pause menu's background - see take_pause_snapshot().
+    if (pause_requested) {
         if (IsTextureValid(pause_snapshot)) UnloadTexture(pause_snapshot);
         pause_snapshot = ui::capture_blurred_background();
-        pause_snapshot_pending = false;
     }
 
     // Hurt flash: a brief red pulse whenever apply_damage() actually lands
@@ -2113,7 +2061,7 @@ void GameEngine::draw()
                 leave_bed();
             }
             if (ui::button({x + half + gap, y, half, height}, ui::tr("sleep.open_menu"))) {
-                enter_state(GameState::Paused);
+                pause_requested = true;
             }
         }
     }
@@ -2128,191 +2076,50 @@ void GameEngine::draw()
         ui::label({0.0f, GetScreenHeight() * 0.35f, static_cast<float>(GetScreenWidth()), ui::scaled(60.0f)},
                   ui::tr("death.title"), WHITE);
     }
-
-    EndDrawing();
 }
 
-void GameEngine::run()
+void GameEngine::update_frame(float delta_time)
 {
-    while (!WindowShouldClose() && !quit_requested) {
-        float delta_time = GetFrameTime();
-        if (IsWindowResized()) {
-            settings.window_width = GetScreenWidth();
-            settings.window_height = GetScreenHeight();
-            SettingsIO::save(settings);
-        }
-        audio.update(delta_time, settings, state == GameState::Playing);
-        ui::set_scale_level(settings.ui_scale);
-        ui::set_language(settings.language);
-        ui::begin_frame();
-        if (state != GameState::Playing) {
-            update_and_draw_menu();
-            continue;
-        }
-
-        if (sleeping) {
-            tick_accumulator = 0.0f;
-            update_sleep_fast_forward(delta_time);
-        } else {
-            update_sleep_fast_forward(delta_time);
-
-            // Fixed-timestep tick loop: run as many 50ms ticks as delta_time
-            // has accumulated (usually 0 or 1 at 60+ FPS, more only after a
-            // stall), each one always the same fixed size - game logic that
-            // reads game_tick sees a steady 20/second clock no matter the
-            // frame rate. See MAX_TICKS_PER_FRAME for the catch-up cap.
-            tick_accumulator += delta_time;
-            int ticks_this_frame = 0;
-            while (tick_accumulator >= TICK_DURATION && ticks_this_frame < MAX_TICKS_PER_FRAME) {
-                tick();
-                tick_accumulator -= TICK_DURATION;
-                ++ticks_this_frame;
-            }
-            if (ticks_this_frame == MAX_TICKS_PER_FRAME) {
-                tick_accumulator = 0.0f; // drop the rest of the backlog instead of chasing it forever
-            }
-        }
-
-        // Exactly once per rendered frame, never from inside tick() (which
-        // can run several times in one frame after a stall - see
-        // MAX_TICKS_PER_FRAME just above): integrates whatever background
-        // chunk generation/meshing (World's ChunkWorkerPool) finished since
-        // last frame, under its own small per-frame budget. Draining this
-        // once per tick instead would let a stall's own catch-up ticks
-        // multiply that budget right on top of the stall that just
-        // happened - see World::integrate_worker_results()'s own comment.
-        if (world) world->integrate_worker_results();
-
-        update(delta_time);
-        draw();
-    }
-}
-
-void GameEngine::update_and_draw_menu()
-{
-    BeginDrawing();
-    ClearBackground(Color{24, 24, 28, 255}); // fallback - covered by one of the two textures below except for one un-drawn edge case (see the comment on the `default` GameState::Playing branch)
-
-    // Pause and its settings share the frozen world; pre-game screens use
-    // the dark dirt pattern.
-    const bool over_world = state == GameState::Paused ||
-        (state == GameState::Settings && settings_return_state == GameState::Paused);
-    if (over_world && IsTextureValid(pause_snapshot)) {
-        DrawTexturePro(pause_snapshot,
-            {0.0f, 0.0f, static_cast<float>(pause_snapshot.width), static_cast<float>(pause_snapshot.height)},
-            {0.0f, 0.0f, static_cast<float>(GetScreenWidth()), static_cast<float>(GetScreenHeight())},
-            {0.0f, 0.0f}, 0.0f, WHITE);
-        if (state == GameState::Settings)
-            DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Color{0, 0, 0, 105});
-    } else if (!over_world && state != GameState::Playing) {
-        ui::menu_background();
-    }
-
-    switch (state) {
-        case GameState::MainMenu: {
-            switch (main_menu_screen.update()) {
-                case MainMenuScreen::Action::Singleplayer:
-                    enter_state(GameState::WorldList);
-                    break;
-                case MainMenuScreen::Action::Settings:
-                    settings_return_state = GameState::MainMenu;
-                    enter_state(GameState::Settings);
-                    break;
-                case MainMenuScreen::Action::Quit:
-                    quit_requested = true;
-                    break;
-                default: break; // None, or Multiplayer (the button is disabled - never actually returned)
-            }
-            break;
-        }
-        case GameState::WorldList: {
-            WorldListScreen::Action action = world_list_screen.update();
-            if (action.type == WorldListScreen::ActionType::LoadWorld) {
-                pending_world_folder = action.folder_name;
-            } else if (action.type == WorldListScreen::ActionType::CreateWorld) {
-                enter_state(GameState::WorldCreate);
-            } else if (action.type == WorldListScreen::ActionType::Back) {
-                enter_state(GameState::MainMenu);
-            }
-            break;
-        }
-        case GameState::WorldCreate: {
-            WorldCreateScreen::Action action = world_create_screen.update();
-            if (action.type == WorldCreateScreen::ActionType::Create) {
-                WorldSave::create_world(action.world);
-                pending_world_folder = action.world.folder_name;
-            } else if (action.type == WorldCreateScreen::ActionType::Cancel) {
-                enter_state(GameState::WorldList);
-            }
-            break;
-        }
-        case GameState::Settings: {
-            if (settings_screen.update(settings).type == SettingsScreen::ActionType::Back) {
-                enter_state(settings_return_state); // MainMenu, or Paused if opened via the in-game Esc menu
-            }
-            break;
-        }
-        case GameState::Paused: {
-            switch (pause_menu_screen.update()) {
-                case PauseMenuScreen::Action::Resume:
-                    enter_state(GameState::Playing);
-                    break;
-                case PauseMenuScreen::Action::Settings:
-                    settings_return_state = GameState::Paused;
-                    enter_state(GameState::Settings);
-                    break;
-                case PauseMenuScreen::Action::MainMenu:
-                    return_to_main_menu();
-                    break;
-                default: break;
-            }
-            break;
-        }
-        case GameState::Playing:
-            break; // unreachable - run() only calls this method when state != Playing
-    }
-
-    EndDrawing();
-
-    // Only now, with this menu frame finished - loading draws frames of
-    // its own (the loading screen), which can't nest inside this one.
-    if (pending_world_folder) {
-        std::string folder = *pending_world_folder;
-        pending_world_folder.reset();
-        start_singleplayer_world(folder);
-    }
-}
-
-void GameEngine::enter_state(GameState new_state)
-{
-    GameState previous_state = state;
-    state = new_state;
-    if (state == GameState::Settings) settings_screen.enter();
-    if (state == GameState::Paused && previous_state == GameState::Playing) pause_snapshot_pending = true;
-    if (state == GameState::Playing) {
-        if (IsTextureValid(pause_snapshot)) {
-            rlDrawRenderBatchActive();
-            UnloadTexture(pause_snapshot);
-            pause_snapshot = {};
-        }
-        pause_snapshot_pending = false;
-        DisableCursor(); // mouse-look needs the cursor captured
+    if (sleeping) {
+        tick_accumulator = 0.0f;
+        update_sleep_fast_forward(delta_time);
     } else {
-        if (state == GameState::MainMenu && IsTextureValid(pause_snapshot)) {
-            rlDrawRenderBatchActive();
-            UnloadTexture(pause_snapshot);
-            pause_snapshot = {};
+        update_sleep_fast_forward(delta_time);
+
+        // Fixed-timestep tick loop: run as many 50ms ticks as delta_time
+        // has accumulated (usually 0 or 1 at 60+ FPS, more only after a
+        // stall), each one always the same fixed size - game logic that
+        // reads game_tick sees a steady 20/second clock no matter the
+        // frame rate. See MAX_TICKS_PER_FRAME for the catch-up cap.
+        tick_accumulator += delta_time;
+        int ticks_this_frame = 0;
+        while (tick_accumulator >= TICK_DURATION && ticks_this_frame < MAX_TICKS_PER_FRAME) {
+            tick();
+            tick_accumulator -= TICK_DURATION;
+            ++ticks_this_frame;
         }
-        EnableCursor(); // every menu screen needs a visible, clickable cursor
-        if (state == GameState::WorldList) world_list_screen.enter();
-        if (state == GameState::WorldCreate) world_create_screen.enter();
+        if (ticks_this_frame == MAX_TICKS_PER_FRAME) {
+            tick_accumulator = 0.0f; // drop the rest of the backlog instead of chasing it forever
+        }
     }
+
+    // Exactly once per rendered frame, never from inside tick() (which
+    // can run several times in one frame after a stall - see
+    // MAX_TICKS_PER_FRAME just above): integrates whatever background
+    // chunk generation/meshing (World's ChunkWorkerPool) finished since
+    // last frame, under its own small per-frame budget. Draining this
+    // once per tick instead would let a stall's own catch-up ticks
+    // multiply that budget right on top of the stall that just
+    // happened - see World::integrate_worker_results()'s own comment.
+    if (world) world->integrate_worker_results();
+
+    update(delta_time);
 }
 
-void GameEngine::start_singleplayer_world(const std::string& folder_name)
+bool GameEngine::open_world(const std::string& folder_name, const GameLoadProgress& progress)
 {
     std::optional<WorldInfo> info = WorldSave::load_world_info(folder_name);
-    if (!info) return; // shouldn't happen - fail safe, stay on the current screen instead of crashing
+    if (!info) return false;
 
     WorldConfig config;
     config.seed = info->seed;
@@ -2331,27 +2138,13 @@ void GameEngine::start_singleplayer_world(const std::string& folder_name)
     // A world with no player.json yet has never been played - it's being
     // generated from scratch, not loaded back.
     std::optional<PlayerSaveState> saved = WorldSave::load_player_state(folder_name);
-    const char* title_key = saved ? "loading.loading" : "loading.generating";
-    loading_screen.reset();
-    last_loading_frame_time = 0.0;
-    auto draw_loading_frame = [this, title_key](WorldLoadStage stage, float progress) {
-        // At most 60 frames a second: EndDrawing() waits out the target
-        // frame time, so drawing after every single chunk would slow the
-        // load itself down.
-        const double now = GetTime();
-        if (now - last_loading_frame_time < 1.0 / 60.0 && progress < 1.0f) return;
-        last_loading_frame_time = now;
-        const char* stage_key = stage == WorldLoadStage::Terrain ? "loading.terrain"
-            : stage == WorldLoadStage::Lighting ? "loading.lighting" : "loading.meshes";
-        BeginDrawing();
-        ClearBackground(BLACK);
-        loading_screen.draw(ui::tr(title_key), ui::tr(stage_key), progress);
-        EndDrawing();
-    };
-    draw_loading_frame(WorldLoadStage::Terrain, 0.0f); // up before the World is even built
+    const bool generating = !saved;
+    progress(generating, WorldLoadStage::Terrain, 0.0f); // up before the World is even built
 
     auto new_world = std::make_unique<World>(config);
-    new_world->set_load_progress_callback(draw_loading_frame);
+    new_world->set_load_progress_callback([&progress, generating](WorldLoadStage stage, float fraction) {
+        progress(generating, stage, fraction);
+    });
     // Inventory belongs to a save, never to the GameEngine session. Without
     // this reset, entering a brand-new world after leaving another one
     // leaked the previous world's stacks into it.
@@ -2416,19 +2209,10 @@ void GameEngine::start_singleplayer_world(const std::string& folder_name)
         set_world(std::move(new_world));
     }
     // Loading's done - no more loading-screen frames from here on (the
-    // callback captures `this`, and nothing blocking should draw one).
+    // callback refers to `progress`, which only lives for this call).
     if (world) world->set_load_progress_callback({});
-
-    // The bar fills slower than a fast load finishes - let it visibly
-    // reach 100% before switching to the world.
-    while (!loading_screen.finished() && !WindowShouldClose()) {
-        BeginDrawing();
-        ClearBackground(BLACK);
-        loading_screen.draw(ui::tr(title_key), ui::tr("loading.meshes"), 1.0f);
-        EndDrawing();
-    }
-
-    enter_state(GameState::Playing);
+    pause_requested = false;
+    return true;
 }
 
 void GameEngine::save_player_state()
@@ -2479,7 +2263,7 @@ void GameEngine::save_player_state()
     WorldSave::save_furnaces(current_world_folder, saved_furnaces);
 }
 
-void GameEngine::return_to_main_menu()
+void GameEngine::close_world()
 {
     save_player_state();
     world.reset(); // ~World() flushes any modified chunks still resident - same guarantee quitting the app outright already relies on
@@ -2492,5 +2276,19 @@ void GameEngine::return_to_main_menu()
     inventory_hud.close(inventory);
     chat_hud.close(); // otherwise its is_open() would leak into the next world's very first frame
     world_spawn_override.reset(); // session-only override - see its own comment
-    enter_state(GameState::MainMenu);
+    pause_requested = false;
+}
+
+bool GameEngine::take_pause_request()
+{
+    bool requested = pause_requested;
+    pause_requested = false;
+    return requested;
+}
+
+Texture2D GameEngine::take_pause_snapshot()
+{
+    Texture2D snapshot = pause_snapshot;
+    pause_snapshot = {};
+    return snapshot;
 }

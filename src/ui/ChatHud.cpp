@@ -1,4 +1,5 @@
 #include "ui/ChatHud.hpp"
+#include "ui/Localization.hpp"
 
 #include "raylib.h"
 
@@ -12,6 +13,7 @@ namespace {
     constexpr size_t MAX_VISIBLE_MESSAGES = 10;  // how many of the most recent are actually drawn at once
     constexpr size_t MAX_VISIBLE_SUGGESTIONS = 6;
     constexpr size_t MAX_CHAT_CODEPOINTS  = 256;
+    constexpr size_t MAX_HISTORY          = 100; // sent lines kept for Up/Down recall
 
     constexpr float CHAT_WIDTH    = 480.0f;
     constexpr float LINE_HEIGHT   = 16.0f;
@@ -54,6 +56,8 @@ void ChatHud::open_chat()
     // otherwise hand the fresh box the very 'T' that opened it as if it
     // had been typed in.
     while (GetCharPressed() != 0) {}
+    history_index = history.size();
+    history_draft.clear();
     EnableCursor();
 }
 
@@ -61,6 +65,7 @@ void ChatHud::open_command()
 {
     open_chat();
     input.text = "/";
+    ui::move_text_caret_to_end(input);
 }
 
 void ChatHud::close()
@@ -81,6 +86,14 @@ std::optional<std::string> ChatHud::update_and_draw()
     std::vector<std::string> suggestions = open ? matching_command_suggestions() : std::vector<std::string>{};
     if (open && IsKeyPressed(KEY_TAB) && !suggestions.empty()) {
         input.text = first_token(suggestions.front()) + " ";
+        ui::move_text_caret_to_end(input);
+        suggestions = matching_command_suggestions();
+    }
+    if (open && (IsKeyPressed(KEY_UP) || IsKeyPressedRepeat(KEY_UP))) {
+        browse_history(true);
+        suggestions = matching_command_suggestions();
+    } else if (open && (IsKeyPressed(KEY_DOWN) || IsKeyPressedRepeat(KEY_DOWN))) {
+        browse_history(false);
         suggestions = matching_command_suggestions();
     }
 
@@ -107,7 +120,32 @@ std::optional<std::string> ChatHud::update_and_draw()
     std::string text = input.text;
     close();
     if (text.empty()) return std::nullopt;
+    remember_sent_line(text);
     return text;
+}
+
+void ChatHud::browse_history(bool older)
+{
+    if (history.empty()) return;
+    if (older) {
+        if (history_index == 0) return; // already at the oldest line
+        if (history_index == history.size()) history_draft = input.text;
+        --history_index;
+    } else {
+        if (history_index == history.size()) return; // already back at the draft
+        ++history_index;
+    }
+    input.text = history_index == history.size() ? history_draft : history[history_index];
+    ui::move_text_caret_to_end(input);
+}
+
+void ChatHud::remember_sent_line(const std::string& text)
+{
+    // Repeating the same line back to back is stored once, the way shells
+    // collapse duplicate consecutive commands.
+    if (!history.empty() && history.back() == text) return;
+    history.push_back(text);
+    if (history.size() > MAX_HISTORY) history.erase(history.begin());
 }
 
 void ChatHud::set_command_suggestions(std::vector<std::string> suggestions)
@@ -123,7 +161,9 @@ std::vector<std::string> ChatHud::matching_command_suggestions() const
 
     std::string prefix = ascii_lower(typed);
     std::vector<std::string> result;
-    for (const std::string& suggestion : command_suggestions) {
+    for (const std::string& key : command_suggestions) {
+        // Translated per call, so a language switch shows up right away.
+        const std::string& suggestion = ui::tr(key);
         std::string token = first_token(suggestion);
         if (!token.empty() && token[0] == '/') token.erase(token.begin());
         if (!starts_with(ascii_lower(token), prefix)) continue;

@@ -30,6 +30,7 @@ target_include_directories(raygui INTERFACE external/raygui/src)
 add_executable(${PROJECT_NAME}
     # Application and reusable core services
     src/main.cpp
+    src/app/Application.cpp
     src/core/GameEngine.cpp
     src/core/Json.cpp
     src/core/Block.cpp

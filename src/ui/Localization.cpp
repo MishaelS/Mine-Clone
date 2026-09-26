@@ -1,4 +1,5 @@
 #include "ui/Localization.hpp"
+#include "core/Biome.hpp"
 #include "core/Block.hpp"
 #include "core/Json.hpp"
 #include "items/Item.hpp"
@@ -6,6 +7,7 @@
 #include "raylib.h"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <map>
 #include <set>
@@ -135,6 +137,19 @@ namespace ui {
         return untranslated.try_emplace(key_string, key_string).first->second;
     }
 
+    std::string tr_format(std::string_view key, std::initializer_list<std::string> args)
+    {
+        std::string text = tr(key);
+        size_t index = 0;
+        for (const std::string& arg : args) {
+            const std::string slot = "{" + std::to_string(index++) + "}";
+            for (size_t at = text.find(slot); at != std::string::npos; at = text.find(slot, at + arg.size())) {
+                text.replace(at, slot.size(), arg);
+            }
+        }
+        return text;
+    }
+
     std::string block_display_name(BlockType type)
     {
         const std::string& id = get_block_name(type);
@@ -145,6 +160,13 @@ namespace ui {
     {
         const std::string id = type == ItemType::None ? "none" : get_item_name(type);
         return content_name("item." + id, id);
+    }
+
+    std::string biome_display_name(Biome biome)
+    {
+        std::string id = get_biome_name(biome);
+        for (char& c : id) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return content_name("biome." + id, id);
     }
 
     std::string game_action_display_name(GameAction action)
@@ -168,19 +190,16 @@ namespace ui {
             case KEY_DOWN        : return tr("key.down");
             case KEY_LEFT        : return tr("key.left");
             case KEY_RIGHT       : return tr("key.right");
-            case KEY_LEFT_SHIFT  : return "Shift";
-            case KEY_LEFT_CONTROL: return "Ctrl";
-            case KEY_LEFT_ALT    : return "Alt";
-            case KEY_TAB         : return "Tab";
+            case KEY_LEFT_SHIFT  : return tr("key.shift");
+            case KEY_LEFT_CONTROL: return tr("key.ctrl");
+            case KEY_LEFT_ALT    : return tr("key.alt");
+            case KEY_TAB         : return tr("key.tab");
             default: break;
         }
         // Printable ASCII keys - raylib's KeyboardKey values for these match
         // their own ASCII codepoint.
         if (binding.code >= 32 && binding.code < 127) return std::string(1, static_cast<char>(binding.code));
 
-        std::string text = tr("key.other");
-        size_t slot = text.find("{0}");
-        if (slot != std::string::npos) text.replace(slot, 3, std::to_string(binding.code));
-        return text;
+        return tr_format("key.other", {std::to_string(binding.code)});
     }
 }

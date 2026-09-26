@@ -120,6 +120,12 @@ namespace ui {
     // caller's codepoint budget - a Cyrillic name is 2 bytes/letter).
     bool text_input(Rectangle bounds, TextInputState& state, bool focused);
 
+    // Puts the caret after the last character of state.text - for code
+    // that replaces the text wholesale (chat history, Tab completion), so
+    // typing continues at the end the way a terminal's own recall does.
+    // Takes effect on the next text_input() call.
+    void move_text_caret_to_end(const TextInputState& state);
+
     // Full button-height slider with its caption centered on the track,
     // restyled to the game's dark theme rather than Minecraft's own pixel
     // art (no bespoke slider texture exists for raygui to skin with).

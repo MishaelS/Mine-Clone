@@ -1,11 +1,11 @@
-#include "core/GameEngine.hpp"
+#include "app/Application.hpp"
 
 int main()
 {
-    // World construction now happens from the startup menu flow (see
-    // GameEngine::start_singleplayer_world()) instead of here - main() just
-    // creates and runs the engine.
-    GameEngine engine(1280, 720, "MineToo");
-    engine.run();
+    // The application owns the window, the menus and the main loop; the
+    // game itself (GameEngine) runs inside it once a world is opened from
+    // the startup menu.
+    Application app(1280, 720, "MineToo");
+    app.run();
     return 0;
 }

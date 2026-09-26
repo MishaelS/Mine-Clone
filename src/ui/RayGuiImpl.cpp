@@ -16,6 +16,16 @@
 #define RAYGUI_IMPLEMENTATION
 #include "raygui.h"
 
+#include "ui/Widgets.hpp"
+
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop
 #endif
+
+// Defined here rather than in Widgets.cpp: raygui keeps the caret in a
+// file-static variable with no setter, reachable only from the translation
+// unit that compiles its implementation - this one.
+void ui::move_text_caret_to_end(const TextInputState& state)
+{
+    textBoxCursorIndex = static_cast<int>(state.text.size()); // raygui counts bytes, not codepoints
+}

@@ -10,6 +10,8 @@
 
 #include <cmath>
 #include <cstdio>
+#include <string>
+#include <vector>
 
 namespace {
     constexpr int FONT_SIZE = 18;
@@ -22,16 +24,23 @@ namespace {
     // Compass name for a (normalized) look direction, clockwise from North -
     // matches the world's own North = -Z / East = +X convention (see
     // Chunk.cpp's CUBE_FACES comment).
-    const char* cardinal_direction(Vector3 forward) {
+    const std::string& cardinal_direction(Vector3 forward) {
         float angle_deg = atan2f(forward.x, -forward.z) * RAD2DEG;
         if (angle_deg < 0.0f) angle_deg += 360.0f;
 
-        static const char* NAMES[8] = {
-            "North", "Northeast", "East", "Southeast",
-            "South", "Southwest", "West", "Northwest",
+        static const char* KEYS[8] = {
+            "direction.north", "direction.northeast", "direction.east", "direction.southeast",
+            "direction.south", "direction.southwest", "direction.west", "direction.northwest",
         };
         int index = static_cast<int>(std::lround(angle_deg / 45.0f)) % 8;
-        return NAMES[index];
+        return ui::tr(KEYS[index]);
+    }
+
+    // A number with a fixed count of decimals, for tr_format() arguments.
+    std::string fixed(float value, int decimals) {
+        char buffer[32];
+        std::snprintf(buffer, sizeof(buffer), "%.*f", decimals, value);
+        return buffer;
     }
 }
 
@@ -66,18 +75,14 @@ void ui::draw_debug_overlay(const Camera3D& camera, const World& world, float ai
     // GameEngine::update_random_ticks()) - a future crop would get its own
     // branch here the same way, right next to whatever its own growth-chance
     // constant lives.
-    char looking_at[112];
+    std::string looking_at;
     if (auto hit = world.raycast(camera.position, forward, aim_reach)) {
         BlockType looked_at_type = world.get_block(hit->x, hit->y, hit->z);
-        char growth_info[48] = "";
-        if (looked_at_type == BlockType::OakSapling) {
-            std::snprintf(growth_info, sizeof(growth_info), " [growth: 1/7 per random tick]");
-        }
-        std::snprintf(looking_at, sizeof(looking_at), "%s (%d, %d, %d)%s",
-                      ui::block_display_name(looked_at_type).c_str(),
-                      hit->x, hit->y, hit->z, growth_info);
+        looking_at = ui::block_display_name(looked_at_type) + " (" + std::to_string(hit->x) + ", " +
+                     std::to_string(hit->y) + ", " + std::to_string(hit->z) + ")";
+        if (looked_at_type == BlockType::OakSapling) looking_at += ui::tr("debug.sapling_growth");
     } else {
-        std::snprintf(looking_at, sizeof(looking_at), "None");
+        looking_at = ui::tr("debug.none");
     }
 
     // Day/night: the exact same game_tick-derived values draw_celestial_
@@ -88,30 +93,30 @@ void ui::draw_debug_overlay(const Camera3D& camera, const World& world, float ai
     uint64_t tick_of_day = game_tick % DayNightCycle::DAY_LENGTH_TICKS;
     Vector3 sun_dir = DayNightCycle::sun_direction(game_tick);
 
-    char lines[12][96];
-    int line_count = 0;
-    std::snprintf(lines[line_count++], sizeof(lines[0]), "%d fps", GetFPS());
-    std::snprintf(lines[line_count++], sizeof(lines[0]), "Ticks: %llu (20/s)", static_cast<unsigned long long>(game_tick));
-    std::snprintf(lines[line_count++], sizeof(lines[0]), "Day %llu, time %llu/%llu (%.0f%%)",
-                  static_cast<unsigned long long>(day_number), static_cast<unsigned long long>(tick_of_day),
-                  static_cast<unsigned long long>(DayNightCycle::DAY_LENGTH_TICKS),
-                  DayNightCycle::time_of_day(game_tick) * 100.0f);
-    std::snprintf(lines[line_count++], sizeof(lines[0]), "Sun dir: %.2f / %.2f / %.2f", sun_dir.x, sun_dir.y, sun_dir.z);
-    std::snprintf(lines[line_count++], sizeof(lines[0]), "XYZ: %.3f / %.3f / %.3f", camera.position.x, camera.position.y, camera.position.z);
-    std::snprintf(lines[line_count++], sizeof(lines[0]), "Block: %d %d %d", block_x, block_y, block_z);
-    std::snprintf(lines[line_count++], sizeof(lines[0]), "Chunk: %d %d %d in %d %d", local_x, block_y, local_z, chunk.x, chunk.z);
-    std::snprintf(lines[line_count++], sizeof(lines[0]), "Biome: %s", get_biome_name(biome).c_str());
-    std::snprintf(lines[line_count++], sizeof(lines[0]), "Facing: %s (%.2f / %.2f / %.2f)", cardinal_direction(forward), forward.x, forward.y, forward.z);
-    std::snprintf(lines[line_count++], sizeof(lines[0]), "Light: %d (block %d, sky %d/%d)",
-                  light, block_light, effective_sky_light, raw_sky_light);
-    std::snprintf(lines[line_count++], sizeof(lines[0]), "Looking at: %s", looking_at);
-    std::snprintf(lines[line_count++], sizeof(lines[0]), "Speed: %.1f blocks/s (scroll to change)", move_speed);
+    auto number = [](auto value) { return std::to_string(value); };
+    std::vector<std::string> lines = {
+        ui::tr_format("debug.fps", {number(GetFPS())}),
+        ui::tr_format("debug.ticks", {number(game_tick)}),
+        ui::tr_format("debug.day", {number(day_number), number(tick_of_day),
+                                    number(DayNightCycle::DAY_LENGTH_TICKS),
+                                    fixed(DayNightCycle::time_of_day(game_tick) * 100.0f, 0)}),
+        ui::tr_format("debug.sun", {fixed(sun_dir.x, 2), fixed(sun_dir.y, 2), fixed(sun_dir.z, 2)}),
+        ui::tr_format("debug.xyz", {fixed(camera.position.x, 3), fixed(camera.position.y, 3), fixed(camera.position.z, 3)}),
+        ui::tr_format("debug.block", {number(block_x), number(block_y), number(block_z)}),
+        ui::tr_format("debug.chunk", {number(local_x), number(block_y), number(local_z), number(chunk.x), number(chunk.z)}),
+        ui::tr_format("debug.biome", {ui::biome_display_name(biome)}),
+        ui::tr_format("debug.facing", {cardinal_direction(forward), fixed(forward.x, 2), fixed(forward.y, 2), fixed(forward.z, 2)}),
+        ui::tr_format("debug.light", {number(light), number(block_light), number(effective_sky_light), number(raw_sky_light)}),
+        ui::tr_format("debug.looking_at", {looking_at}),
+        ui::tr_format("debug.speed", {fixed(move_speed, 1)}),
+    };
+    const int line_count = static_cast<int>(lines.size());
 
     const Font& font = FontManager::get();
 
     int text_width = 0;
     for (int i = 0; i < line_count; ++i) {
-        int width = static_cast<int>(MeasureTextEx(font, lines[i], FONT_SIZE, TEXT_SPACING).x);
+        int width = static_cast<int>(MeasureTextEx(font, lines[i].c_str(), FONT_SIZE, TEXT_SPACING).x);
         if (width > text_width) text_width = width;
     }
 
@@ -121,6 +126,6 @@ void ui::draw_debug_overlay(const Camera3D& camera, const World& world, float ai
 
     for (int i = 0; i < line_count; ++i) {
         Vector2 position = {static_cast<float>(MARGIN + PADDING), static_cast<float>(MARGIN + PADDING + i * (FONT_SIZE + LINE_SPACING))};
-        DrawTextEx(font, lines[i], position, FONT_SIZE, TEXT_SPACING, WHITE);
+        DrawTextEx(font, lines[i].c_str(), position, FONT_SIZE, TEXT_SPACING, WHITE);
     }
 }
