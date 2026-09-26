@@ -41,6 +41,7 @@ namespace {
     constexpr float INITIAL_POP_VELOCITY = 0.11f; // blocks/tick, ~2.2 blocks/s - the old straight-up-pop speed
 
     constexpr float ITEM_HALF_SIZE       = 0.14f;
+    constexpr float SPRITE_SIZE          = ITEM_HALF_SIZE * 3.0f; // flat item icons draw larger than the physics box
     constexpr float BOB_HEIGHT           = 0.04f;
     constexpr float BOB_SPEED            = 3.0f;
     constexpr float BLOCK_ROTATION_SPEED = 45.0f;
@@ -63,6 +64,41 @@ namespace {
             }
         }
         return std::nullopt;
+    }
+
+    // Where an item stuck inside a block should head: the center of the
+    // nearest cell with no collision at all (air, water, plants) within
+    // ESCAPE_SEARCH_RADIUS, measured from the item to that cell's own box -
+    // so the cell right behind the nearest face wins. Straight up (like
+    // vanilla's own fallback) when it's buried deeper than that.
+    constexpr int ESCAPE_SEARCH_RADIUS = 3;
+    constexpr float ESCAPE_SPEED = 0.15f;  // blocks/tick, ~3 blocks/s
+    constexpr float ESCAPE_UP_BIAS = 0.05f; // on a near tie, prefer popping out upward
+
+    Vector3 escape_target(const World* world, Vector3 position) {
+        const int cx = static_cast<int>(std::floor(position.x));
+        const int cy = static_cast<int>(std::floor(position.y));
+        const int cz = static_cast<int>(std::floor(position.z));
+        std::optional<Vector3> best;
+        float best_score = 0.0f;
+        for (int dx = -ESCAPE_SEARCH_RADIUS; dx <= ESCAPE_SEARCH_RADIUS; ++dx) {
+            for (int dy = -ESCAPE_SEARCH_RADIUS; dy <= ESCAPE_SEARCH_RADIUS; ++dy) {
+                for (int dz = -ESCAPE_SEARCH_RADIUS; dz <= ESCAPE_SEARCH_RADIUS; ++dz) {
+                    const int x = cx + dx, y = cy + dy, z = cz + dz;
+                    if (world->collision_boxes_at(x, y, z).count > 0) continue;
+                    // Distance from the item to the nearest point of this cell.
+                    const float nx = std::clamp(position.x, static_cast<float>(x), x + 1.0f);
+                    const float ny = std::clamp(position.y, static_cast<float>(y), y + 1.0f);
+                    const float nz = std::clamp(position.z, static_cast<float>(z), z + 1.0f);
+                    float score = Vector3Distance(position, {nx, ny, nz}) - (dy > 0 ? ESCAPE_UP_BIAS : 0.0f);
+                    if (!best || score < best_score) {
+                        best = Vector3{x + 0.5f, y + 0.5f, z + 0.5f};
+                        best_score = score;
+                    }
+                }
+            }
+        }
+        return best.value_or(Vector3{position.x, position.y + 1.0f, position.z});
     }
 
     // A tool or material has no BlockType (and so no BlockProperties::
@@ -101,7 +137,7 @@ namespace {
             (source.width - sub_texel * 2.0f) / static_cast<float>(atlas.width),
             (source.height - sub_texel * 2.0f) / static_cast<float>(atlas.height),
         };
-        return {&atlas, uv, WHITE, ITEM_HALF_SIZE * 3.0f};
+        return {&atlas, uv, WHITE, SPRITE_SIZE};
     }
 
     void draw_billboard_quad(const BillboardTexture& billboard)
@@ -146,6 +182,27 @@ void DroppedItem::tick_physics(const World* world)
     if (age >= MAX_AGE) {
         active = false;
         return;
+    }
+
+    // Stuck inside a block: no gravity or collision this tick - slide
+    // straight toward the nearest free cell, through whatever is in the
+    // way (vanilla's own pushOutOfBlocks, just aimed at the nearest air
+    // rather than only at the six neighbors).
+    if (world && containing_collision_box(world, motion.current)) {
+        Vector3 to_exit = Vector3Subtract(escape_target(world, motion.current), motion.current);
+        float distance = Vector3Length(to_exit);
+        velocity = distance > 0.0001f ? Vector3Scale(to_exit, std::min(ESCAPE_SPEED, distance) / distance)
+                                      : Vector3{0.0f, ESCAPE_SPEED, 0.0f};
+        escaping_block = true;
+        motion.current = Vector3Add(motion.current, velocity);
+        set_position(motion.current);
+        return;
+    }
+    // Just got out - drop most of the push, so it settles where it came
+    // out instead of skidding away.
+    if (escaping_block) {
+        escaping_block = false;
+        velocity = Vector3Scale(velocity, 0.2f);
     }
 
     std::optional<int> submerged = world ? world->water_depth_at(motion.current) : std::nullopt;
@@ -243,12 +300,22 @@ bool DroppedItem::try_merge(DroppedItem& other)
 void DroppedItem::render(float tick_alpha, Vector3 viewer_position, const World& world) const
 {
     Vector3 render_position = motion.interpolated(tick_alpha);
-    float bob = std::sin(static_cast<float>(GetTime()) * BOB_SPEED) * BOB_HEIGHT;
+    std::optional<Rectangle> sprite = item_sprite(stack);
+
+    // Physics rests the item's center ITEM_HALF_SIZE above the floor, but
+    // the picture reaches further down: a flat icon is taller than the
+    // physics box, and the bob dips BOB_HEIGHT below the rest point. Lift
+    // it by both, so even the lowest point of the bob only touches the
+    // ground instead of sinking into it. Rendering only - physics, pickup
+    // and saved positions are unaffected.
+    const float visual_half_height = sprite ? SPRITE_SIZE * 0.5f : ITEM_HALF_SIZE;
+    float bob = std::sin(static_cast<float>(GetTime()) * BOB_SPEED) * BOB_HEIGHT
+              + (visual_half_height - ITEM_HALF_SIZE) + BOB_HEIGHT;
     Color environment_tint = entity_environment_tint(world, render_position);
 
     rlPushMatrix();
     rlTranslatef(render_position.x, render_position.y + bob, render_position.z);
-    if (std::optional<Rectangle> sprite = item_sprite(stack)) {
+    if (sprite) {
         Vector3 to_viewer = Vector3Subtract(viewer_position, render_position);
         // Cylindrical billboard: ignore pitch so the item remains vertical
         // even when the camera is above or below it.

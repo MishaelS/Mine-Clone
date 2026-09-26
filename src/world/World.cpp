@@ -849,8 +849,9 @@ void World::set_block_orientation(int x, int y, int z, HorizontalDirection direc
     }
     // Only this one chunk's own mesh can show the change (a directional
     // block's faces never cross a chunk border), so a neighborhood rebuild
-    // like set_block_and_rebuild()'s own isn't needed - just this chunk.
-    request_remesh(chunk_x, chunk_z);
+    // like set_block_and_rebuild()'s own isn't needed - just this chunk,
+    // this frame (see flush_urgent_remeshes()).
+    urgent_remesh.insert(chunk_key(chunk_x, chunk_z));
 }
 
 uint16_t World::get_block_state(int x, int y, int z) const
@@ -883,7 +884,8 @@ void World::set_block_state(int x, int y, int z, uint16_t packed)
         chunk->set_block_state(local_x, y - MIN_WORLD_Y, local_z, packed);
         chunk->mark_modified();
     }
-    request_remesh(chunk_x, chunk_z);
+    urgent_remesh.insert(chunk_key(chunk_x, chunk_z)); // a door/trapdoor/cake change shows this frame
+
 }
 
 BlockShapeBoxes World::collision_boxes_at(int x, int y, int z) const
@@ -1398,7 +1400,36 @@ void World::set_block_and_rebuild(int x, int y, int z, BlockType type)
     }
 
     relight_chunk_neighborhood(chunk_x, chunk_z);
-    rebuild_mesh_neighborhood(chunk_x, chunk_z);
+    remesh_after_edit(x, z);
+}
+
+void World::remesh_after_edit(int x, int z)
+{
+    int chunk_x = floor_div(x, CHUNK_SIZE);
+    int chunk_z = floor_div(z, CHUNK_SIZE);
+    int local_x = x - chunk_x * CHUNK_SIZE;
+    int local_z = z - chunk_z * CHUNK_SIZE;
+    // Which neighbor (if any) the block touches along each axis.
+    int edge_x = local_x == 0 ? -1 : local_x == CHUNK_SIZE - 1 ? 1 : 0;
+    int edge_z = local_z == 0 ? -1 : local_z == CHUNK_SIZE - 1 ? 1 : 0;
+    for (int dx = -1; dx <= 1; ++dx) {
+        for (int dz = -1; dz <= 1; ++dz) {
+            bool shows_block = (dx == 0 || dx == edge_x) && (dz == 0 || dz == edge_z);
+            if (shows_block) urgent_remesh.insert(chunk_key(chunk_x + dx, chunk_z + dz));
+            else request_remesh(chunk_x + dx, chunk_z + dz);
+        }
+    }
+}
+
+void World::flush_urgent_remeshes()
+{
+    for (int64_t key : urgent_remesh) {
+        auto [chunk_x, chunk_z] = unpack_chunk_key(key);
+        if (chunk_at(chunk_x, chunk_z) == nullptr) continue;
+        if (meshing.count(key) > 0) stale_mesh_jobs.insert(key);
+        rebuild_mesh(chunk_x, chunk_z);
+    }
+    urgent_remesh.clear();
 }
 
 namespace {
@@ -1568,6 +1599,10 @@ void World::update_falling_blocks()
             }
         }
     };
+    // Where blocks landed this tick - remeshed this frame (see
+    // remesh_after_edit()), so the falling entity vanishing and the placed
+    // block appearing happen in the same frame instead of flickering.
+    std::vector<std::pair<int, int>> landed_columns;
 
     // Phase 1: cells newly (or still) unsupported since last tick each
     // become their own free-falling entity - only entries already queued
@@ -1659,7 +1694,7 @@ void World::update_falling_blocks()
                 }
                 chunk->mark_modified();
                 relit_chunks.insert(chunk_key(chunk_x, chunk_z));
-                mark_dirty(chunk_x, chunk_z);
+                landed_columns.push_back({grid_x, grid_z});
                 schedule_fluid_neighbors(grid_x, land_y, grid_z);
                 schedule_falling_check(grid_x, land_y - 1, grid_z);
             }
@@ -1671,7 +1706,9 @@ void World::update_falling_blocks()
     relight_centers.reserve(relit_chunks.size());
     for (int64_t key : relit_chunks) relight_centers.push_back(unpack_chunk_key(key));
     relight_chunks_around(relight_centers);
+    for (const auto& [x, z] : landed_columns) remesh_after_edit(x, z);
     for (int64_t key : needs_mesh) {
+        if (urgent_remesh.count(key) > 0) continue; // rebuilt this frame anyway
         auto [cx, cz] = unpack_chunk_key(key);
         request_remesh(cx, cz);
     }
@@ -2108,13 +2145,15 @@ void World::integrate_worker_results()
     for (ChunkWorkerPool::MeshResult& result : worker_pool->drain_mesh_results(MAX_MESH_INTEGRATIONS_PER_FRAME)) {
         int64_t key = chunk_key(result.chunk_x, result.chunk_z);
         meshing.erase(key);
+        // Older than the mesh flush_urgent_remeshes() already built - drop it.
+        const bool stale = stale_mesh_jobs.erase(key) > 0;
 
         // Only actually upload if this chunk is still the live one at this
         // coordinate - it may have been unloaded while the job was in
         // flight, in which case this geometry is for a chunk nobody will
         // ever draw again (see request_remesh()'s own comment on why the
         // job still ran to completion instead of being cancelled).
-        if (chunk_at(result.chunk_x, result.chunk_z) == result.chunk.get()) {
+        if (!stale && chunk_at(result.chunk_x, result.chunk_z) == result.chunk.get()) {
             result.chunk->upload_mesh_data(std::move(result.mesh_data));
         }
 

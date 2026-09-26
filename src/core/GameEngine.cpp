@@ -2114,6 +2114,10 @@ void GameEngine::update_frame(float delta_time)
     if (world) world->integrate_worker_results();
 
     update(delta_time);
+
+    // After every edit this frame (player input above, furnaces/leaf decay
+    // in tick()), before draw(): a changed block is visible immediately.
+    if (world) world->flush_urgent_remeshes();
 }
 
 bool GameEngine::open_world(const std::string& folder_name, const GameLoadProgress& progress)

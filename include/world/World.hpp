@@ -378,6 +378,13 @@ public:
     // stall that just happened.
     void integrate_worker_results();
 
+    // Rebuilds, right now on this thread, every chunk mesh a point edit
+    // this frame made visibly stale (see remesh_after_edit()) - call once
+    // per frame after the frame's updates and before drawing, so a placed
+    // or broken block shows up in the very frame it changed instead of a
+    // few frames later when a background mesh job lands.
+    void flush_urgent_remeshes();
+
     // Finds a spawn point on dry land (never Sea or Ocean) with clear air
     // above the ground for the player to actually appear in, instead of a
     // fixed position that could just as easily land in open water or
@@ -626,6 +633,14 @@ private:
     // inline.
     void request_remesh(int chunk_x, int chunk_z);
 
+    // After one block at world (x, z) changed: the chunk holding it - and a
+    // neighbor chunk too when the block sits on that border, since the
+    // neighbor's own faces/AO next to it change - go into urgent_remesh
+    // (rebuilt this frame by flush_urgent_remeshes()); the rest of the 3x3
+    // neighborhood, which only needs its lighting refreshed, still goes
+    // through the background request_remesh().
+    void remesh_after_edit(int x, int z);
+
     // Pushes a small nearest-first batch from pending_generation into the
     // worker pool. This keeps chunk streaming smooth when a chunk-boundary
     // crossing makes a whole new ring eligible at once.
@@ -769,6 +784,14 @@ private:
     // reflect it). integrate_worker_results() re-calls request_remesh() for
     // any coordinate found here once that job's result lands.
     std::unordered_set<int64_t> remesh_pending;
+
+    // Chunks to rebuild synchronously this frame - see remesh_after_edit().
+    std::unordered_set<int64_t> urgent_remesh;
+    // Chunks flush_urgent_remeshes() rebuilt while a background job for
+    // them was already in flight: that job read the data before the edit,
+    // so integrate_worker_results() drops its result instead of uploading
+    // a mesh older than the one already showing.
+    std::unordered_set<int64_t> stale_mesh_jobs;
 
     // Which chunk update_chunk_states() last computed states around, so it
     // can skip rescanning when the observer hasn't left that chunk since -

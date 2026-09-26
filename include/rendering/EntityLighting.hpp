@@ -66,28 +66,39 @@ inline float sample_light_smooth(const World& world, Vector3 position)
     const float fy = p.y - static_cast<float>(by);
     const float fz = p.z - static_cast<float>(bz);
 
-    auto sample_sky = [&](int dx, int dy, int dz) {
-        return static_cast<float>(world.get_sky_light(bx + dx, by + dy, bz + dz));
-    };
-    auto sample_block = [&](int dx, int dy, int dz) {
-        return static_cast<float>(world.get_block_light(bx + dx, by + dy, bz + dz));
-    };
-
-    const float sky_x0z0 = sample_sky(0, 0, 0) * (1.0f - fx) + sample_sky(1, 0, 0) * fx;
-    const float sky_x0z1 = sample_sky(0, 0, 1) * (1.0f - fx) + sample_sky(1, 0, 1) * fx;
-    const float sky_x1z0 = sample_sky(0, 1, 0) * (1.0f - fx) + sample_sky(1, 1, 0) * fx;
-    const float sky_x1z1 = sample_sky(0, 1, 1) * (1.0f - fx) + sample_sky(1, 1, 1) * fx;
-    const float sky_y0 = sky_x0z0 * (1.0f - fz) + sky_x0z1 * fz;
-    const float sky_y1 = sky_x1z0 * (1.0f - fz) + sky_x1z1 * fz;
-    const float sky = sky_y0 * (1.0f - fy) + sky_y1 * fy;
-
-    const float block_x0z0 = sample_block(0, 0, 0) * (1.0f - fx) + sample_block(1, 0, 0) * fx;
-    const float block_x0z1 = sample_block(0, 0, 1) * (1.0f - fx) + sample_block(1, 0, 1) * fx;
-    const float block_x1z0 = sample_block(0, 1, 0) * (1.0f - fx) + sample_block(1, 1, 0) * fx;
-    const float block_x1z1 = sample_block(0, 1, 1) * (1.0f - fx) + sample_block(1, 1, 1) * fx;
-    const float block_y0 = block_x0z0 * (1.0f - fz) + block_x0z1 * fz;
-    const float block_y1 = block_x1z0 * (1.0f - fz) + block_x1z1 * fz;
-    const float block = block_y0 * (1.0f - fy) + block_y1 * fy;
+    // Opaque cells (the ground under a dropped item, a wall it leans
+    // against) hold no light of their own - 0 inside stone - so they're left
+    // out and the remaining cells' weights renormalized, instead of
+    // dragging an item lying in full sunlight down to ~60% just for resting
+    // below the middle of its cell. Same rule the chunk mesh's own
+    // vertex_light() follows for block faces.
+    float sky = 0.0f;
+    float block = 0.0f;
+    float weight_total = 0.0f;
+    for (int dx = 0; dx <= 1; ++dx) {
+        for (int dy = 0; dy <= 1; ++dy) {
+            for (int dz = 0; dz <= 1; ++dz) {
+                const int x = bx + dx, y = by + dy, z = bz + dz;
+                if (!get_block_properties(world.get_block(x, y, z)).transparent) continue;
+                const float weight = (dx ? fx : 1.0f - fx) * (dy ? fy : 1.0f - fy) * (dz ? fz : 1.0f - fz);
+                sky += weight * static_cast<float>(world.get_sky_light(x, y, z));
+                block += weight * static_cast<float>(world.get_block_light(x, y, z));
+                weight_total += weight;
+            }
+        }
+    }
+    if (weight_total > 0.0001f) {
+        sky /= weight_total;
+        block /= weight_total;
+    } else {
+        // Every nearby cell is solid (or the item sits exactly on a corner
+        // where only solid cells carry weight): its own cell's light.
+        const int x = static_cast<int>(std::floor(position.x));
+        const int y = static_cast<int>(std::floor(position.y));
+        const int z = static_cast<int>(std::floor(position.z));
+        sky = static_cast<float>(world.get_sky_light(x, y, z));
+        block = static_cast<float>(world.get_block_light(x, y, z));
+    }
 
     // Raw sky/block fractions (no floor yet - see chunk.fs's own comment on
     // why it's applied last, to the max of both terms, instead of baked

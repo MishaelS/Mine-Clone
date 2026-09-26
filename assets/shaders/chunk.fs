@@ -4,7 +4,7 @@
 // texture*vertexColor shading, so tint/face-direction shading baked into
 // vertex colors by Chunk::build_mesh keeps working exactly as before) plus
 // linear distance fog, day/night + brightness-slider light scaling and
-// sun-aware AO (both per-fragment, from their own vertex channels - see
+// vertex AO (both per-fragment, from their own vertex channels - see
 // fragLight/fragAO below - rather than baked into vertexColor, so neither
 // needs this mesh rebuilt when the time of day changes) and, only during
 // Chunk::draw_water()'s own pass (see isWaterPass), a
@@ -130,17 +130,14 @@ void main()
         float lightScale = max(MIN_LIGHT_FRACTION, max(skyTerm, blockTerm));
         finalColor.rgb *= lightScale;
 
-        // Ambient occlusion: suppressed wherever this fragment is actually
-        // standing in direct sunlight right now (sky exposure * the
-        // current daylight strength both near 1.0) - real Minecraft's own
-        // vertex AO darkens a corner purely from nearby geometry, with no
-        // regard for whether direct light is hitting it, which reads
-        // wrong for a sunlit corner. mix() fades toward "no occlusion"
-        // (1.0) as sun exposure rises, and applies fragAO at full strength
-        // (its own baked value) in genuine shadow - a night-time or
-        // sky-blocked corner darkens exactly as it always has.
-        float sunExposure = clamp(fragLight.x * daylightFactor, 0.0, 1.0);
-        finalColor.rgb *= mix(fragAO, 1.0, sunExposure);
+        // Ambient occlusion: always applied, day or night - like real
+        // Minecraft's own vertex AO, it darkens a corner purely from the
+        // blocks around it. (It used to fade out in direct sunlight, but
+        // that only looked right while vertex light still averaged the 0
+        // light *inside* neighboring stone into every corner - Chunk.cpp's
+        // vertex_light() no longer does, so AO is now the one thing that
+        // shades corners and ground contact, and has to stay on.)
+        finalColor.rgb *= fragAO;
     }
 
     float distance = length(fragWorldPosition - cameraPosition);

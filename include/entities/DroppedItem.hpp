@@ -37,7 +37,9 @@ public:
                 std::optional<Color> block_tint = std::nullopt);
 
     // One tick's worth of gravity/drag/water-buoyancy and ground collision
-    // (see the .cpp), plus aging toward MAX_AGE. Called from
+    // (see the .cpp), plus aging toward MAX_AGE. An item that ends up inside
+    // a block (one placed on top of it, a magnet pull through a wall) slides
+    // out to the nearest free cell instead of staying stuck. Called from
     // GameEngine::tick(), never per-frame.
     void tick_physics(const World* world);
 
@@ -98,4 +100,5 @@ private:
     float pickup_delay = NATURAL_PICKUP_DELAY;
     std::optional<Color> block_tint;
     TickMotion motion;
+    bool escaping_block = false; // was sliding out of a block last tick - see tick_physics()
 };

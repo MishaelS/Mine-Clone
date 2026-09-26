@@ -353,6 +353,15 @@ namespace {
         return chunk->get_block_light(x, y, z);
     }
 
+    // Blocks light (stone, dirt, ...) rather than letting it through (air,
+    // glass, leaves, water) - same rule Chunk::is_opaque() lights by.
+    bool opaque_at(const Neighborhood& nb, int x, int y, int z) {
+        if (y < 0 || y >= CHUNK_HEIGHT) return false;
+        const Chunk* chunk = nb.resolve(x, z);
+        if (chunk == nullptr) return false;
+        return !get_block_properties(chunk->get_block(x, y, z)).transparent;
+    }
+
     // The 4 cells relevant to one face-corner's vertex: the cell right
     // outside the face, the two edge-adjacent ("side") cells, and the
     // diagonal ("corner") cell. AO and vertex light both sample these.
@@ -423,14 +432,28 @@ namespace {
     VertexLight vertex_light(const Neighborhood& nb, int x, int y, int z, Vector3 normal, Vector3 corner) {
         NeighborCells cells = compute_neighbor_cells(x, y, z, normal, corner);
 
-        int sky_total = sky_light_at(nb, cells.base[0]  , cells.base[1]  , cells.base[2]  )
-                      + sky_light_at(nb, cells.side1[0] , cells.side1[1] , cells.side1[2] )
-                      + sky_light_at(nb, cells.side2[0] , cells.side2[1] , cells.side2[2] )
-                      + sky_light_at(nb, cells.corner[0], cells.corner[1], cells.corner[2]);
-        int block_total = block_light_at(nb, cells.base[0]  , cells.base[1]  , cells.base[2]  )
-                        + block_light_at(nb, cells.side1[0] , cells.side1[1] , cells.side1[2] )
-                        + block_light_at(nb, cells.side2[0] , cells.side2[1] , cells.side2[2] )
-                        + block_light_at(nb, cells.corner[0], cells.corner[1], cells.corner[2]);
+        // An opaque neighbor holds no light of its own (it's 0 inside
+        // stone), so averaging it in would darken every vertex touching the
+        // ground or a wall a second time on top of AO - a block resting on
+        // the floor came out visibly darker than the same block in mid-air.
+        // Like Minecraft's own smooth lighting, such a cell counts with the
+        // light right outside the face instead; the diagonal cell too when
+        // both side cells are opaque (it can't be seen from the vertex
+        // then). Darkening in corners is left entirely to AO.
+        const int base_sky = sky_light_at(nb, cells.base[0], cells.base[1], cells.base[2]);
+        const int base_block = block_light_at(nb, cells.base[0], cells.base[1], cells.base[2]);
+        int sky_total = base_sky;
+        int block_total = base_block;
+        auto add = [&](const int cell[3], bool open) {
+            sky_total += open ? sky_light_at(nb, cell[0], cell[1], cell[2]) : base_sky;
+            block_total += open ? block_light_at(nb, cell[0], cell[1], cell[2]) : base_block;
+        };
+        const bool side1_open = !opaque_at(nb, cells.side1[0], cells.side1[1], cells.side1[2]);
+        const bool side2_open = !opaque_at(nb, cells.side2[0], cells.side2[1], cells.side2[2]);
+        add(cells.side1, side1_open);
+        add(cells.side2, side2_open);
+        add(cells.corner, (side1_open || side2_open) &&
+                          !opaque_at(nb, cells.corner[0], cells.corner[1], cells.corner[2]));
 
         return {
             (sky_total / 4.0f) / MAX_LIGHT,
@@ -572,8 +595,9 @@ namespace {
         return false;
     }
 
-    // Appends one face as two triangles (0,1,2) and (0,2,3) - the same quad,
-    // split for a Mesh's plain (non-quad) triangle list. `tint` (typically
+    // Appends one face as two triangles - the same quad, split along
+    // whichever diagonal suits its corners' AO (see below) for a Mesh's
+    // plain (non-quad) triangle list. `tint` (typically
     // WHITE) is multiplied into each vertex color alongside AO/light
     // brightness - see BlockProperties::texture_tints for why a face would
     // ever need anything other than white. `top_drop` lowers this face's own
@@ -596,8 +620,18 @@ namespace {
                             Vector3 center, const float u[4], const float v[4],
                             const float shade[4], const float sky_fraction[4], const float block_fraction[4],
                             const float ao[4], Color tint) {
-        static constexpr int TRIANGLE[6] = {0, 1, 2, 0, 2, 3};
-        for (int corner : TRIANGLE) {
+        // Which diagonal splits the quad matters once its corners' AO
+        // differ: each triangle interpolates only its own 3 corners, so a
+        // fixed split shades the same corner configuration differently
+        // depending on how the face happens to be oriented (see
+        // https://0fps.net/2013/07/03/ambient-occlusion-for-minecraft-like-worlds/).
+        // Always cutting along the brighter diagonal makes it consistent -
+        // the same rule Sodium uses. Both splits keep the corners' winding.
+        static constexpr int ALONG_0_2[6] = {0, 1, 2, 0, 2, 3};
+        static constexpr int ALONG_1_3[6] = {0, 1, 3, 1, 2, 3};
+        const int* triangles = ao[1] + ao[3] > ao[0] + ao[2] ? ALONG_1_3 : ALONG_0_2;
+        for (int i = 0; i < 6; ++i) {
+            const int corner = triangles[i];
             mesh_data.positions.push_back(center.x + corners[corner].x);
             mesh_data.positions.push_back(center.y + corners[corner].y);
             mesh_data.positions.push_back(center.z + corners[corner].z);
