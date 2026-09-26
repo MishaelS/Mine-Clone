@@ -88,10 +88,11 @@ std::shared_ptr<Chunk> generate_chunk_data(int chunk_x, int chunk_z, uint32_t wo
     return chunk;
 }
 
-ChunkWorkerPool::ChunkWorkerPool(uint32_t seed, WorldType type, std::optional<std::string> directory,
-                                 unsigned int worker_count)
+ChunkWorkerPool::ChunkWorkerPool(uint32_t seed, WorldType type, std::shared_ptr<const CustomWorld> custom_world,
+                                 std::optional<std::string> directory, unsigned int worker_count)
     : world_seed(seed)
     , world_type(type)
+    , custom(std::move(custom_world))
     , save_directory(std::move(directory))
 {
     unsigned int hardware_threads = std::max(2u, std::thread::hardware_concurrency());
@@ -217,7 +218,7 @@ void ChunkWorkerPool::worker_loop()
         }
 
         if (job.kind == Job::Kind::Generate) {
-            if (!local_noise.has_value()) local_noise.emplace(world_seed, world_type);
+            if (!local_noise.has_value()) local_noise.emplace(world_seed, world_type, custom);
             std::shared_ptr<Chunk> chunk = generate_chunk_data(job.chunk_x, job.chunk_z, world_seed, save_directory, *local_noise);
 
             std::lock_guard<std::mutex> lock(results_mutex);

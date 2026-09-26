@@ -514,6 +514,11 @@ private:
     // height over an open void - no bedrock, no sea.
     void generate_sky_islands(const TerrainNoise& noise);
 
+    // WorldType::Custom's generate_terrain(): the player's layer recipe,
+    // the same in every column except for its biome (grass tint, and a
+    // Desert turns grass/dirt to sand).
+    void generate_custom_layers(const TerrainNoise& noise);
+
     // Chunk-local opacity check for light propagation (transparent blocks,
     // including air, let light pass through). Out-of-range counts as open.
     bool is_opaque(int x, int y, int z) const;

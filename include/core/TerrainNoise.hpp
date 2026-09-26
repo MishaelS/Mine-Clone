@@ -2,9 +2,11 @@
 
 #include "core/Biome.hpp"
 #include "core/PerlinNoise.hpp"
+#include "worldgen/CustomWorld.hpp"
 #include "worldgen/WorldType.hpp"
 
 #include <cstdint>
+#include <memory>
 
 // Every noise layer World Generation samples per world column, bundled
 // together since they all need to agree on the same seed. Beta 1.7.3-style
@@ -27,10 +29,14 @@
 // that generates terrain already has a TerrainNoise at hand.
 class TerrainNoise {
 public:
-    explicit TerrainNoise(uint32_t seed, WorldType type = WorldType::Normal);
+    // `custom` is the player's setup for a WorldType::Custom world (null
+    // for every other type).
+    explicit TerrainNoise(uint32_t seed, WorldType type = WorldType::Normal,
+                          std::shared_ptr<const CustomWorld> custom = nullptr);
 
     WorldType world_type() const { return type; }
     const WorldTypeParams& params() const { return type_params; }
+    const CustomWorld* custom_world() const { return custom.get(); }
 
     // Multi-octave (fractal) height noise, roughly in [-1, 1] - the same
     // shape as before, just factored out so it can be scaled/offset
@@ -120,6 +126,7 @@ private:
     static constexpr float SKY_ISLAND_THRESHOLD = 0.18f;
 
     WorldType type;
+    std::shared_ptr<const CustomWorld> custom;
     WorldTypeParams type_params;
 
     PerlinNoise height_noise;

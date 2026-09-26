@@ -323,6 +323,31 @@
     "world_type.underground": "Underground",
     "world_type.underground.description": "Huge caves and deep ravines",
     "world_type.sky": "Sky Islands",
-    "world_type.sky.description": "Floating islands at cloud height"
+    "world_type.sky.description": "Floating islands at cloud height",
+
+    "world_type.custom": "Custom",
+    "world_type.custom.description": "A flat world of your own layers, with your choice of structures and biomes",
+    "create.customize": "Customize...",
+    "custom.title": "Customize World",
+    "custom.layers": "Layers (bottom to top)",
+    "custom.layers_hint": "A number before a block sets its thickness, air leaves a gap",
+    "custom.layers_ok": "{0} layers, surface at Y={1}",
+    "custom.error.empty": "Add at least one layer",
+    "custom.error.count": "Invalid count: {0}",
+    "custom.error.missing_block": "No block after the number {0}",
+    "custom.error.unknown_block": "Unknown block: {0}",
+    "custom.error.too_tall": "Too many layers (maximum {0})",
+    "custom.group.structures": "Structures",
+    "custom.group.biomes": "Biomes",
+    "custom.feature.trees": "Trees",
+    "custom.feature.grass": "Grass",
+    "custom.feature.caves": "Caves",
+    "custom.feature.ravines": "Ravines",
+    "custom.feature.ores": "Ores",
+    "custom.feature.plains": "Plains",
+    "custom.feature.forest": "Forest",
+    "custom.feature.desert": "Desert",
+    "custom.feature.hills": "Hills",
+    "custom.chance": "Chance"
   }
 }

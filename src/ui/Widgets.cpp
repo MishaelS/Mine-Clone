@@ -541,8 +541,9 @@ namespace ui {
         return result == 1; // RESULT_PRESSED
     }
 
-    bool slider_int(Rectangle bounds, const std::string& label_text, int& value, int min_value, int max_value) {
-        const bool hovered = CheckCollisionPointRec(GetMousePosition(), bounds);
+    bool slider_int(Rectangle bounds, const std::string& label_text, int& value, int min_value, int max_value,
+                    const std::string& suffix, bool enabled) {
+        const bool hovered = enabled && CheckCollisionPointRec(GetMousePosition(), bounds);
         if (hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && sound_callback) sound_callback(SoundEvent::Click);
 
         GuiSetStyle(SLIDER, BORDER_WIDTH, std::max(1, static_cast<int>(scaled(2.0f))));
@@ -552,7 +553,9 @@ namespace ui {
         // version's own `active_slider_id` bookkeeping - already keeps
         // capturing the drag once started even if the pointer leaves `bounds`.
         float float_value = static_cast<float>(value);
+        GuiSetState(enabled ? STATE_NORMAL : STATE_DISABLED);
         GuiSlider(bounds, nullptr, nullptr, &float_value, static_cast<float>(min_value), static_cast<float>(max_value));
+        GuiSetState(STATE_NORMAL);
         const int next = min_value < max_value ? static_cast<int>(std::lround(float_value)) : value;
         const bool changed = next != value;
         value = next;
@@ -561,8 +564,8 @@ namespace ui {
         // above just restyles its flat track/knob to the game's dark theme), so
         // the centered "Label: value" caption stays a custom label() draw on
         // top, same as the old nine-patch version.
-        label(bounds, label_text + ": " + std::to_string(value),
-            hovered ? Color{255, 255, 160, 255} : WHITE);
+        label(bounds, label_text + ": " + std::to_string(value) + suffix,
+            !enabled ? TEXT_DISABLED : hovered ? Color{255, 255, 160, 255} : WHITE);
         return changed;
     }
 

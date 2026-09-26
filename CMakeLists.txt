@@ -78,6 +78,7 @@ add_executable(${PROJECT_NAME}
     src/rendering/PlayerRenderer.cpp
     src/worldgen/Structure.cpp
     src/worldgen/StructureGenerator.cpp
+    src/worldgen/CustomWorld.cpp
 
     # UI: reusable widgets and independent screens
     src/ui/RayGuiImpl.cpp
@@ -88,6 +89,7 @@ add_executable(${PROJECT_NAME}
     src/ui/MainMenuScreen.cpp
     src/ui/WorldListScreen.cpp
     src/ui/WorldCreateScreen.cpp
+    src/ui/CustomWorldScreen.cpp
     src/ui/SettingsScreen.cpp
     src/ui/PauseMenuScreen.cpp
     src/ui/InventoryHud.cpp

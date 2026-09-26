@@ -87,7 +87,7 @@ void StructureGenerator::generate(Chunk& chunk, const TerrainNoise& noise, int c
             int world_z = chunk_z * CHUNK_SIZE + local_z;
 
             Biome biome = noise.biome(static_cast<float>(world_x), static_cast<float>(world_z));
-            if (unit_float(hash) >= tree_chance(biome)) continue;
+            if (unit_float(hash) >= tree_chance(biome) * noise.params().tree_density) continue;
 
             int surface_y = -1;
             for (int y = CHUNK_HEIGHT - 2; y >= 0; --y) {
@@ -128,7 +128,7 @@ void StructureGenerator::generate(Chunk& chunk, const TerrainNoise& noise, int c
             int world_x = chunk_x * CHUNK_SIZE + local_x;
             int world_z = chunk_z * CHUNK_SIZE + local_z;
             Biome biome = noise.biome(static_cast<float>(world_x), static_cast<float>(world_z));
-            float chance = short_grass_chance(biome);
+            float chance = short_grass_chance(biome) * noise.params().grass_density;
             if (chance <= 0.0f) continue;
 
             uint64_t hash = candidate_hash(world_seed ^ SHORT_GRASS_SEED_SALT, world_x, world_z);

@@ -12,6 +12,7 @@ enum class WorldType : uint8_t {
     Mountains,   // much taller, rockier land with snowy peaks
     Underground, // normal surface over far more (and bigger) caves and deeper ravines
     Sky,         // floating islands around cloud height over an open void
+    Custom,      // flat layers + per-feature switches the player sets up - see worldgen/CustomWorld.hpp
     Count,
 };
 
@@ -37,6 +38,11 @@ struct WorldTypeParams {
     // Ores: shifts every vein band up by this many blocks - floating islands
     // have no stone down at the normal ore depths.
     int ore_y_offset = 0;
+    float ore_amount = 1.0f;        // multiplies every vein/patch count
+
+    // Vegetation (see StructureGenerator) - multiplies each biome's chance.
+    float tree_density = 1.0f;
+    float grass_density = 1.0f;
 };
 
 inline WorldTypeParams world_type_params(WorldType type)
@@ -63,6 +69,7 @@ inline WorldTypeParams world_type_params(WorldType type)
             params.ore_y_offset = 150;
             break;
         case WorldType::Normal:
+        case WorldType::Custom: // see custom_world_params() - depends on the player's settings
         case WorldType::Count:
             break;
     }
@@ -77,6 +84,7 @@ inline const char* world_type_id(WorldType type)
         case WorldType::Mountains:   return "mountains";
         case WorldType::Underground: return "underground";
         case WorldType::Sky:         return "sky";
+        case WorldType::Custom:      return "custom";
         default:                     return "normal";
     }
 }

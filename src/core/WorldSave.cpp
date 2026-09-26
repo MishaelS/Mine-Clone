@@ -188,7 +188,21 @@ namespace WorldSave {
         out << "  \"seed\": " << info.seed << ",\n";
         out << "  \"game_mode\": \"" << game_mode_json_value(info.game_mode) << "\",\n";
         out << "  \"allow_commands\": " << (info.allow_commands ? "true" : "false") << ",\n";
-        out << "  \"world_type\": \"" << world_type_id(info.world_type) << "\"\n";
+        out << "  \"world_type\": \"" << world_type_id(info.world_type) << "\"";
+        if (info.world_type == WorldType::Custom) {
+            out << ",\n  \"custom\": {\n";
+            out << "    \"layers\": \"" << json_escape(info.custom.layers) << "\",\n";
+            out << "    \"features\": {";
+            bool first = true;
+            for (const CustomFeatureInfo& feature : CUSTOM_FEATURES) {
+                const CustomFeatureSetting& setting = info.custom[feature.feature];
+                out << (first ? "\n" : ",\n") << "      \"" << feature.id << "\": { \"enabled\": "
+                    << (setting.enabled ? "true" : "false") << ", \"chance\": " << setting.chance << " }";
+                first = false;
+            }
+            out << "\n    }\n  }";
+        }
+        out << "\n";
         out << "}\n";
 
         return static_cast<bool>(out);
@@ -228,6 +242,18 @@ namespace WorldSave {
             info.game_mode = game_mode_from_json_value(root["game_mode"].as_string("creative"));
             info.allow_commands = root["allow_commands"].as_bool(true);
             info.world_type = world_type_from_id(root["world_type"].as_string("normal"));
+            if (info.world_type == WorldType::Custom) {
+                const Json& custom = root["custom"];
+                info.custom.layers = custom["layers"].as_string(CustomWorld::DEFAULT_LAYERS);
+                for (const CustomFeatureInfo& feature : CUSTOM_FEATURES) {
+                    const Json& saved = custom["features"][feature.id];
+                    CustomFeatureSetting& setting = info.custom[feature.feature];
+                    setting.enabled = saved["enabled"].as_bool(true);
+                    setting.chance = std::clamp(static_cast<int>(saved["chance"].as_number(100)),
+                                                CUSTOM_CHANCE_MIN, CUSTOM_CHANCE_MAX);
+                }
+                info.custom.resolve_column();
+            }
             return info;
         } catch (const std::exception&) {
             return std::nullopt;

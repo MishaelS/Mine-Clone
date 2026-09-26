@@ -130,8 +130,10 @@ namespace ui {
     // restyled to the game's dark theme rather than Minecraft's own pixel
     // art (no bespoke slider texture exists for raygui to skin with).
     // Backed by raygui's GuiSlider, which already captures the pointer
-    // until release even outside its bounds.
-    bool slider_int(Rectangle bounds, const std::string& label_text, int& value, int min_value, int max_value);
+    // until release even outside its bounds. `suffix` follows the number
+    // ("%"); a disabled slider is greyed out and ignores input.
+    bool slider_int(Rectangle bounds, const std::string& label_text, int& value, int min_value, int max_value,
+                    const std::string& suffix = "", bool enabled = true);
 
     // Draws `type` as a three-face isometric block item using its top and
     // side atlas textures. The visible sides receive different brightness

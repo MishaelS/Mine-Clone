@@ -819,6 +819,10 @@ void Chunk::generate_terrain(const TerrainNoise& noise)
         generate_sky_islands(noise);
         return;
     }
+    if (noise.custom_world() != nullptr) {
+        generate_custom_layers(noise);
+        return;
+    }
 
     const float mountain_height = noise.params().mountain_height;
     Vector3 origin = get_position();
@@ -1061,6 +1065,29 @@ void Chunk::generate_sky_islands(const TerrainNoise& noise)
                 if (y == top) type = surface_block;
                 else if (y > top - terrain.surface_depth) type = subsurface_block;
                 else type = BlockType::Stone;
+                set_block(x, y, z, type);
+            }
+        }
+    }
+}
+
+void Chunk::generate_custom_layers(const TerrainNoise& noise)
+{
+    const std::vector<BlockType>& column = noise.custom_world()->column;
+    const int layer_count = std::min(static_cast<int>(column.size()), CHUNK_HEIGHT);
+    Vector3 origin = get_position();
+
+    for (int x = 0; x < CHUNK_SIZE; ++x) {
+        for (int z = 0; z < CHUNK_SIZE; ++z) {
+            BiomeWeights weights = noise.biome_weights(origin.x + x, origin.z + z);
+            column_grass_tint[z * CHUNK_SIZE + x] = grass_tint_for_weights(weights);
+            column_foliage_tint[z * CHUNK_SIZE + x] = foliage_tint_for_weights(weights);
+            const bool desert = dominant_biome(weights) == Biome::Desert;
+
+            for (int y = 0; y < layer_count; ++y) {
+                BlockType type = column[y];
+                if (type == BlockType::Air) continue;
+                if (desert && (type == BlockType::Grass || type == BlockType::Dirt)) type = BlockType::Sand;
                 set_block(x, y, z, type);
             }
         }
@@ -1421,8 +1448,13 @@ void Chunk::generate_ores(uint32_t world_seed, int chunk_x, int chunk_z, const W
     const int offset = params.ore_y_offset;
     std::mt19937_64 rng(cave_chunk_seed(world_seed ^ ORE_SEED_SALT, chunk_x, chunk_z));
 
+    auto scaled_count = [&params](int count) {
+        return static_cast<int>(std::lround(count * params.ore_amount));
+    };
+
     for (const OreVein& vein : ORE_VEINS) {
-        for (int i = 0; i < vein.veins_per_chunk; ++i) {
+        const int vein_count = scaled_count(vein.veins_per_chunk);
+        for (int i = 0; i < vein_count; ++i) {
             bool common_band = cave_random_double(rng) < ORE_COMMON_BAND_CHANCE;
             int y_min = (common_band ? vein.y_common_min : vein.y_min) + offset;
             int y_max = (common_band ? vein.y_common_max : vein.y_max) + offset;
@@ -1437,7 +1469,8 @@ void Chunk::generate_ores(uint32_t world_seed, int chunk_x, int chunk_z, const W
     }
 
     for (const FillerPatch& patch : FILLER_PATCHES) {
-        for (int i = 0; i < patch.patches_per_chunk; ++i) {
+        const int patch_count = scaled_count(patch.patches_per_chunk);
+        for (int i = 0; i < patch_count; ++i) {
             int size = 1 + cave_random_int(rng, patch.max_patch_size);
             place_vein(*this, rng, patch.type, patch.y_min + offset, patch.y_max + offset, size);
         }

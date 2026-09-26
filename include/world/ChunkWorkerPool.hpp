@@ -1,6 +1,7 @@
 #pragma once
 
 #include "world/Chunk.hpp"
+#include "worldgen/CustomWorld.hpp"
 #include "worldgen/WorldType.hpp"
 
 #include <array>
@@ -85,8 +86,8 @@ public:
     // capped at 4, minimum 1) - 0 means "use the default". Spawns every
     // worker thread immediately; each sits idle (blocked on the job queue's
     // condition variable) until work is submitted.
-    ChunkWorkerPool(uint32_t world_seed, WorldType world_type, std::optional<std::string> save_directory,
-                    unsigned int worker_count = 0);
+    ChunkWorkerPool(uint32_t world_seed, WorldType world_type, std::shared_ptr<const CustomWorld> custom,
+                    std::optional<std::string> save_directory, unsigned int worker_count = 0);
 
     // Stops every worker thread (see shutdown()) and reclaims anything left
     // in pending_destroy - World's own destructor calls shutdown()
@@ -169,6 +170,7 @@ private:
 
     uint32_t world_seed;
     WorldType world_type;
+    std::shared_ptr<const CustomWorld> custom; // read-only, shared by every worker's TerrainNoise
     std::optional<std::string> save_directory;
 
     std::vector<std::thread> workers;

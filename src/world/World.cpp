@@ -355,8 +355,9 @@ namespace {
 
 World::World(WorldConfig config)
     : config(std::move(config))
-    , terrain_noise(std::make_unique<TerrainNoise>(this->config.seed, this->config.world_type))
-    , worker_pool(std::make_unique<ChunkWorkerPool>(this->config.seed, this->config.world_type, this->config.save_directory))
+    , terrain_noise(std::make_unique<TerrainNoise>(this->config.seed, this->config.world_type, this->config.custom))
+    , worker_pool(std::make_unique<ChunkWorkerPool>(this->config.seed, this->config.world_type, this->config.custom,
+                                                    this->config.save_directory))
 {
     // Active must never exceed Loaded - desired_state_for() assumes this
     // ordering, and Settings only actually exposes render distance to the

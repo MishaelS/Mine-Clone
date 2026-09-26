@@ -2,6 +2,7 @@
 
 #include "items/Inventory.hpp"
 #include "items/Smelting.hpp"
+#include "worldgen/CustomWorld.hpp"
 #include "worldgen/WorldType.hpp"
 
 #include "raylib.h"
@@ -25,6 +26,7 @@ struct WorldInfo {
     GameMode game_mode = GameMode::Creative;
     bool allow_commands = true;
     WorldType world_type = WorldType::Normal; // generator preset - see worldgen/WorldType.hpp
+    CustomWorld custom; // only meaningful (and only saved) for WorldType::Custom
 };
 
 // Where the player was and what their hotbar held, last time they left this

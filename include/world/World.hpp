@@ -8,6 +8,7 @@
 #include "core/TickMotion.hpp"
 #include "items/Inventory.hpp"
 #include "items/Smelting.hpp"
+#include "worldgen/CustomWorld.hpp"
 #include "worldgen/WorldType.hpp"
 
 #include <array>
@@ -35,6 +36,7 @@ enum class Biome : uint8_t;
 struct WorldConfig {
     uint32_t seed = 0;
     WorldType world_type = WorldType::Normal; // generator preset - see worldgen/WorldType.hpp
+    std::shared_ptr<const CustomWorld> custom; // WorldType::Custom's layers/switches, null otherwise
 
     // saves/<world>/ (see core/WorldSave.hpp) - nullopt disables
     // persistence entirely (nothing is loaded from or saved to disk; every

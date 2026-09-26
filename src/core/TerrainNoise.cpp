@@ -3,13 +3,14 @@
 #include <algorithm>
 #include <cmath>
 
-TerrainNoise::TerrainNoise(uint32_t seed, WorldType type)
+TerrainNoise::TerrainNoise(uint32_t seed, WorldType type, std::shared_ptr<const CustomWorld> custom_world)
     // Distinct seeds so the layers don't sample identical patterns - small,
     // deterministic offsets are enough: FastNoise2's permutation table
     // already looks completely different for any two distinct seeds,
     // however close together.
     : type(type)
-    , type_params(world_type_params(type))
+    , custom(type == WorldType::Custom ? std::move(custom_world) : nullptr)
+    , type_params(custom ? custom_world_params(*custom) : world_type_params(type))
     , height_noise(seed)
     , temperature_noise(seed + 1)
     , humidity_noise(seed + 2)
@@ -36,6 +37,9 @@ BiomeWeights TerrainNoise::biome_weights(float world_x, float world_z) const
     float humidity = humidity_noise.noise(world_x * BIOME_FREQUENCY, world_z * BIOME_FREQUENCY);
     float continentalness = continent_noise.noise(world_x * CONTINENT_FREQUENCY, world_z * CONTINENT_FREQUENCY);
     float coast_roughness = coast_noise.noise(world_x * COAST_FREQUENCY, world_z * COAST_FREQUENCY);
+    // A custom world is flat land with no sea - fully "continental", and
+    // only the biomes the player switched on.
+    if (custom) return custom_biome_weights(compute_biome_weights(temperature, humidity, 1.0f, coast_roughness), *custom);
     return compute_biome_weights(temperature, humidity, continentalness, coast_roughness);
 }
 

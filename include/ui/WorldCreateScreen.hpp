@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/WorldSave.hpp"
+#include "ui/CustomWorldScreen.hpp"
 #include "ui/Widgets.hpp"
 
 #include <string>
@@ -27,6 +28,9 @@ private:
     ui::TextInputState seed_field;
     GameMode selected_mode = GameMode::Creative;
     WorldType selected_type = WorldType::Normal;
+    CustomWorld custom_world;            // WorldType::Custom's setup, edited on custom_screen
+    CustomWorldScreen custom_screen;
+    bool custom_screen_open = false;
     bool allow_commands = false;
     int focused_field = 0; // 0 = name, 1 = seed
     std::string error_message;
