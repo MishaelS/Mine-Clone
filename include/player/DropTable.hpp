@@ -14,18 +14,14 @@ struct DropRoll {
     int count = 1;
 };
 
-// Loads assets/drops.json (Beta 1.7.3-sourced per-block drop table - see
-// the file's own "_notes"). Call once, after both Load_block_definitions()
-// and Load_item_definitions() (needs both name tables to resolve entries).
-// A drop entry naming a block/item this build doesn't have yet (the file
-// deliberately documents more of Beta 1.7.3 than the engine can act on -
-// saplings, doors, etc.) is silently skipped rather than treated as an
-// error, unlike blocks.json's own stricter loader.
+// Fills the per-block drop table (Beta 1.7.3 rules) from
+// src/content/Drops.cpp - see content::when_broken(). Call once, after
+// both Load_block_definitions() and Load_item_definitions().
 void Load_drop_table();
 
 // True if breaking `type` with `selected` would actually yield at least a
 // chance at a drop - i.e. `selected` satisfies whatever requires_tool/
-// min_tool_tier drops.json demands for this block (a block with neither
+// minimum tier this block's drop rule demands (a block with neither
 // set - Dirt, Log, Leaves, ... - is always harvestable, hand included).
 // Doesn't roll anything itself; resolve_block_drops() checks this exact
 // same gate before rolling. Exposed separately for GameEngine's own
@@ -39,10 +35,9 @@ bool can_harvest_block(BlockType type, const ItemStack& selected);
 // actually yields - rolls every one of that block's possible drops
 // independently against its own chance (a block can yield more than one
 // stack at once, e.g. Gravel's Flint roll alongside its own Gravel roll).
-// If `selected` doesn't meet the block's own requires_tool/min_tool_tier
-// (see drops.json), returns empty - same as real Minecraft, breaking with
+// If `selected` doesn't meet the block's own tool requirement (see
+// content::DropRule::needs()), returns empty - same as real Minecraft, breaking with
 // the wrong/no tool yields nothing at all, not a partial drop. A BlockType
-// with no drop-table entry at all (not yet covered by drops.json, or its
-// name didn't resolve) falls back to "drops itself" - the old behavior -
-// so nothing regresses to silently dropping nothing.
+// with no drop rule at all falls back to "drops itself", so a new block
+// needs a rule only when it drops something else (or nothing).
 std::vector<DropRoll> resolve_block_drops(BlockType type, const ItemStack& selected);

@@ -375,7 +375,7 @@ public:
     void set_block(int x, int y, int z, BlockType type);
 
     // Per-instance facing for a directional block (see HorizontalDirection's
-    // own comment) - South (blocks.json's own authored default front) if
+    // own comment) - South (the block definition's authored default front) if
     // this position was never explicitly set. Sparse (a plain
     // unordered_map, not a parallel CHUNK_SIZE^2*CHUNK_HEIGHT array like
     // `blocks`/`light`) since only a handful of block *types* ever need

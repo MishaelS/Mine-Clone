@@ -54,7 +54,7 @@ public:
     // through a GameObject*, so this is deliberately a distinct method
     // rather than an override with a mismatched signature. Blocks render as
     // small 3D cubes using terrain.png. Non-block items - and blocks with an
-    // items.json "block_items" sprite (torches, sapling, doors, bed) - use
+    // content::block_item_sprite() (torches, sapling, doors, bed) - use
     // one flat icon from the item atlas; that billboard faces
     // `viewer_position` only around the vertical axis, so looking up/down
     // never tilts its top or bottom edge.

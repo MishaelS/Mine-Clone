@@ -56,6 +56,14 @@ add_executable(${PROJECT_NAME}
     src/player/Smelting.cpp
     src/effects/ParticleSystem.cpp
 
+    # Game content: every block, item, drop, recipe and smelting rule
+    # (see include/content/Content.hpp)
+    src/content/Blocks.cpp
+    src/content/Items.cpp
+    src/content/Drops.cpp
+    src/content/Recipes.cpp
+    src/content/Smelting.cpp
+
     # World, generation, and rendering
     src/world/Chunk.cpp
     src/world/ChunkWorkerPool.cpp

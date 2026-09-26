@@ -1,23 +1,15 @@
 #include "player/Recipe.hpp"
+#include "content/Content.hpp"
 #include "player/Item.hpp"
-#include "core/Json.hpp"
 
-#include "raylib.h"
-
+#include <algorithm>
 #include <optional>
+#include <stdexcept>
+#include <string>
 
 namespace {
-    struct Ingredient {
-        bool is_item = false;
-        BlockType block = BlockType::Air;
-        ItemType item = ItemType::None;
-    };
-
     struct Recipe {
-        bool output_is_item = false;
-        BlockType output_block = BlockType::Air;
-        ItemType output_item = ItemType::None;
-        int output_count = 1;
+        ItemStack output;
 
         bool shapeless = false;
         int grid_size = 2; // 2 or 3 (square) - the smallest grid this recipe fits in
@@ -25,89 +17,97 @@ namespace {
         // Shaped only: pattern_rows x pattern_cols, row-major, std::nullopt = empty cell.
         int pattern_rows = 0;
         int pattern_cols = 0;
-        std::vector<std::optional<Ingredient>> pattern;
+        std::vector<std::optional<ItemRef>> pattern;
 
         // Shapeless only: one entry per required unit (an ingredient needed
         // x3 appears 3 times) - order doesn't matter, matching is by
         // multiset.
-        std::vector<Ingredient> shapeless_ingredients;
+        std::vector<ItemRef> shapeless_ingredients;
     };
 
     std::vector<Recipe> recipes;
 
-    std::optional<Ingredient> parse_ingredient(const std::string& name)
+    std::string describe(ItemRef what)
     {
-        if (name.empty()) return std::nullopt;
-        if (std::optional<BlockType> block = block_type_from_name(name)) {
-            return Ingredient{false, *block, ItemType::None};
-        }
-        if (std::optional<ItemType> item = item_type_from_name(name)) {
-            return Ingredient{true, BlockType::Air, *item};
-        }
-        return std::nullopt;
-    }
-
-    bool ingredient_matches(const Ingredient& ingredient, const ItemStack& stack)
-    {
-        if (stack.empty()) return false;
-        if (ingredient.is_item) return stack.holds_item() && stack.tool == ingredient.item;
-        return !stack.holds_item() && stack.block == ingredient.block;
+        return what.is_item() ? get_item_name(what.item) : get_block_name(what.block);
     }
 }
+
+namespace content {
+
+void shaped(ItemRef output, int count, std::initializer_list<const char*> pattern, std::initializer_list<Key> keys)
+{
+    std::vector<std::string> rows(pattern.begin(), pattern.end());
+    auto row_empty = [](const std::string& row) {
+        return row.find_first_not_of(' ') == std::string::npos;
+    };
+    // Trim fully empty rows/columns around the pattern, so it matches
+    // wherever it's placed in the grid (Minecraft's own behavior).
+    while (!rows.empty() && row_empty(rows.back())) rows.pop_back();
+    while (!rows.empty() && row_empty(rows.front())) rows.erase(rows.begin());
+    size_t first_col = std::string::npos;
+    size_t last_col = 0;
+    for (const std::string& row : rows) {
+        size_t first = row.find_first_not_of(' ');
+        if (first == std::string::npos) continue;
+        first_col = std::min(first_col, first);
+        last_col = std::max(last_col, row.find_last_not_of(' '));
+    }
+    if (rows.empty()) {
+        throw std::runtime_error("shaped recipe for '" + describe(output) + "': empty pattern");
+    }
+
+    Recipe recipe;
+    recipe.output = output.stack(std::max(1, count));
+    recipe.pattern_rows = static_cast<int>(rows.size());
+    recipe.pattern_cols = static_cast<int>(last_col - first_col + 1);
+    recipe.grid_size = recipe.pattern_rows > 2 || recipe.pattern_cols > 2 ? 3 : 2;
+    if (recipe.pattern_rows > 3 || recipe.pattern_cols > 3) {
+        throw std::runtime_error("shaped recipe for '" + describe(output) + "': pattern larger than 3x3");
+    }
+    for (const std::string& row : rows) {
+        for (size_t col = first_col; col <= last_col; ++col) {
+            char symbol = col < row.size() ? row[col] : ' ';
+            if (symbol == ' ') {
+                recipe.pattern.push_back(std::nullopt);
+                continue;
+            }
+            const Key* key = std::find_if(keys.begin(), keys.end(),
+                                          [symbol](const Key& k) { return k.symbol == symbol; });
+            if (key == keys.end()) {
+                throw std::runtime_error("shaped recipe for '" + describe(output) + "': no key for '" +
+                                         std::string(1, symbol) + "'");
+            }
+            recipe.pattern.push_back(key->what);
+        }
+    }
+    recipes.push_back(std::move(recipe));
+}
+
+void shaped(ItemRef output, std::initializer_list<const char*> pattern, std::initializer_list<Key> keys)
+{
+    shaped(output, 1, pattern, keys);
+}
+
+void shapeless(ItemRef output, int count, std::initializer_list<ItemRef> ingredients)
+{
+    if (ingredients.size() == 0 || ingredients.size() > 9) {
+        throw std::runtime_error("shapeless recipe for '" + describe(output) + "': needs 1-9 ingredients");
+    }
+    Recipe recipe;
+    recipe.output = output.stack(std::max(1, count));
+    recipe.shapeless = true;
+    recipe.grid_size = ingredients.size() > 4 ? 3 : 2;
+    recipe.shapeless_ingredients.assign(ingredients.begin(), ingredients.end());
+    recipes.push_back(std::move(recipe));
+}
+
+} // namespace content
 
 void Load_recipes()
 {
     recipes.clear();
-
-    char* fileText = LoadFileText(ASSETS_PATH "recipes.json");
-    if (fileText == nullptr) {
-        throw std::runtime_error("Could not load " ASSETS_PATH "recipes.json");
-    }
-    Json root = Json::parse(fileText);
-    UnloadFileText(fileText);
-
-    for (const Json& entry : root["recipes"].as_array()) {
-        const Json& output = entry["output"];
-        std::optional<Ingredient> output_ingredient = parse_ingredient(output["name"].as_string());
-        if (!output_ingredient) continue; // output not something this build has yet - skip whole recipe
-
-        Recipe recipe;
-        recipe.output_is_item = output_ingredient->is_item;
-        recipe.output_block = output_ingredient->block;
-        recipe.output_item = output_ingredient->item;
-        recipe.output_count = std::max(1, static_cast<int>(output["count"].as_number(1)));
-        recipe.shapeless = entry["shape"].as_string() == "shapeless";
-        recipe.grid_size = entry["grid_size"].as_string().substr(0, 1) == "3" ? 3 : 2;
-
-        bool all_resolved = true;
-        if (recipe.shapeless) {
-            for (const Json& ing : entry["ingredients"].as_array()) {
-                std::optional<Ingredient> parsed = parse_ingredient(ing["name"].as_string());
-                if (!parsed) { all_resolved = false; break; }
-                int count = std::max(1, static_cast<int>(ing["count"].as_number(1)));
-                for (int i = 0; i < count; ++i) recipe.shapeless_ingredients.push_back(*parsed);
-            }
-        } else {
-            const std::vector<Json>& rows = entry["pattern"].as_array();
-            recipe.pattern_rows = static_cast<int>(rows.size());
-            recipe.pattern_cols = recipe.pattern_rows > 0 ? static_cast<int>(rows[0].as_array().size()) : 0;
-            for (const Json& row : rows) {
-                for (const Json& cell : row.as_array()) {
-                    if (cell.get_type() != Json::Type::String) {
-                        recipe.pattern.push_back(std::nullopt);
-                        continue;
-                    }
-                    std::optional<Ingredient> parsed = parse_ingredient(cell.as_string());
-                    if (!parsed) { all_resolved = false; break; }
-                    recipe.pattern.push_back(parsed);
-                }
-                if (!all_resolved) break;
-            }
-        }
-        if (!all_resolved) continue;
-
-        recipes.push_back(std::move(recipe));
-    }
+    content::register_recipes();
 }
 
 std::optional<ItemStack> match_recipe(const std::vector<ItemStack>& grid, int rows, int cols)
@@ -124,10 +124,10 @@ std::optional<ItemStack> match_recipe(const std::vector<ItemStack>& grid, int ro
             if (occupied.size() == recipe.shapeless_ingredients.size()) {
                 std::vector<bool> used(occupied.size(), false);
                 matched = true;
-                for (const Ingredient& ingredient : recipe.shapeless_ingredients) {
+                for (const ItemRef& ingredient : recipe.shapeless_ingredients) {
                     bool found = false;
                     for (size_t i = 0; i < occupied.size(); ++i) {
-                        if (used[i] || !ingredient_matches(ingredient, *occupied[i])) continue;
+                        if (used[i] || !ingredient.matches(*occupied[i])) continue;
                         used[i] = true;
                         found = true;
                         break;
@@ -151,7 +151,7 @@ std::optional<ItemStack> match_recipe(const std::vector<ItemStack>& grid, int ro
                             const auto& ingredient = recipe.pattern[
                                 (r - offset_row) * recipe.pattern_cols + (c - offset_col)];
                             if (ingredient) {
-                                if (!ingredient_matches(*ingredient, cell)) fits = false;
+                                if (!ingredient->matches(cell)) fits = false;
                             } else if (!cell.empty()) {
                                 fits = false;
                             }
@@ -162,21 +162,9 @@ std::optional<ItemStack> match_recipe(const std::vector<ItemStack>& grid, int ro
             }
         }
 
-        if (matched) {
-            ItemStack result;
-            if (recipe.output_is_item) {
-                result.tool = recipe.output_item;
-                // A freshly crafted tool starts at full durability - left
-                // at ItemStack's own default (0) it would read as already
-                // broken, and shatter on the very first hit.
-                const ItemProperties& properties = get_item_properties(recipe.output_item);
-                if (properties.category == ItemCategory::Tool) result.durability = properties.max_durability;
-            } else {
-                result.block = recipe.output_block;
-            }
-            result.count = recipe.output_count;
-            return result;
-        }
+        // A freshly crafted tool starts at full durability - see
+        // ItemRef::stack().
+        if (matched) return recipe.output;
     }
     return std::nullopt;
 }

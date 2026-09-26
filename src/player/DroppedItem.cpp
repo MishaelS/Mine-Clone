@@ -69,7 +69,7 @@ namespace {
     // density) of its own to fall/float by - treated as exactly water's own
     // density (falls at the plain baseline rate, neither floats nor sinks
     // unusually fast), same neutral-default spirit as a block that never
-    // overrode "density" in blocks.json.
+    // overrode .density() in src/content/Blocks.cpp.
     float effective_density(const ItemStack& stack) {
         return stack.holds_item() ? WATER_REFERENCE_DENSITY : get_block_properties(stack.block).density;
     }
@@ -82,7 +82,7 @@ namespace {
     };
 
     // Flat item-atlas sprite for this stack, if it has one: always for a
-    // tool/material, and for the handful of blocks items.json gives a
+    // tool/material, and for the handful of blocks content::block_item_sprite() gives a
     // "block_items" sprite (torches, sapling, doors, bed). Everything else
     // renders as a small 3D block cube instead.
     std::optional<Rectangle> item_sprite(const ItemStack& stack)

@@ -428,7 +428,7 @@ public:
 
     // Which way a directional block (Furnace/Workbench/Dispenser/Pumpkin/
     // JackOLantern) at this position is facing - see Chunk::get_orientation()'s
-    // own comment. South (its blocks.json-authored default) for any
+    // own comment. South (its definition's authored default) for any
     // position that was never explicitly set, including one in an unloaded
     // chunk.
     HorizontalDirection get_block_orientation(int x, int y, int z) const;

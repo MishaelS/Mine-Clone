@@ -1,11 +1,7 @@
 #include "player/Smelting.hpp"
-#include "core/Json.hpp"
-
-#include "raylib.h"
+#include "content/Content.hpp"
 
 #include <algorithm>
-#include <stdexcept>
-#include <string>
 #include <vector>
 
 namespace {
@@ -18,25 +14,11 @@ namespace {
         int burn_ticks = 0;
     };
 
-    int cook_ticks = 200;
+    // Vanilla: every recipe takes 10 seconds (20 ticks per second) - one
+    // coal (1600) smelts 8 items, one plank/log (300) 1.5 items.
+    constexpr int COOK_TICKS = 200;
     std::vector<SmeltingRecipe> recipes;
     std::vector<Fuel> fuels;
-
-    // A smelting.json name is either a block (blocks.json) or an item
-    // (items.json) - same lookup order recipes.json uses.
-    std::optional<ItemStack> stack_from_name(const std::string& name, int count)
-    {
-        ItemStack stack;
-        if (std::optional<BlockType> block = block_type_from_name(name)) {
-            stack.block = *block;
-        } else if (std::optional<ItemType> item = item_type_from_name(name)) {
-            stack.tool = *item;
-        } else {
-            return std::nullopt;
-        }
-        stack.count = count;
-        return stack;
-    }
 
     bool same_item(const ItemStack& a, const ItemStack& b)
     {
@@ -66,39 +48,30 @@ namespace {
     }
 }
 
+namespace content {
+
+void smelt(ItemRef input, ItemRef output, int count)
+{
+    recipes.push_back({input.stack(1), output.stack(std::max(1, count))});
+}
+
+void fuel(ItemRef what, int burn_ticks)
+{
+    if (burn_ticks > 0) fuels.push_back({what.stack(1), burn_ticks});
+}
+
+} // namespace content
+
 void Load_smelting()
 {
     recipes.clear();
     fuels.clear();
-
-    char* text = LoadFileText(ASSETS_PATH "smelting.json");
-    if (text == nullptr) throw std::runtime_error("Could not load " ASSETS_PATH "smelting.json");
-    Json root = Json::parse(text);
-    UnloadFileText(text);
-
-    cook_ticks = std::max(1, static_cast<int>(root["cook_ticks"].as_number(200)));
-
-    for (const Json& entry : root["recipes"].as_array()) {
-        std::optional<ItemStack> input = stack_from_name(entry["input"].as_string(), 1);
-        std::optional<ItemStack> output = stack_from_name(entry["output"].as_string(),
-            std::max(1, static_cast<int>(entry["count"].as_number(1))));
-        // A name this build doesn't have (yet) skips just that recipe, same
-        // as recipes.json/drops.json treat theirs.
-        if (!input || !output) continue;
-        recipes.push_back({*input, *output});
-    }
-
-    for (const Json& entry : root["fuels"].as_array()) {
-        std::optional<ItemStack> item = stack_from_name(entry["name"].as_string(), 1);
-        int burn = static_cast<int>(entry["burn_ticks"].as_number(0));
-        if (!item || burn <= 0) continue;
-        fuels.push_back({*item, burn});
-    }
+    content::register_smelting();
 }
 
 int smelting_cook_ticks()
 {
-    return cook_ticks;
+    return COOK_TICKS;
 }
 
 std::optional<ItemStack> smelting_result(const ItemStack& input)
@@ -137,7 +110,7 @@ bool tick_furnace(FurnaceState& furnace)
     }
 
     if (furnace.burning() && can_smelt(furnace)) {
-        if (++furnace.cook_ticks >= cook_ticks) {
+        if (++furnace.cook_ticks >= COOK_TICKS) {
             furnace.cook_ticks = 0;
             ItemStack result = *smelting_result(furnace.input);
             if (furnace.output.empty()) furnace.output = result;

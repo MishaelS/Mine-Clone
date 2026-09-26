@@ -8,8 +8,8 @@
 
 // The id a Chunk stores per voxel cell. Kept tiny (1 byte) since a single
 // chunk column (CHUNK_SIZE x CHUNK_HEIGHT x CHUNK_SIZE) holds tens of
-// thousands of these. Every value except Air must have a matching "name"
-// entry in assets/blocks.json.
+// thousands of these. Every value except Air must have a matching
+// content::block() line in src/content/Blocks.cpp (see content/Content.hpp).
 enum class BlockType : uint8_t {
     Air,
     Grass,
@@ -87,17 +87,13 @@ enum class BlockType : uint8_t {
     LightGrayWool,
     Lava,
     ShortGrass,
-    // Matches drops.json's own pre-existing (until now unused) "oak_sapling"
-    // self-drop rule and spruce_sapling/birch_sapling's, kept alongside it
-    // for whenever those get an actual tree shape/block of their own -
-    // only this one is placeable/grows yet. Plantable on Grass/Dirt only
+    // Only oak has a sapling block yet (spruce/birch leaves drop the
+    // ItemType::Sapling item instead). Plantable on Grass/Dirt only
     // (World::place_block) - see GameEngine::update_random_ticks()/
     // update_sapling_growth() for the random-tick grow-into-a-tree roll.
     OakSapling,
 
-    // Light sources - matches drops.json's own pre-existing (until now
-    // unused) "torch"/"redstone_torch"/"lit_redstone_torch" entries.
-    // RedstoneTorch is the unlit state (see World::place_block - only
+    // Light sources. RedstoneTorch is the unlit state (see World::place_block - only
     // Torch/LitRedstoneTorch are directly placeable; nothing here ever
     // flips one to the other yet, since there's no redstone-signal system
     // to drive it - RedstoneTorch exists so breaking a lit one has
@@ -148,7 +144,7 @@ enum class BlockFace : uint8_t {
 };
 
 // Which way a placed directional block (Furnace/Workbench/Dispenser/
-// Pumpkin/JackOLantern - anything blocks.json gives a distinct "south"
+// Pumpkin/JackOLantern - anything whose definition gives a distinct .south()
 // front-face texture) is facing, i.e. which world-facing mesh face shows
 // that front texture instead of the plain "side" one - see Chunk::
 // get_orientation()/set_orientation(). Values match BlockFace's own
@@ -209,7 +205,7 @@ enum class BlockRenderShape : uint8_t { Cube, Cross, Shaped };
 
 // Everything Mesh Generation needs to know about a BlockType, looked up once
 // per face while building a chunk's mesh (not stored per-block). Loaded from
-// assets/blocks.json by Load_block_definitions().
+// src/content/Blocks.cpp by Load_block_definitions().
 struct BlockProperties {
     bool solid;        // occludes neighbor faces, blocks movement
     bool transparent;  // doesn't block light or occlude neighbors (air, later: glass/water)
@@ -253,7 +249,7 @@ struct BlockProperties {
     // faster the denser it is, and sinks in water above ~1.0, floats to
     // the surface below it (see DroppedItem::tick_physics()). Not a real
     // Minecraft mechanic (vanilla items all fall/sink identically - see
-    // the comment on "density" in blocks.json) - this project's own
+    // BlockDef::density()) - this project's own
     // addition.
     float density;
 
@@ -265,7 +261,7 @@ struct BlockProperties {
     // Chunk::build_mesh_data()'s BlockRenderShape::Shaped branch.
     bool has_custom_shape;
 
-    // How far (in blocks - blocks.json gives it in texture pixels, 1 =
+    // How far (in blocks - BlockDef::side_inset() takes texture pixels, 1 =
     // 1/16) the four side faces are drawn inward from the cell edge, top/
     // bottom untouched - vanilla's cactus model: its 14x14 top/bottom art
     // then meets the side faces exactly, and the full-width spike rows of
@@ -275,8 +271,8 @@ struct BlockProperties {
 
     // Where this block may be mounted, vanilla's own AttachFace idea: on
     // the floor (support below), on a wall (support to the side), on the
-    // ceiling (support above) - blocks.json's own "attach": ["floor",
-    // "wall"]. All false for an ordinary block, which needs no support at
+    // ceiling (support above) - BlockDef::attach_floor()/attach_wall()/
+    // attach_ceiling(). All false for an ordinary block, which needs no support at
     // all. A block with any of these placed by the player stores which
     // face it actually ended up on (BlockInstanceState::attachment) and is
     // broken off automatically once that support goes away (World::
@@ -299,35 +295,36 @@ struct BlockProperties {
 
     // Per-face tint, indexed by BlockFace, multiplied into the sampled texel
     // alongside AO/light shading (see Chunk::append_face). WHITE leaves the
-    // tile's own colors untouched; blocks.json sets anything else only for a
+    // tile's own colors untouched; a definition sets anything else only for a
     // tile that's deliberately colorless art meant to be recolored in code
     // (e.g. grass top), same idea as Minecraft's biome-tinted grass overlay.
     Color texture_tints[6];
 
-    // Optional blocks.json "cut" face - the cross-section shown on a
+    // Optional BlockDef::cut() face - the cross-section shown on a
     // partially eaten cake's open side instead of its ordinary side
     // texture (see Chunk::build_mesh_data()'s Shaped branch). Tinted the
     // same as the side faces.
     std::optional<Rectangle> cut_texture_uv;
 
-    // Optional blocks.json "end" face - the outer end of a two-cell block
+    // Optional BlockDef::end() face - the outer end of a two-cell block
     // (a bed half's headboard or foot end), used instead of "side" on that
     // one face; "side" then covers the long sides. See core/BlockShape.hpp's
     // shaped_face_texture().
     std::optional<Rectangle> end_texture_uv;
 };
 
-// Parses assets/blocks.json and fills the BlockType -> BlockProperties table.
-// Each face entry ("top"/"bottom"/"side") gives the (x, y) grid position of
-// its tile within assets/sprites/terrain.png - a fixed 16x16 grid of 16px
-// tiles, shared by every block, no per-sprite packing needed - plus an
-// optional "color" tint (see BlockProperties::texture_tints).
-// Call once after the window exists (texture loads need a GL context).
+// Fills the BlockType -> BlockProperties table from src/content/Blocks.cpp
+// (see content/Content.hpp). Each face is a content::Tile - the (x, y) grid
+// position of its tile within assets/sprites/terrain.png, a fixed 16x16
+// grid of 16px tiles shared by every block - plus an optional tint (see
+// BlockProperties::texture_tints). Throws if any BlockType is left
+// undefined. Call once after the window exists (texture loads need a GL
+// context).
 void Load_block_definitions();
 
 const BlockProperties& get_block_properties(BlockType type);
 
-// True for a block whose blocks.json entry gives it a distinct "south"
+// True for a block whose definition gives it a distinct .south()
 // front-face texture (Chest/Furnace/LitFurnace/Workbench/Dispenser/Pumpkin/
 // JackOLantern) - the only ones a per-instance HorizontalDirection actually
 // changes anything for. Used by both Chunk::build_mesh_data() (which face
@@ -349,13 +346,13 @@ bool block_needs_facing(BlockType type);
 // plain place_block() path.
 bool block_is_attachable(BlockType type);
 
-// The blocks.json "name" a BlockType was loaded from (e.g. "oak_planks"),
+// The content::block() name a BlockType was defined with (e.g. "oak_planks"),
 // for display purposes (the debug overlay's "Looking at" line). "air" for
-// BlockType::Air, which has no blocks.json entry of its own.
+// BlockType::Air, which has no definition of its own.
 const std::string& get_block_name(BlockType type);
 
 // Reverse of get_block_name() - std::nullopt if `name` doesn't match any
-// blocks.json entry. Used to deserialize a block by its stable, human-
+// defined block. Used to deserialize a block by its stable, human-
 // readable name (e.g. a saved player's hotbar) instead of its raw
 // BlockType enum value, which isn't safe to persist across builds if the
 // enum's own order ever changes.
@@ -371,7 +368,7 @@ const Texture2D& get_block_atlas_texture();
 Rectangle get_sample_safe_block_uv(Rectangle uv);
 
 // The raw (0..1) UV rectangle for terrain.png's (column, row) tile - the
-// same lookup blocks.json's own "x"/"y" face coordinates resolve through,
+// same lookup block definitions' content::Tile face coordinates resolve through,
 // exposed for the handful of things that need an atlas tile that isn't a
 // block face: the block-breaking crack overlay (row 15, columns 0-9 - see
 // ui::block_breaking_overlay()).

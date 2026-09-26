@@ -38,7 +38,7 @@ struct BlockInstanceState {
     uint8_t bite_count = 0;    // cake only, 0-6
 
     // Which face of its own cell this block is mounted on, for a block
-    // blocks.json marks attachable (BlockProperties::attach_*): Bottom =
+    // a block definition marks attachable (BlockProperties::attach_*): Bottom =
     // standing on the floor (the default), Top = hanging from the ceiling,
     // North/South/East/West = on that wall. The support block is the
     // neighbor in that direction - block_face_offset(attachment).
@@ -95,7 +95,7 @@ bool block_has_custom_shape(BlockType type);
 // This shaped block's current box list, in local 0..1 tile space - its
 // render geometry (BlockRenderShape::Shaped), and also its collision when
 // block_has_custom_shape() is true. A torch is render-only: shaped here,
-// but not custom_shape in blocks.json, so it still has no collision.
+// but not .custom_shape() in its definition, so it still has no collision.
 // Empty for a type with no shape.
 BlockShapeBoxes get_block_shape(BlockType type, const BlockInstanceState& state);
 
@@ -103,7 +103,7 @@ BlockShapeBoxes get_block_shape(BlockType type, const BlockInstanceState& state)
 // ray hits (World::raycast()), what the black target outline and the
 // breaking cracks are drawn around. Separate from collision, same as
 // vanilla: a torch or a sapling has none of the latter but still has a
-// small box to aim at. In order: blocks.json's own "outline" boxes (static
+// small box to aim at. In order: the block's own "outline" boxes (static
 // shapes - torch, plants, cactus); else, for a custom_shape block, its
 // collision shape (get_block_shape() - it depends on facing/open/half/
 // bites); else one full cube. Local 0..1 cell space.

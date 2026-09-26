@@ -1705,7 +1705,7 @@ void GameEngine::update(float delta_time)
                     // What actually comes off this block - not necessarily
                     // itself (Stone -> Cobblestone), not necessarily
                     // anything at all (wrong/no tool against an ore) - see
-                    // resolve_block_drops()/assets/drops.json. A block can
+                    // resolve_block_drops()/src/content/Drops.cpp. A block can
                     // yield more than one stack (Gravel's own Flint roll
                     // alongside Gravel itself), so this can push 0..N
                     // dropped items, not just the old always-exactly-1.
@@ -1869,7 +1869,7 @@ void GameEngine::update(float delta_time)
                             placed = world->place_chest(place_x, place_y, place_z, facing);
                         } else if (block_is_attachable(selected.block)) {
                             // Mounts onto whatever face was clicked - wall,
-                            // floor or ceiling, per its own blocks.json
+                            // floor or ceiling, per its own block definition
                             // "attach" list (World::place_attached_block()).
                             placed = world->place_attached_block(place_x, place_y, place_z, selected.block,
                                                                  targeted_block->normal);

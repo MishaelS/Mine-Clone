@@ -45,8 +45,13 @@ enum class ItemType : uint8_t {
 // ItemType" so a stack of, say, Coal is never mistaken for a wielded tool.
 enum class ItemCategory : uint8_t { Tool, Material };
 
+// Mining *level* - ItemProperties::tier and DropRule::needs()'s minimum.
+// Gold deliberately ranks with Wood (see ItemProperties::tier).
+namespace ToolTier {
+    constexpr int None = 0, Wood = 1, Gold = 1, Stone = 2, Iron = 3, Diamond = 4;
+}
+
 struct ItemProperties {
-    std::string display_name; // Legacy label; UI uses ui::item_display_name for the selected language.
     ItemCategory category = ItemCategory::Tool;
     ToolKind tool_kind;             // Material entries leave this ToolKind::None
     int max_durability;            // "uses" before the tool breaks - unused (0) for a Material
@@ -61,25 +66,22 @@ struct ItemProperties {
     int heal_amount = 0;           // half-hearts restored on eating (PlayerHealth's own unit) - 0 for anything not food
 };
 
-// Fills the ItemType -> ItemProperties table. Gameplay stats (durability,
-// speed, tier, heal amount) are defined in the .cpp; the item atlas
-// texture path and every sprite's tile coordinates come from
-// assets/items.json, the same way blocks.json supplies terrain tile
-// coordinates. Throws if items.json names an unknown item/block or leaves
-// any ItemType without a sprite. Call once after the window exists
+// Fills the ItemType -> ItemProperties table from src/content/Items.cpp
+// (see content/Content.hpp). Throws if any ItemType is left undefined or a
+// sprite lies outside the item atlas. Call once after the window exists
 // (texture loads need a GL context), same as Load_block_definitions().
 void Load_item_definitions();
 
 const ItemProperties& get_item_properties(ItemType type);
 
-// The item atlas texture (items.json's "atlas") every ItemProperties::
+// The item atlas texture (sprites/items.png) every ItemProperties::
 // atlas_source and get_block_item_sprite() rect indexes into. Valid only
 // after Load_item_definitions().
 const Texture2D& get_item_atlas_texture();
 
 // A block that shows a flat item-atlas sprite instead of its terrain-based
 // cube/cross render - both as an inventory icon and as a dropped item
-// (torches, sapling, doors, bed - items.json's "block_items"). std::nullopt
+// (torches, sapling, doors, bed - content::block_item_sprite()). std::nullopt
 // for every other block.
 std::optional<Rectangle> get_block_item_sprite(BlockType type);
 

@@ -157,7 +157,7 @@ namespace {
     }
 
     // Generalizes what used to be a single hardcoded BlockType::Cactus
-    // check into anything blocks.json flags damages_on_touch (see
+    // check into anything its block definition flags damages_on_touch (see
     // BlockProperties::damages_on_touch) - cactus is a full solid collision
     // cube in this engine (unlike real Minecraft's own slightly-inset
     // cactus hitbox), so the movement solver above never actually lets the

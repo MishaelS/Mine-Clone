@@ -5,12 +5,9 @@
 #include <optional>
 #include <vector>
 
-// Loads assets/recipes.json (Beta 1.7.3-sourced - see the file's own
-// "_notes"). Call once, after both Load_block_definitions() and
-// Load_item_definitions() (needs both name tables to resolve entries). A
-// recipe naming a block/item this build doesn't have yet (the file
-// documents more of Beta 1.7.3 than the engine can act on - doors, saplings,
-// etc.) is silently skipped, same spirit as Load_drop_table().
+// Fills the crafting recipe list (Beta 1.7.3 recipes) from
+// src/content/Recipes.cpp - see content::shaped()/shapeless(). Call once,
+// after both Load_block_definitions() and Load_item_definitions().
 void Load_recipes();
 
 // What crafting `grid` (row-major, `rows` x `cols`, empty cells as empty

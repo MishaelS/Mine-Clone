@@ -571,7 +571,7 @@ namespace ui {
 
         // Torches, sapling, doors, bed: their in-world shape reads poorly (or
         // not at all) at icon scale, so - same as real Minecraft - they show
-        // a flat item-atlas sprite instead (items.json's "block_items").
+        // a flat item-atlas sprite instead (content::block_item_sprite()).
         if (std::optional<Rectangle> sprite = get_block_item_sprite(type)) {
             DrawTexturePro(get_item_atlas_texture(), *sprite, bounds, {0.0f, 0.0f}, 0.0f, WHITE);
             return;

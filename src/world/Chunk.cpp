@@ -162,7 +162,7 @@ namespace {
 
     // Grass top tint per biome - same idea as Minecraft's own per-biome
     // grass color, applied here since the block's own texture tile is a
-    // deliberately colorless overlay (see blocks.json's grass "color").
+    // deliberately colorless overlay (see GRASS_TINT in src/content/Blocks.cpp).
     // Forest and Hills deliberately share the same, slightly darker green;
     // Plains reads noticeably lighter. Desert/Ocean/Sea never generate a
     // Grass block at all, so they don't need their own tint.
@@ -2146,10 +2146,10 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                     // A grass top's tint depends on this column's own blend
                     // of biomes (column_grass_tint, precomputed in
                     // generate_terrain) instead of the one fixed color
-                    // blocks.json's texture_tints would give every Grass
+                    // the block definition's texture_tints would give every Grass
                     // block regardless of where it is. Water's own tint
                     // deliberately does *not* vary with depth the same way
-                    // - it stays blocks.json's one plain color everywhere,
+                    // - it stays its definition's one plain color everywhere,
                     // same as real Minecraft's water surface; depth instead
                     // darkens *visibility* (World::draw's underwater fog
                     // override, set_chunk_fog), not the water block itself.

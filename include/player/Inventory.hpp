@@ -36,6 +36,34 @@ struct ItemStack {
     void clear() { block = BlockType::Air; tool = ItemType::None; count = 0; durability = 0; }
 };
 
+// Names "a block or an item" without a count - what drop rules, recipes
+// and smelting refer to. Implicitly built from either enum, so content
+// tables can pass BlockType::Sand or ItemType::Coal interchangeably.
+struct ItemRef {
+    BlockType block = BlockType::Air;
+    ItemType item = ItemType::None;
+
+    ItemRef(BlockType type) : block(type) {}
+    ItemRef(ItemType type) : item(type) {}
+
+    bool is_item() const { return item != ItemType::None; }
+    bool matches(const ItemStack& stack) const
+    {
+        if (stack.empty()) return false;
+        return is_item() ? stack.tool == item : !stack.holds_item() && stack.block == block;
+    }
+    // A stack of `count` - a Tool starts at full durability.
+    ItemStack stack(int count) const
+    {
+        ItemStack result;
+        result.block = block;
+        result.tool = item;
+        result.count = count;
+        if (result.is_tool()) result.durability = get_item_properties(item).max_durability;
+        return result;
+    }
+};
+
 struct Inventory {
     std::array<ItemStack, HOTBAR_SIZE> hotbar{};
     std::array<ItemStack, INVENTORY_STORAGE_SIZE> storage{};

@@ -5,8 +5,9 @@
 #include <optional>
 
 // Furnace smelting - which input turns into what, what burns as fuel and
-// for how long, and the per-tick furnace simulation itself. All data comes
-// from assets/smelting.json (Minecraft Beta 1.7.3 rules): one input item
+// for how long, and the per-tick furnace simulation itself. Recipes and
+// fuels are defined in src/content/Smelting.cpp (Minecraft Beta 1.7.3
+// rules - see content::smelt()/fuel()): one input item
 // cooks for smelting_cook_ticks() game ticks into one output item; fuel
 // burns one item at a time for its own burn_ticks.
 
@@ -26,13 +27,13 @@ struct FurnaceState {
     bool empty() const { return input.empty() && fuel.empty() && output.empty() && !burning(); }
 };
 
-// Parses assets/smelting.json. Call once at startup, after the block/item
-// tables are loaded (names resolve against both).
+// Fills the smelting recipe and fuel tables from src/content/Smelting.cpp.
+// Call once at startup, after the block/item tables are loaded.
 void Load_smelting();
 
 int smelting_cook_ticks();
 
-// What one of `input` smelts into (count as smelting.json gives it), or
+// What one of `input` smelts into (count as content::smelt() gives it), or
 // std::nullopt if it isn't smeltable.
 std::optional<ItemStack> smelting_result(const ItemStack& input);
 

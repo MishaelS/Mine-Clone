@@ -1,17 +1,17 @@
 #include "player/DropTable.hpp"
+#include "content/Content.hpp"
 #include "player/Item.hpp"
-#include "core/Json.hpp"
 
 #include "raylib.h"
 
+#include <algorithm>
 #include <array>
 #include <optional>
+#include <stdexcept>
 
 namespace {
     struct DropEntry {
-        bool is_item = false;
-        BlockType block = BlockType::Air;
-        ItemType item = ItemType::None;
+        ItemRef what;
         int count_min = 1;
         int count_max = 1;
         float chance = 1.0f;
@@ -19,72 +19,65 @@ namespace {
 
     struct BlockDropRule {
         ToolKind requires_tool = ToolKind::None;
-        int min_tier = 0; // 0 = no minimum; see ItemProperties::tier
+        int min_tier = ToolTier::None; // see ItemProperties::tier
         std::vector<DropEntry> drops;
     };
 
     std::array<std::optional<BlockDropRule>, static_cast<size_t>(BlockType::Count)> drop_table;
 
-    ToolKind tool_kind_from_name(const std::string& name)
+    BlockDropRule& rule_for(BlockType block)
     {
-        if (name == "pickaxe") return ToolKind::Pickaxe;
-        if (name == "axe") return ToolKind::Axe;
-        if (name == "shovel") return ToolKind::Shovel;
-        if (name == "sword") return ToolKind::Sword;
-        if (name == "hoe") return ToolKind::Hoe;
-        return ToolKind::None;
-    }
-
-    // Mining-level rank matching ItemProperties::tier (Gold == Wood, both
-    // rank 1 - see that field's own comment).
-    int tier_from_name(const std::string& name)
-    {
-        if (name == "wood" || name == "gold") return 1;
-        if (name == "stone") return 2;
-        if (name == "iron") return 3;
-        if (name == "diamond") return 4;
-        return 0;
+        return *drop_table[static_cast<size_t>(block)];
     }
 }
 
+namespace content {
+
+DropRule when_broken(BlockType block)
+{
+    std::optional<BlockDropRule>& rule = drop_table[static_cast<size_t>(block)];
+    if (rule) throw std::runtime_error("drop rule defined twice for block '" + get_block_name(block) + "'");
+    rule.emplace();
+    return DropRule(block);
+}
+
+DropRule& DropRule::needs(ToolKind kind, int min_tier)
+{
+    BlockDropRule& rule = rule_for(block_);
+    rule.requires_tool = kind;
+    rule.min_tier = min_tier;
+    return *this;
+}
+
+DropRule& DropRule::drop(ItemRef what, int count)
+{
+    return drop(what, count, count);
+}
+
+DropRule& DropRule::drop(ItemRef what, int count_min, int count_max)
+{
+    DropEntry entry{what};
+    entry.count_min = std::max(1, count_min);
+    entry.count_max = std::max(entry.count_min, count_max);
+    rule_for(block_).drops.push_back(entry);
+    return *this;
+}
+
+DropRule& DropRule::chance(float probability)
+{
+    BlockDropRule& rule = rule_for(block_);
+    if (rule.drops.empty()) {
+        throw std::runtime_error("drop rule for '" + get_block_name(block_) + "': chance() before any drop()");
+    }
+    rule.drops.back().chance = probability;
+    return *this;
+}
+
+} // namespace content
+
 void Load_drop_table()
 {
-    char* fileText = LoadFileText(ASSETS_PATH "drops.json");
-    if (fileText == nullptr) {
-        throw std::runtime_error("Could not load " ASSETS_PATH "drops.json");
-    }
-    Json root = Json::parse(fileText);
-    UnloadFileText(fileText);
-
-    for (const Json& entry : root["drops"].as_array()) {
-        std::optional<BlockType> block_type = block_type_from_name(entry["block"].as_string());
-        if (!block_type) continue; // not a block this build has yet - skip (see header comment)
-
-        BlockDropRule rule;
-        rule.requires_tool = tool_kind_from_name(entry["requires_tool"].as_string());
-        rule.min_tier = tier_from_name(entry["min_tool_tier"].as_string());
-
-        for (const Json& drop : entry["drops"].as_array()) {
-            DropEntry parsed;
-            std::string name = drop["name"].as_string();
-            if (drop["type"].as_string() == "item") {
-                std::optional<ItemType> item_type = item_type_from_name(name);
-                if (!item_type) continue; // not an item this build has yet - skip
-                parsed.is_item = true;
-                parsed.item = *item_type;
-            } else {
-                std::optional<BlockType> drop_block = block_type_from_name(name);
-                if (!drop_block) continue;
-                parsed.block = *drop_block;
-            }
-            parsed.count_min = std::max(1, static_cast<int>(drop["count_min"].as_number(1)));
-            parsed.count_max = std::max(parsed.count_min, static_cast<int>(drop["count_max"].as_number(parsed.count_min)));
-            parsed.chance = static_cast<float>(drop["chance"].as_number(1.0));
-            rule.drops.push_back(parsed);
-        }
-
-        drop_table[static_cast<size_t>(*block_type)] = std::move(rule);
-    }
+    content::register_drops();
 }
 
 bool can_harvest_block(BlockType type, const ItemStack& selected)
@@ -106,9 +99,8 @@ std::vector<DropRoll> resolve_block_drops(BlockType type, const ItemStack& selec
 {
     const std::optional<BlockDropRule>& rule = drop_table[static_cast<size_t>(type)];
 
-    // No table entry at all - not yet covered by drops.json, or its name
-    // didn't resolve - falls back to the old "drops itself" default rather
-    // than silently yielding nothing.
+    // No rule at all (see content::when_broken()) - the block drops
+    // itself, rather than silently yielding nothing.
     if (!rule) return {{false, type, ItemType::None, 1}};
 
     if (!can_harvest_block(type, selected)) return {};
@@ -121,9 +113,9 @@ std::vector<DropRoll> resolve_block_drops(BlockType type, const ItemStack& selec
             ? entry.count_min
             : GetRandomValue(entry.count_min, entry.count_max);
         DropRoll drop;
-        drop.is_item = entry.is_item;
-        drop.block = entry.block;
-        drop.item = entry.item;
+        drop.is_item = entry.what.is_item();
+        drop.block = entry.what.block;
+        drop.item = entry.what.item;
         drop.count = count;
         result.push_back(drop);
     }
