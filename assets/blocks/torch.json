@@ -25,6 +25,10 @@
       "south": {}
     } }
   ],
+  "particles": [
+    { "type": "smoke", "at": [8, 9.4, 8], "spread": [0, 1.7, 0], "chance": 0.6 },
+    { "type": "flame", "at": [8, 9.8, 8], "spread": [1.5, 2.1, 1.5], "chance": 0.5 }
+  ],
   "states": {
     "floor": { "hitbox": [6, 0, 6, 10, 10, 10] },
     "wall": { "hitbox": [6, 2, 0, 10, 12, 4.7], "offset": [0, 2.4, -8], "pivot": [8, 2.4, 0], "angle": 22.5 }

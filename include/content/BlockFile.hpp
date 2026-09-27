@@ -42,6 +42,10 @@ namespace block_file {
     constexpr const char* NORMAL_IDS[] = {"out", "in", "both"};
     constexpr int NORMAL_COUNT = 3;
 
+    // BlockParticleKind, in its own order.
+    constexpr const char* PARTICLE_IDS[] = {"flame", "smoke", "dust", "leaf"};
+    constexpr int PARTICLE_COUNT = 4;
+
     // Tiles per row/column of sprites/terrain.png (16px each).
     constexpr int ATLAS_TILES = 16;
 
@@ -78,6 +82,17 @@ namespace block_file {
         Vector3 to{16, 16, 16};
         bool shade = true;
         std::array<ElementFace, 6> faces{};
+    };
+
+    // One of its particle emitters (BlockParticleEmitter), in texture pixels.
+    struct ParticleEmitter {
+        int kind = 1;               // index into PARTICLE_IDS (smoke)
+        Vector3 at{8, 8, 8};        // in its model's / its south-facing layout
+        Vector3 spread{0, 0, 0};    // +- along each axis
+        float chance = 1.0f;        // per animate tick
+        int count = 1;
+        Color color = WHITE;
+        bool only_above_air = false;
     };
 
     struct BlockFile {
@@ -129,6 +144,8 @@ namespace block_file {
         // Its own model from parts - a cube or a torch may have one
         // (elements_allowed()); none: its shape's own look.
         std::vector<Element> elements;
+        // What it gives off now and then (a torch's flame and smoke).
+        std::vector<ParticleEmitter> particles;
     };
 
     // Whether a block of `shape` can be drawn from parts: a cube or a torch
@@ -141,6 +158,7 @@ namespace block_file {
     std::array<float, 4> face_uv(const Element& element, int face);
     // In the game's units.
     std::vector<BlockElement> to_elements(const std::vector<Element>& elements);
+    std::vector<BlockParticleEmitter> to_emitters(const std::vector<ParticleEmitter>& emitters);
 
     // A two-cell block's halves by `shape`: a door's "lower"/"upper", a
     // bed's "foot"/"head" (0 is the cell it's placed at).

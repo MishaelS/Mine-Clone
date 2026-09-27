@@ -7,6 +7,10 @@
   "density": 2.7,
   "luminance": 13,
   "directional": true,
+  "particles": [
+    { "type": "smoke", "at": [8, 3, 16.32], "spread": [4.8, 3, 0] },
+    { "type": "flame", "at": [8, 3, 16.32], "spread": [4.8, 3, 0] }
+  ],
   "faces": {
     "top": { "tile": [14, 3] },
     "bottom": { "tile": [14, 3] },

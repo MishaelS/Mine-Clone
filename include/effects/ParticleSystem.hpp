@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Block.hpp"
+#include "effects/BlockParticles.hpp"
 
 #include "raylib.h"
 
@@ -17,6 +18,9 @@ public:
     void spawn_hit(BlockType type, Vector3 surface_position, Vector3 surface_normal);
     void spawn_destroy(BlockType type, Vector3 block_center);
     void spawn_footstep(BlockType type, Vector3 ground_position);
+    // One particle a block gives off (effects/BlockParticles.hpp) at
+    // `position` in `color` - a leaf a bit of `block`'s own tile.
+    void spawn_block_particle(BlockParticleKind kind, Vector3 position, Color color, BlockType block);
 
     // `world`, when given, stops a particle at whatever solid block it
     // would otherwise fall/fly into instead of passing straight through -
@@ -46,5 +50,6 @@ private:
     void add(Particle particle);
 
     std::vector<Particle> particles;
+    std::vector<block_particles::Particle> block_particles_; // flames, smoke, dust, falling leaves
     uint32_t random_state = 0x91E10DA5u;
 };

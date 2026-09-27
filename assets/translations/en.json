@@ -678,6 +678,26 @@
     "editor.block_biome": "Biome color",
     "editor.biome.none": "None",
     "editor.biome.grass": "Grass",
-    "editor.biome.foliage": "Foliage"
+    "editor.biome.foliage": "Foliage",
+    "editor.block_tab_particles": "Particles",
+    "editor.particles_section": "Block particles",
+    "editor.particles_hint": "What the block gives off on its own: every tick the game picks random blocks near the player (nearer ones more often) and gives them a chance. The preview shows them live.",
+    "editor.particles_none": "Nothing yet.",
+    "editor.particles_add": "+ Particle",
+    "editor.particle_section": "Picked particle",
+    "editor.particle_kind": "Kind",
+    "editor.particle.flame": "Flame",
+    "editor.particle.smoke": "Smoke",
+    "editor.particle.dust": "Dust (colored)",
+    "editor.particle.leaf": "Leaf",
+    "editor.particle_at": "Point, px",
+    "editor.particle_spread": "Spread +-, px",
+    "editor.particle_at_hint": "In the model's coordinates: on a wall torch the point tilts with it; on a directional block - as if its front faced south (toward the camera). The yellow dot and spread box show in the preview.",
+    "editor.particle_chance": "Chance (0..1)",
+    "editor.particle_count": "Count each time",
+    "editor.particle_color": "Color",
+    "editor.particle_leaf_color": "A leaf takes its block's color - its biome's in the world.",
+    "editor.particle_above_air": "Only if air below",
+    "editor.particle_rate_hint": "The chance is per time the game picks this block: for one a couple of steps from the player that's about 3 times a second, less farther away."
   }
 }

@@ -259,6 +259,11 @@ namespace content {
         return *this;
     }
 
+    BlockDef& BlockDef::particles(std::vector<BlockParticleEmitter> emitters) {
+        block_table[static_cast<size_t>(type_)].particles = std::move(emitters);
+        return *this;
+    }
+
     BlockDef& BlockDef::directional() {
         block_table[static_cast<size_t>(type_)].directional = true;
         return *this;

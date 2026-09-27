@@ -1,6 +1,7 @@
 #include "effects/ParticleSystem.hpp"
 #include "world/World.hpp"
 #include "rendering/EntityLighting.hpp"
+#include "core/TextureManager.hpp"
 
 #include "raymath.h"
 
@@ -10,6 +11,7 @@
 
 namespace {
     constexpr std::size_t MAX_PARTICLES = 768;
+    constexpr std::size_t MAX_BLOCK_PARTICLES = 512;
     constexpr float FRAGMENT_PIXELS = 4.0f;
 
     BlockFace face_from_normal(Vector3 normal) {
@@ -110,6 +112,16 @@ void ParticleSystem::spawn_footstep(BlockType type, Vector3 ground_position)
     }
 }
 
+void ParticleSystem::spawn_block_particle(BlockParticleKind kind, Vector3 position, Color color, BlockType block)
+{
+    const Texture2D& atlas = get_block_atlas_texture();
+    const Rectangle uv = get_block_properties(block).texture_uvs[static_cast<int>(BlockFace::North)];
+    const Rectangle tile = {uv.x * atlas.width, uv.y * atlas.height, uv.width * atlas.width, uv.height * atlas.height};
+    if (block_particles_.size() >= MAX_BLOCK_PARTICLES) block_particles_.erase(block_particles_.begin());
+    block_particles_.push_back(block_particles::make(kind, position, color, tile,
+                                                     [this](float minimum, float maximum) { return random(minimum, maximum); }));
+}
+
 void ParticleSystem::update(float delta_time, const World* world)
 {
     auto collision_at = [world](Vector3 position) -> std::optional<BoundingBox> {
@@ -159,6 +171,21 @@ void ParticleSystem::update(float delta_time, const World* world)
     }
     particles.erase(std::remove_if(particles.begin(), particles.end(),
         [](const Particle& particle) { return particle.age >= particle.lifetime; }), particles.end());
+
+    // A block's own: flames and smoke float free; a falling leaf settles on
+    // whatever it drifts down onto.
+    for (block_particles::Particle& particle : block_particles_) {
+        const Vector3 before = particle.position;
+        block_particles::step(particle, delta_time);
+        if (block_particles::falls(particle)) {
+            if (auto floor_box = collision_at(particle.position)) {
+                particle.position = {before.x, floor_box->max.y + 0.01f, before.z};
+                particle.velocity = {0.0f, 0.0f, 0.0f};
+            }
+        }
+    }
+    block_particles_.erase(std::remove_if(block_particles_.begin(), block_particles_.end(),
+        [](const block_particles::Particle& particle) { return particle.age >= particle.lifetime; }), block_particles_.end());
 }
 
 void ParticleSystem::draw(const Camera3D& camera, const World* world) const
@@ -172,9 +199,24 @@ void ParticleSystem::draw(const Camera3D& camera, const World* world) const
         DrawBillboardRec(camera, atlas, particle.texture_source, particle.position,
                          Vector2{particle.size, particle.size}, tint);
     }
+
+    const Texture2D& sheet = TextureManager::get(block_particles::SHEET_PATH);
+    for (const block_particles::Particle& particle : block_particles_) {
+        Color tint = block_particles::draw_color(particle);
+        // A flame (or glowing dust) lights itself - only the rest takes the dark.
+        if (world && !block_particles::glows(particle)) {
+            const unsigned char alpha = tint.a;
+            tint = multiply_tint(tint, entity_environment_tint(*world, particle.position));
+            tint.a = alpha;
+        }
+        const float size = block_particles::draw_size(particle);
+        DrawBillboardRec(camera, block_particles::from_sheet(particle) ? sheet : atlas, block_particles::source(particle), particle.position,
+                         Vector2{size, size}, tint);
+    }
 }
 
 void ParticleSystem::clear()
 {
     particles.clear();
+    block_particles_.clear();
 }

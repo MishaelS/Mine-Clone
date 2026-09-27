@@ -201,6 +201,14 @@ private:
     // dispatcher's own random pick happens to land exactly on it.
     void update_random_ticks();
 
+    // Minecraft's animateTick: every tick, 667 random cells within 16
+    // blocks of the player and 667 within 32 (each offset the difference
+    // of two random numbers, so nearer blocks come up far more often) - any
+    // that gives off particles (BlockProperties::particles - a torch's
+    // flame, falling leaves) gets a chance to, right there.
+    void animate_blocks();
+    void emit_block_particles(int x, int y, int z, BlockType type);
+
     // One random-tick hit on an OakSapling at (x, y, z) (see
     // update_random_ticks()) - rolls a 1-in-7 chance (real Minecraft's own
     // sapling growth odds) to grow it into an oak tree right now. On a

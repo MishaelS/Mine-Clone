@@ -220,6 +220,24 @@ enum class BlockRenderShape : uint8_t { Cube, Cross, Shaped };
 //   Fluid    - water, lava: flows and is drawn by the game's own fluid code
 enum class BlockShapeKind : uint8_t { Cube, Slab, Stairs, Trapdoor, Cake, Torch, Door, Bed, Cross, Fluid, Count };
 
+// A particle a block gives off now and then (BlockProperties::particles) -
+// Minecraft's animateTick: a torch's flame and smoke, a lit redstone
+// torch's red dust, a lit furnace's fire, leaves drifting down.
+enum class BlockParticleKind : uint8_t { Flame, Smoke, Dust, Leaf };
+
+struct BlockParticleEmitter {
+    BlockParticleKind kind = BlockParticleKind::Smoke;
+    // Where, in cell units, in the block's own layout: its model's (moved
+    // and tilted with it on a wall - BlockStateModel), its front facing
+    // south (turned with a directional block's facing).
+    Vector3 at{0.5f, 0.5f, 0.5f};
+    Vector3 spread{0, 0, 0}; // +- this much at random along each axis
+    float chance = 1.0f;     // per animate tick of the block
+    int count = 1;           // particles each time
+    Color color = WHITE;     // a leaf ignores it: it takes its block's own color
+    bool only_above_air = false; // leaves: only from an underside that's open
+};
+
 // A face recolored per column by the biome it's in instead of its own tint
 // (which is then only its color out of the world): grass (a grass block's
 // top, tall grass) or foliage (leaves) - Minecraft's biome colormap idea.
@@ -383,6 +401,8 @@ struct BlockProperties {
     // Can only be placed on (and stays only on) one of these - a plant's
     // soil. Empty: anywhere.
     std::vector<BlockType> placed_on;
+    // What it gives off on its animate ticks (BlockParticleEmitter).
+    std::vector<BlockParticleEmitter> particles;
     // Its own model from parts (a torch's stick and flame) - drawn instead
     // of its shape's boxes when not empty. Rendering only: collision and
     // the hitbox stay its shape's / its state's.

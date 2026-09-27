@@ -140,6 +140,7 @@ ModelEditor::~ModelEditor()
 {
     if (skin.id != 0) UnloadTexture(skin);
     if (preview_items_atlas.id != 0) UnloadTexture(preview_items_atlas);
+    if (preview_particle_sheet.id != 0) UnloadTexture(preview_particle_sheet);
     if (preview_blocks_atlas.id != 0) UnloadTexture(preview_blocks_atlas);
     if (block_view_texture.id != 0) UnloadRenderTexture(block_view_texture);
     if (block_game_texture.id != 0) UnloadRenderTexture(block_game_texture);

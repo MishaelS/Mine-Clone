@@ -1,6 +1,7 @@
 #pragma once
 
 #include "content/BlockFile.hpp"
+#include "effects/BlockParticles.hpp"
 #include "model/EntityModel.hpp"
 
 #include "raylib.h"
@@ -55,6 +56,9 @@ private:
     void draw_block_inventory_icon(Rectangle bounds);
     const Texture2D& terrain_atlas();
     const Texture2D& items_atlas();
+    const Texture2D& particle_sheet();
+    void draw_block_particles_panel(Rectangle bounds);
+    void update_block_particles(float dt);
     void mark_block_dirty();
     void commit_block_history(bool force = false);
     void block_undo();
@@ -69,7 +73,16 @@ private:
     Vector2 block_list_scroll = {0, 0};
     Vector2 block_panel_scroll = {0, 0};
     Vector2 block_hitbox_scroll = {0, 0};
-    int block_panel_tab = 0;   // the right panel: 0 properties, 1 model (its parts), 2 hitbox
+    int block_panel_tab = 0;   // the right panel: 0 properties, 1 model (its parts), 2 hitbox, 3 particles
+    Vector2 block_particles_scroll = {0, 0};
+    int selected_emitter = 0;  // the particle emitter being edited
+    // What the selected block gives off, live: around it in the preview and
+    // round its two copies "in the game" - emitted on the game's 20/s clock.
+    std::vector<block_particles::Particle> preview_particles;
+    std::vector<block_particles::Particle> game_particles;
+    float particle_clock = 0.0f;
+    int particles_block = -1; // whose they are - cleared on picking another
+    uint32_t particle_random = 0x6C8E9CF5u;
     Vector2 block_model_scroll = {0, 0};
     int selected_element = 0;  // the part of its model being edited
     bool uv_dragging = false;  // drawing a face's UV rectangle over its tile
@@ -271,6 +284,7 @@ private:
     bool player_view = false;
     int preview_item = 0;
     Texture2D preview_items_atlas{};
+    Texture2D preview_particle_sheet{};
     Texture2D preview_blocks_atlas{};
     Rectangle preview_combo_rect(Rectangle viewport) const;
     // The "in hand" preview picker shows for any model with item slots.

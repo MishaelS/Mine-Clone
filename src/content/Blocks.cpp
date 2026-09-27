@@ -69,6 +69,7 @@ namespace content {
                     .east(tile(4), file.faces[4].tint)
                     .west(tile(5), file.faces[5].tint);
                 for (int f = 0; f < 6; ++f) def.biome_tint(f, static_cast<BiomeTint>(file.faces[static_cast<size_t>(f)].biome));
+                if (!file.particles.empty()) def.particles(block_file::to_emitters(file.particles));
             }
             // A slab's double block and a two-cell block's other half, once
             // every block has a name to find.

@@ -75,6 +75,7 @@ public:
     BlockDef& joins_sideways(const std::array<Tile, 4>& tiles);      // joins a neighbor into a wide block (a large chest)
     BlockDef& biome_tint(int face, BiomeTint tint);                  // that face recolored by its biome
     BlockDef& placed_on(std::vector<BlockType> soil);                // placed only on (and stays only on) these
+    BlockDef& particles(std::vector<BlockParticleEmitter> emitters); // what it gives off on its animate ticks
 
     BlockDef& attach_floor();
     BlockDef& attach_wall();

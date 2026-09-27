@@ -36,6 +36,7 @@ add_executable(${PROJECT_NAME}
     src/core/Block.cpp
     src/core/BlockShape.cpp
     src/core/BlockShapeKinds.cpp
+    src/effects/BlockParticles.cpp
     src/core/TextureManager.cpp
     src/core/PerlinNoise.cpp
     src/core/TerrainNoise.cpp
@@ -151,6 +152,7 @@ add_executable(MineTooModelEditor
     tools/model_editor/BlockTab.cpp
     src/rendering/BlockIcon.cpp
     src/core/BlockShapeKinds.cpp
+    src/effects/BlockParticles.cpp
     src/content/BlockFile.cpp
     src/model/EntityModel.cpp
     src/model/EntityModelRenderer.cpp

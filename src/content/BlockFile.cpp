@@ -148,6 +148,22 @@ namespace block_file {
         return result;
     }
 
+    std::vector<BlockParticleEmitter> to_emitters(const std::vector<ParticleEmitter>& emitters) {
+        std::vector<BlockParticleEmitter> result;
+        for (const ParticleEmitter& source : emitters) {
+            BlockParticleEmitter emitter;
+            emitter.kind = static_cast<BlockParticleKind>(std::clamp(source.kind, 0, PARTICLE_COUNT - 1));
+            emitter.at = {source.at.x / 16.0f, source.at.y / 16.0f, source.at.z / 16.0f};
+            emitter.spread = {source.spread.x / 16.0f, source.spread.y / 16.0f, source.spread.z / 16.0f};
+            emitter.chance = std::clamp(source.chance, 0.0f, 1.0f);
+            emitter.count = std::clamp(source.count, 1, 16);
+            emitter.color = source.color;
+            emitter.only_above_air = source.only_above_air;
+            result.push_back(emitter);
+        }
+        return result;
+    }
+
     std::string directory() {
         return std::string(ASSETS_PATH) + "blocks/";
     }
@@ -244,6 +260,23 @@ namespace block_file {
                 }
             } else {
                 block.elements = default_elements(block.shape);
+            }
+            for (const Json& saved : root["particles"].as_array()) {
+                ParticleEmitter emitter;
+                emitter.kind = index_of(PARTICLE_IDS, saved["type"].as_string("smoke"), 1);
+                if (auto at = vector(saved["at"])) emitter.at = *at;
+                if (auto spread = vector(saved["spread"])) emitter.spread = *spread;
+                emitter.chance = std::clamp(static_cast<float>(saved["chance"].as_number(1.0)), 0.0f, 1.0f);
+                emitter.count = std::clamp(static_cast<int>(saved["count"].as_number(1)), 1, 16);
+                const std::vector<Json>& color = saved["color"].as_array();
+                if (color.size() >= 3) {
+                    auto channel = [&](size_t i) {
+                        return static_cast<unsigned char>(std::clamp(i < color.size() ? color[i].as_number(255) : 255.0, 0.0, 255.0));
+                    };
+                    emitter.color = {channel(0), channel(1), channel(2), channel(3)};
+                }
+                emitter.only_above_air = saved["only_above_air"].as_bool(false);
+                block.particles.push_back(emitter);
             }
             // Each state over its shape's defaults.
             for (int s = 0; s < MAX_BLOCK_STATES; ++s) {
@@ -355,6 +388,25 @@ namespace block_file {
                     first = false;
                 }
                 out << (first ? "} }" : "\n    } }") << (e + 1 < block.elements.size() ? "," : "") << "\n";
+            }
+            out << "  ],\n";
+        }
+        if (!block.particles.empty()) {
+            out << "  \"particles\": [\n";
+            for (size_t i = 0; i < block.particles.size(); ++i) {
+                const ParticleEmitter& emitter = block.particles[i];
+                out << "    { \"type\": \"" << PARTICLE_IDS[std::clamp(emitter.kind, 0, PARTICLE_COUNT - 1)] << "\", \"at\": "
+                    << vector_text(emitter.at);
+                if (emitter.spread.x != 0 || emitter.spread.y != 0 || emitter.spread.z != 0) out << ", \"spread\": " << vector_text(emitter.spread);
+                if (emitter.chance != 1.0f) out << ", \"chance\": " << number(emitter.chance);
+                if (emitter.count != 1) out << ", \"count\": " << emitter.count;
+                const Color& c = emitter.color;
+                if (c.r != 255 || c.g != 255 || c.b != 255 || c.a != 255) {
+                    out << ", \"color\": [" << static_cast<int>(c.r) << ", " << static_cast<int>(c.g) << ", " << static_cast<int>(c.b) << ", "
+                        << static_cast<int>(c.a) << "]";
+                }
+                if (emitter.only_above_air) out << ", \"only_above_air\": true";
+                out << " }" << (i + 1 < block.particles.size() ? "," : "") << "\n";
             }
             out << "  ],\n";
         }

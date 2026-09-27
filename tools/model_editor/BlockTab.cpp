@@ -566,6 +566,31 @@ namespace {
     }
 }
 
+namespace {
+    // Here a block gets an animate tick this often a game tick - about as
+    // often as one a few steps from the player does in the game.
+    constexpr float EDITOR_ANIMATE_CHANCE = 0.15f;
+
+    // The state its particles come off in: as shown, a directional block's
+    // front toward the south (where the preview draws it).
+    BlockInstanceState particle_state(const block_file::BlockFile& block, const BlockInstanceState& state)
+    {
+        BlockInstanceState result = state;
+        if (block.directional && kind_of(block) == BlockShapeKind::Cube) result.facing = HorizontalDirection::South;
+        return result;
+    }
+
+    void draw_particles(const std::vector<block_particles::Particle>& particles, const Camera3D& camera, const Texture2D& sheet,
+                        const Texture2D& atlas)
+    {
+        for (const block_particles::Particle& particle : particles) {
+            const float size = block_particles::draw_size(particle);
+            DrawBillboardRec(camera, block_particles::from_sheet(particle) ? sheet : atlas, block_particles::source(particle),
+                             particle.position, Vector2{size, size}, block_particles::draw_color(particle));
+        }
+    }
+}
+
 // ---------------------------------------------------------------- Setup --
 
 const Texture2D& ModelEditor::terrain_atlas()
@@ -584,6 +609,15 @@ const Texture2D& ModelEditor::items_atlas()
         SetTextureFilter(preview_items_atlas, TEXTURE_FILTER_POINT);
     }
     return preview_items_atlas;
+}
+
+const Texture2D& ModelEditor::particle_sheet()
+{
+    if (preview_particle_sheet.id == 0) {
+        preview_particle_sheet = LoadTexture((std::string(ASSETS_PATH) + block_particles::SHEET_PATH).c_str());
+        SetTextureFilter(preview_particle_sheet, TEXTURE_FILTER_POINT);
+    }
+    return preview_particle_sheet;
 }
 
 void ModelEditor::load_blocks()
@@ -695,6 +729,72 @@ void ModelEditor::block_redo()
     set_status(tr_format("editor.redone", {std::to_string(block_redo_stack.size())}));
 }
 
+// ------------------------------------------------------------ Particles --
+
+void ModelEditor::update_block_particles(float dt)
+{
+    if (particles_block != selected_block) {
+        preview_particles.clear();
+        game_particles.clear();
+        particles_block = selected_block;
+    }
+    auto random = [this](float minimum, float maximum) {
+        particle_random ^= particle_random << 13;
+        particle_random ^= particle_random >> 17;
+        particle_random ^= particle_random << 5;
+        return minimum + (maximum - minimum) * static_cast<float>(particle_random & 0x00ffffffu) / static_cast<float>(0x01000000u);
+    };
+
+    // Move them; "in the game" a falling leaf lands on the grass (its top at y -0.5).
+    for (block_particles::Particle& particle : preview_particles) block_particles::step(particle, dt);
+    for (block_particles::Particle& particle : game_particles) {
+        const Vector3 before = particle.position;
+        block_particles::step(particle, dt);
+        if (block_particles::falls(particle) && particle.position.y < -0.49f) {
+            particle.position = {before.x, -0.49f, before.z};
+            particle.velocity = {0, 0, 0};
+        }
+    }
+    auto dead = [](const block_particles::Particle& particle) { return particle.age >= particle.lifetime; };
+    preview_particles.erase(std::remove_if(preview_particles.begin(), preview_particles.end(), dead), preview_particles.end());
+    game_particles.erase(std::remove_if(game_particles.begin(), game_particles.end(), dead), game_particles.end());
+    if (selected_block < 0) return;
+
+    // New ones, on the game's 20/s clock.
+    const block_file::BlockFile& block = blocks[static_cast<size_t>(selected_block)];
+    const BlockInstanceState state = display_state(block, block_state_view);
+    const BlockInstanceState emit_state = particle_state(block, state);
+    const BlockStateModel model = state_model_of(block, state);
+    const std::vector<BlockParticleEmitter> emitters = block_file::to_emitters(block.particles);
+    const block_file::Face& side = block.faces[2];
+    const Rectangle tile = {side.tile_x * 16.0f, side.tile_y * 16.0f, 16.0f, 16.0f};
+    auto emit = [&](std::vector<block_particles::Particle>& into, Vector3 cell, bool air_below) {
+        if (random(0.0f, 1.0f) >= EDITOR_ANIMATE_CHANCE) return;
+        for (const BlockParticleEmitter& emitter : emitters) {
+            if (emitter.only_above_air && !air_below) continue;
+            if (random(0.0f, 1.0f) >= emitter.chance) continue;
+            const Color color = emitter.kind == BlockParticleKind::Leaf ? side.tint : emitter.color;
+            for (int n = 0; n < emitter.count; ++n) {
+                const Vector3 unit = {random(-1.0f, 1.0f), random(-1.0f, 1.0f), random(-1.0f, 1.0f)};
+                const Vector3 at = Vector3Add(cell, block_particles::emit_point(emitter, unit, model, emit_state, block.directional));
+                into.push_back(block_particles::make(emitter.kind, at, color, tile, random));
+            }
+        }
+    };
+    particle_clock = std::min(particle_clock + dt, 0.25f);
+    while (particle_clock >= 0.05f) {
+        particle_clock -= 0.05f;
+        if (emitters.empty()) continue;
+        emit(preview_particles, preview_origin(companion_of(blocks, block, state, block_large_view)), true);
+        // The two copies "in the game" stand on grass.
+        emit(game_particles, {-0.5f, -0.5f, -0.5f}, false);
+        emit(game_particles, {0.5f, -0.5f, -0.5f}, false);
+    }
+    constexpr size_t MAX_PARTICLES = 512;
+    if (preview_particles.size() > MAX_PARTICLES) preview_particles.erase(preview_particles.begin(), preview_particles.end() - MAX_PARTICLES);
+    if (game_particles.size() > MAX_PARTICLES) game_particles.erase(game_particles.begin(), game_particles.end() - MAX_PARTICLES);
+}
+
 // ---------------------------------------------------------------- Frame --
 
 void ModelEditor::run_blocks_frame()
@@ -719,6 +819,7 @@ void ModelEditor::run_blocks_frame()
     }
 
     update_block_camera(view);
+    update_block_particles(GetFrameTime());
     draw_block_preview(view);
 
     BeginDrawing();
@@ -764,16 +865,22 @@ void ModelEditor::run_blocks_frame()
     const Rectangle panel_body = {panel.x, panel.y + panel_tabs.height, panel.width, panel.height - panel_tabs.height};
     if (block_panel_tab == 0) draw_block_properties(panel_body);
     else if (block_panel_tab == 1) draw_block_model_panel(panel_body);
-    else draw_block_hitbox_panel(panel_body);
+    else if (block_panel_tab == 2) draw_block_hitbox_panel(panel_body);
+    else draw_block_particles_panel(panel_body);
     GuiPanel(panel_tabs, nullptr);
     {
-        const char* tab_keys[3] = {"editor.block_tab_properties", "editor.block_tab_model", "editor.block_tab_hitbox"};
-        const float tab_width = (panel_tabs.width - PAD * 2 - GAP * 2) / 3.0f;
-        for (int t = 0; t < 3; ++t) {
+        const char* tab_keys[4] = {"editor.block_tab_properties", "editor.block_tab_model", "editor.block_tab_hitbox",
+                                   "editor.block_tab_particles"};
+        const float tab_width = (panel_tabs.width - PAD * 2 - GAP * 3) / 4.0f;
+        // Four across: a size smaller, so each name fits.
+        const int text_size = GuiGetStyle(DEFAULT, TEXT_SIZE);
+        GuiSetStyle(DEFAULT, TEXT_SIZE, text_size * 13 / 16);
+        for (int t = 0; t < 4; ++t) {
             bool open = block_panel_tab == t;
             GuiToggle({panel_tabs.x + PAD + t * (tab_width + GAP), panel_tabs.y + PAD * 0.5f, tab_width, ROW}, tr(tab_keys[t]).c_str(), &open);
             if (open) block_panel_tab = t;
         }
+        GuiSetStyle(DEFAULT, TEXT_SIZE, text_size);
     }
     draw_blocks_top_bar(top_bar_rect());
     draw_tabs();
@@ -1490,6 +1597,150 @@ void ModelEditor::draw_block_model_panel(Rectangle bounds)
     GuiUnlock();
 }
 
+// ------------------------------------------------------------ Particles --
+
+void ModelEditor::draw_block_particles_panel(Rectangle bounds)
+{
+    const float content_width = bounds.width - 14.0f;
+    static float content_height = 700.0f;
+    Rectangle view{};
+    GuiScrollPanel(bounds, nullptr, {0, 0, content_width, content_height}, &block_particles_scroll, &view);
+    if (selected_block < 0) return;
+    block_file::BlockFile& block = blocks[static_cast<size_t>(selected_block)];
+
+    const bool mouse_inside = CheckCollisionPointRec(GetMousePosition(), view);
+    if (!mouse_inside) GuiLock();
+    BeginScissorMode(static_cast<int>(view.x), static_cast<int>(view.y), static_cast<int>(view.width), static_cast<int>(view.height));
+    const float x = view.x + PAD;
+    const float width = content_width - PAD * 2;
+    const float label_w = 200.0f;
+    float y = view.y + block_particles_scroll.y + PAD;
+
+    auto section = [&](const std::string& title) {
+        GuiLine({x, y, width, ROW}, title.c_str());
+        y += ROW;
+    };
+    auto hint = [&](const std::string& text) { y = draw_hint(x, y, width, text, false); };
+    // A caption, then its X, Y and Z fields side by side; true once changed.
+    auto vector_row = [&](const std::string& caption, Vector3& value, float min_value, float max_value) {
+        label({x, y, width, ROW}, caption);
+        y += ROW;
+        constexpr const char* AXES[3] = {"X", "Y", "Z"};
+        constexpr Color AXIS_COLORS[3] = {{230, 90, 90, 255}, {120, 210, 90, 255}, {90, 150, 240, 255}};
+        float* parts[3] = {&value.x, &value.y, &value.z};
+        const float field = (width - GAP * 2) / 3.0f;
+        bool changed = false;
+        for (int i = 0; i < 3; ++i) {
+            const float fx = x + i * (field + GAP);
+            DrawTextEx(editor_text::font(), AXES[i], {fx + 2, y + 5}, 16, 1, AXIS_COLORS[i]);
+            if (float_field({fx + 16, y, field - 16, ROW}, *parts[i], min_value, max_value)) changed = true;
+        }
+        y += ROW + GAP;
+        return changed;
+    };
+
+    section(tr("editor.particles_section"));
+    hint(tr("editor.particles_hint"));
+
+    // Its emitters - pick one to edit.
+    if (block.particles.empty()) hint(tr("editor.particles_none"));
+    selected_emitter = std::clamp(selected_emitter, 0, std::max(0, static_cast<int>(block.particles.size()) - 1));
+    for (size_t i = 0; i < block.particles.size(); ++i) {
+        const block_file::ParticleEmitter& emitter = block.particles[i];
+        auto whole = [](float v) { return std::to_string(static_cast<int>(std::lround(v))); };
+        const std::string caption = tr(std::string("editor.particle.") + block_file::PARTICLE_IDS[std::clamp(emitter.kind, 0, 3)]) + "  (" +
+                                    whole(emitter.at.x) + ", " + whole(emitter.at.y) + ", " + whole(emitter.at.z) + ")";
+        bool picked = static_cast<int>(i) == selected_emitter;
+        GuiToggle({x, y, width, ROW}, caption.c_str(), &picked);
+        if (picked) selected_emitter = static_cast<int>(i);
+        y += ROW + 2;
+    }
+    y += GAP;
+    const float third = (width - GAP * 2) / 3.0f;
+    if (GuiButton({x, y, third, ROW}, tr("editor.particles_add").c_str())) {
+        block_file::ParticleEmitter emitter;
+        emitter.at = {8, 16, 8};
+        block.particles.push_back(emitter);
+        selected_emitter = static_cast<int>(block.particles.size()) - 1;
+        mark_block_dirty();
+    }
+    GuiSetState(block.particles.empty() ? STATE_DISABLED : STATE_NORMAL);
+    if (GuiButton({x + third + GAP, y, third, ROW}, tr("editor.model_copy").c_str()) && !block.particles.empty()) {
+        const block_file::ParticleEmitter copy = block.particles[static_cast<size_t>(selected_emitter)];
+        block.particles.insert(block.particles.begin() + selected_emitter + 1, copy);
+        ++selected_emitter;
+        mark_block_dirty();
+    }
+    if (GuiButton({x + (third + GAP) * 2, y, third, ROW}, tr("editor.model_delete").c_str()) && !block.particles.empty()) {
+        block.particles.erase(block.particles.begin() + selected_emitter);
+        selected_emitter = std::max(0, selected_emitter - 1);
+        mark_block_dirty();
+    }
+    GuiSetState(STATE_NORMAL);
+    y += ROW + GAP * 2;
+
+    if (!block.particles.empty()) {
+        block_file::ParticleEmitter& emitter = block.particles[static_cast<size_t>(selected_emitter)];
+        section(tr("editor.particle_section"));
+        // What kind.
+        {
+            std::string kinds;
+            for (int k = 0; k < block_file::PARTICLE_COUNT; ++k) kinds += (k ? ";" : "") + tr(std::string("editor.particle.") + block_file::PARTICLE_IDS[k]);
+            label({x, y, label_w, ROW}, tr("editor.particle_kind"));
+            int chosen = emitter.kind;
+            GuiComboBox({x + label_w, y, width - label_w, ROW}, kinds.c_str(), &chosen);
+            if (chosen != emitter.kind) {
+                emitter.kind = chosen;
+                mark_block_dirty();
+            }
+            y += ROW + GAP;
+        }
+        // Where, and how far around.
+        if (vector_row(tr("editor.particle_at"), emitter.at, -16.0f, 32.0f)) mark_block_dirty();
+        if (vector_row(tr("editor.particle_spread"), emitter.spread, 0.0f, 16.0f)) mark_block_dirty();
+        hint(tr("editor.particle_at_hint"));
+        // How often, how many.
+        label({x, y, label_w, ROW}, tr("editor.particle_chance"));
+        if (float_field({x + label_w, y, width - label_w, ROW}, emitter.chance, 0.0f, 1.0f)) mark_block_dirty();
+        y += ROW + GAP;
+        label({x, y, label_w, ROW}, tr("editor.particle_count"));
+        if (int_field({x + label_w, y, width - label_w, ROW}, emitter.count, 1, 16)) mark_block_dirty();
+        y += ROW + GAP;
+        // Its color (a leaf has its block's own).
+        if (emitter.kind == 3) {
+            hint(tr("editor.particle_leaf_color"));
+        } else {
+            label({x, y, width - ROW - GAP, ROW}, tr("editor.particle_color"));
+            DrawRectangleRec({x + width - ROW, y, ROW, ROW}, emitter.color);
+            DrawRectangleLinesEx({x + width - ROW, y, ROW, ROW}, 1.0f, gui_color(DEFAULT, LINE_COLOR));
+            y += ROW + GAP;
+            const float field = (width - GAP * 3) / 4.0f;
+            unsigned char* channels[4] = {&emitter.color.r, &emitter.color.g, &emitter.color.b, &emitter.color.a};
+            for (int c = 0; c < 4; ++c) {
+                float value = *channels[c];
+                if (float_field({x + c * (field + GAP), y, field, ROW}, value, 0.0f, 255.0f)) {
+                    *channels[c] = static_cast<unsigned char>(std::lround(value));
+                    mark_block_dirty();
+                }
+            }
+            y += ROW + GAP;
+        }
+        // Only from an open underside (leaves).
+        bool above_air = emitter.only_above_air;
+        GuiCheckBox({x, y + 4, ROW - 8, ROW - 8}, tr("editor.particle_above_air").c_str(), &above_air);
+        if (above_air != emitter.only_above_air) {
+            emitter.only_above_air = above_air;
+            mark_block_dirty();
+        }
+        y += ROW + GAP;
+        hint(tr("editor.particle_rate_hint"));
+    }
+
+    content_height = y - (view.y + block_particles_scroll.y) + PAD;
+    EndScissorMode();
+    GuiUnlock();
+}
+
 // -------------------------------------------------------------- Preview --
 
 void ModelEditor::update_block_camera(Rectangle view)
@@ -1595,6 +1846,34 @@ void ModelEditor::draw_block_preview(Rectangle view)
         rlDrawRenderBatchActive();
         rlEnableBackfaceCulling();
         EndShaderMode();
+
+        draw_particles(preview_particles, cam, particle_sheet(), atlas);
+        rlDrawRenderBatchActive();
+
+        // Its emitters (while they're edited): each point, the picked one's
+        // spread as a box - where they are on the block as it's shown.
+        if (block_panel_tab == 3) {
+            const std::vector<BlockParticleEmitter> emitters = block_file::to_emitters(block.particles);
+            const BlockInstanceState emit_state = particle_state(block, state);
+            const BlockStateModel model = state_model_of(block, state);
+            auto at = [&](const BlockParticleEmitter& emitter, Vector3 unit) {
+                return Vector3Add(origin, block_particles::emit_point(emitter, unit, model, emit_state, block.directional));
+            };
+            rlDrawRenderBatchActive();
+            rlDisableDepthTest();
+            for (size_t i = 0; i < emitters.size(); ++i) {
+                const bool picked = static_cast<int>(i) == selected_emitter;
+                DrawSphere(at(emitters[i], {0, 0, 0}), picked ? 0.025f : 0.018f, picked ? YELLOW : Fade(YELLOW, 0.5f));
+                if (!picked) continue;
+                constexpr int EDGES[12][2] = {{0, 1}, {1, 3}, {3, 2}, {2, 0}, {4, 5}, {5, 7}, {7, 6}, {6, 4}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
+                auto corner = [&](int c) {
+                    return at(emitters[i], {c & 1 ? 1.0f : -1.0f, c & 2 ? 1.0f : -1.0f, c & 4 ? 1.0f : -1.0f});
+                };
+                for (const auto& edge : EDGES) DrawLine3D(corner(edge[0]), corner(edge[1]), Fade(YELLOW, 0.8f));
+            }
+            rlDrawRenderBatchActive();
+            rlEnableDepthTest();
+        }
 
         // On a wall: that wall, see-through, behind it (the north one).
         if (state.attachment != BlockFace::Bottom && state.attachment != BlockFace::Top) {
@@ -1778,6 +2057,8 @@ void ModelEditor::draw_block_game_view(Rectangle bounds)
     rlDrawRenderBatchActive();
     rlEnableDepthMask();
     EndShaderMode();
+    draw_particles(game_particles, cam, particle_sheet(), atlas);
+    rlDrawRenderBatchActive();
     // The left one as if aimed at: the game's dark frame round its hitbox.
     if (show_hitbox) {
         const BlockShapeBoxes hitbox = hitbox_boxes(block, state);

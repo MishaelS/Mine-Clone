@@ -33,6 +33,9 @@
       "west": { "uv": [8, 6, 9, 7], "normal": "in" }
     } }
   ],
+  "particles": [
+    { "type": "dust", "at": [8, 9, 8], "spread": [2, 2.5, 2], "chance": 0.2, "count": 2, "color": [255, 0, 0, 255] }
+  ],
   "states": {
     "floor": { "hitbox": [6, 0, 6, 10, 10, 10] },
     "wall": { "hitbox": [5, 3, 1, 11, 14, 7], "offset": [0, 2.4, -8], "pivot": [8, 2.4, 0], "angle": 22.5 }

@@ -224,6 +224,17 @@ BlockInstanceState shape_state_example(BlockShapeKind kind, int index)
     return state;
 }
 
+Vector3 turn_from_south(Vector3 p, HorizontalDirection facing)
+{
+    // turn_to_wall()'s north-wall layout faces south too: the same turns.
+    switch (facing) {
+        case HorizontalDirection::North: return turn_to_wall(p, BlockFace::South);
+        case HorizontalDirection::East:  return turn_to_wall(p, BlockFace::West);
+        case HorizontalDirection::West:  return turn_to_wall(p, BlockFace::East);
+        default:                         return p;
+    }
+}
+
 bool is_pair_kind(BlockShapeKind kind)
 {
     return kind == BlockShapeKind::Door || kind == BlockShapeKind::Bed;

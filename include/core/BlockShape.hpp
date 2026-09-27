@@ -214,6 +214,10 @@ Vector3 place_model_normal(const BlockStateModel& model, BlockFace attachment, V
 // `model`'s hitbox turned to the wall `attachment` names.
 BoundingBox place_hitbox(const BlockStateModel& model, BlockFace attachment);
 
+// A point (0..1 cell space) of a layout whose front faces south, turned so
+// that front faces `facing` - a directional block's (a furnace's).
+Vector3 turn_from_south(Vector3 p, HorizontalDirection facing);
+
 // Whether a block of `kind` is one half of a two-cell block (a door, a bed
 // - BlockProperties::partner/pair_half).
 bool is_pair_kind(BlockShapeKind kind);

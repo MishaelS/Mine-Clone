@@ -678,6 +678,26 @@
     "editor.block_biome": "Цвет биома",
     "editor.biome.none": "Нет",
     "editor.biome.grass": "Трава",
-    "editor.biome.foliage": "Листва"
+    "editor.biome.foliage": "Листва",
+    "editor.block_tab_particles": "Частицы",
+    "editor.particles_section": "Частицы блока",
+    "editor.particles_hint": "Что блок испускает сам по себе: игра каждый тик выбирает случайные блоки рядом с игроком (ближние чаще) и даёт им шанс. Превью показывает их вживую.",
+    "editor.particles_none": "Пока ничего.",
+    "editor.particles_add": "+ Частица",
+    "editor.particle_section": "Выбранная частица",
+    "editor.particle_kind": "Вид",
+    "editor.particle.flame": "Пламя",
+    "editor.particle.smoke": "Дым",
+    "editor.particle.dust": "Пыль (цветная)",
+    "editor.particle.leaf": "Лист",
+    "editor.particle_at": "Точка, px",
+    "editor.particle_spread": "Разброс ±, px",
+    "editor.particle_at_hint": "В координатах модели: у факела на стене точка наклоняется вместе с ним; у направленного блока - как будто перед смотрит на юг (к камере). Жёлтая точка и рамка разброса видны в превью.",
+    "editor.particle_chance": "Шанс (0..1)",
+    "editor.particle_count": "Сколько за раз",
+    "editor.particle_color": "Цвет",
+    "editor.particle_leaf_color": "Лист берёт цвет блока - в мире цвет его биома.",
+    "editor.particle_above_air": "Только если снизу воздух",
+    "editor.particle_rate_hint": "Шанс - за каждый раз, когда игра выбрала этот блок: у блока в паре шагов от игрока это примерно 3 раза в секунду, дальше - реже."
   }
 }

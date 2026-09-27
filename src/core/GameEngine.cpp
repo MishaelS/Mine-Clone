@@ -563,6 +563,7 @@ void GameEngine::tick()
     tick_mobs();
     update_leaf_decay();
     update_random_ticks();
+    animate_blocks();
 }
 
 void GameEngine::tick_mobs()
@@ -1031,6 +1032,56 @@ void GameEngine::update_random_ticks()
                     }
                 }
             }
+        }
+    }
+}
+
+void GameEngine::animate_blocks()
+{
+    if (!world) return;
+    constexpr int SAMPLES = 667;
+    static uint32_t random = 0x2545F491u;
+    auto next_random = [] {
+        random ^= random << 13;
+        random ^= random >> 17;
+        random ^= random << 5;
+        return random;
+    };
+    auto offset = [&](int radius) {
+        return static_cast<int>(next_random() % static_cast<uint32_t>(radius)) - static_cast<int>(next_random() % static_cast<uint32_t>(radius));
+    };
+    const int cx = static_cast<int>(std::floor(camera.position.x));
+    const int cy = static_cast<int>(std::floor(camera.position.y));
+    const int cz = static_cast<int>(std::floor(camera.position.z));
+    for (int i = 0; i < SAMPLES; ++i) {
+        for (int radius : {16, 32}) {
+            const int x = cx + offset(radius), y = cy + offset(radius), z = cz + offset(radius);
+            const BlockType type = world->get_block(x, y, z);
+            if (!get_block_properties(type).particles.empty()) emit_block_particles(x, y, z, type);
+        }
+    }
+}
+
+void GameEngine::emit_block_particles(int x, int y, int z, BlockType type)
+{
+    const BlockProperties& properties = get_block_properties(type);
+    const BlockInstanceState state = unpack_block_state(world->get_block_orientation(x, y, z), world->get_block_state(x, y, z));
+    const BlockStateModel& model = properties.state_models[static_cast<size_t>(shape_state_index(properties.shape_kind, state))];
+    auto unit = [] { return GetRandomValue(-1000, 1000) / 1000.0f; };
+    for (const BlockParticleEmitter& emitter : properties.particles) {
+        if (emitter.only_above_air && world->get_block(x, y - 1, z) != BlockType::Air) continue;
+        if (GetRandomValue(0, 9999) >= static_cast<int>(emitter.chance * 10000.0f)) continue;
+        // A leaf takes its block's own color - its biome's, where it has one.
+        Color color = emitter.color;
+        if (emitter.kind == BlockParticleKind::Leaf) {
+            const BiomeTint biome = properties.biome_tints[static_cast<int>(BlockFace::North)];
+            color = biome == BiomeTint::Foliage ? world->get_foliage_tint(x, z)
+                  : biome == BiomeTint::Grass   ? world->get_grass_tint(x, z)
+                                                : properties.texture_tints[static_cast<int>(BlockFace::North)];
+        }
+        for (int n = 0; n < emitter.count; ++n) {
+            const Vector3 p = block_particles::emit_point(emitter, {unit(), unit(), unit()}, model, state, properties.directional);
+            particles.spawn_block_particle(emitter.kind, {x + p.x, y + p.y, z + p.z}, color, type);
         }
     }
 }
