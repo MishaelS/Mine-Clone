@@ -4,6 +4,7 @@
 #include "model/EntityModel.hpp"
 #include "model/EntityModelRenderer.hpp"
 #include "rendering/EntityLighting.hpp"
+#include "rendering/HeldItem.hpp"
 
 #include "raymath.h"
 #include "rlgl.h"
@@ -15,6 +16,7 @@ namespace {
     constexpr const char* PLAYER_MODEL_PATH = ASSETS_PATH "models/player.json";
     constexpr const char* SWING_ANIMATION = "swing"; // the model's Manual hit/use animation
     constexpr const char* SLEEP_ANIMATION = "sleep"; // the model's Manual pose/breathing while asleep in bed
+    constexpr const char* HOLD_ANIMATION = "hold";   // the model's Manual pose while holding something (the arm raised a little)
 
     // The model is 32 pixels tall; scaling those to the controller's
     // 1.8-block standing height keeps the visible body and the gameplay
@@ -39,7 +41,7 @@ namespace {
     // The whole model turned to `body_yaw`, its head on toward `look_yaw`
     // and down by `pitch_down` (all degrees).
     void draw_model(Vector3 feet_position, float body_yaw, float look_yaw, float pitch_down, Color tint,
-                    const EntityAnimator& animator)
+                    const EntityAnimator& animator, const ItemStack& held)
     {
         const EntityModel& model = player_model();
         const Texture2D& skin = model.skin.empty() ? Texture2D{} : TextureManager::get(model.skin);
@@ -50,11 +52,13 @@ namespace {
         rlTranslatef(feet_position.x, feet_position.y, feet_position.z);
         rlRotatef(body_yaw, 0.0f, 1.0f, 0.0f);
         draw_entity_model(model, skin, pose, MODEL_PIXEL, tint);
+        draw_held_item(model, pose, held, MODEL_PIXEL, tint); // in the right hand's item slot
         rlPopMatrix();
     }
 }
 
-void PlayerRenderer::draw(Vector3 feet_position, Vector3 forward, bool sneaking, const World& world, float swing_seconds) const
+void PlayerRenderer::draw(Vector3 feet_position, Vector3 forward, bool sneaking, const World& world, float swing_seconds,
+                          const ItemStack& held) const
 {
     if (Vector3LengthSqr(forward) < 0.000001f) forward = {0.0f, 0.0f, 1.0f};
     forward = Vector3Normalize(forward);
@@ -70,7 +74,9 @@ void PlayerRenderer::draw(Vector3 feet_position, Vector3 forward, bool sneaking,
     const bool walking = moved_distance / delta_time > WALKING_SPEED;
     last_feet_position = feet_position;
     animator.update(delta_time, moved_distance, sneaking);
-    animator.set_manual(swing_seconds >= 0.0f ? SWING_ANIMATION : "", swing_seconds);
+    animator.clear_manual();
+    if (!held.empty()) animator.add_manual(HOLD_ANIMATION, 0.0f);
+    if (swing_seconds >= 0.0f) animator.add_manual(SWING_ANIMATION, swing_seconds);
 
     if (!has_body_yaw) {
         body_yaw = look_yaw;
@@ -82,18 +88,21 @@ void PlayerRenderer::draw(Vector3 feet_position, Vector3 forward, bool sneaking,
 
     // Lit by the light around the middle of the body.
     const Color tint = entity_environment_tint(world, Vector3Add(feet_position, {0.0f, 0.9f, 0.0f}));
-    draw_model(feet_position, body_yaw, look_yaw, pitch_down, tint, animator);
+    draw_model(feet_position, body_yaw, look_yaw, pitch_down, tint, animator, held);
 }
 
-void PlayerRenderer::draw_flat(Vector3 feet_position, float yaw_degrees, float pitch_degrees, Color tint) const
+void PlayerRenderer::draw_flat(Vector3 feet_position, float yaw_degrees, float pitch_degrees, Color tint, const ItemStack& held) const
 {
     // The preview's body faces the viewer; only a look past the head's own
     // limit turns it.
     const float body = body_yaw_following_look(player_model(), 0.0f, yaw_degrees);
-    // The preview stands still: only its "always" animations play.
+    // The preview stands still: only its "always" animations play - plus the
+    // holding pose with something in hand.
     static EntityAnimator preview_animator;
     preview_animator.update(GetFrameTime(), 0.0f);
-    draw_model(feet_position, body, yaw_degrees, pitch_degrees, tint, preview_animator);
+    preview_animator.clear_manual();
+    if (!held.empty()) preview_animator.add_manual(HOLD_ANIMATION, 0.0f);
+    draw_model(feet_position, body, yaw_degrees, pitch_degrees, tint, preview_animator, held);
 }
 
 float PlayerRenderer::model_height()
@@ -107,7 +116,7 @@ float PlayerRenderer::back_depth()
 }
 
 void PlayerRenderer::draw_sleeping(Vector3 stand_feet, Vector3 bed_feet, Vector3 head_direction, float lie_down,
-                                   float seconds, const World& world) const
+                                   float seconds, const World& world, const ItemStack& held) const
 {
     const EntityModel& model = player_model();
     lie_down = std::clamp(lie_down, 0.0f, 1.0f);
@@ -135,5 +144,6 @@ void PlayerRenderer::draw_sleeping(Vector3 stand_feet, Vector3 bed_feet, Vector3
     rlRotatef(yaw, 0.0f, 1.0f, 0.0f);
     rlRotatef(-90.0f * lie_down, 1.0f, 0.0f, 0.0f);
     draw_entity_model(model, skin, pose, MODEL_PIXEL, tint);
+    draw_held_item(model, pose, held, MODEL_PIXEL, tint);
     rlPopMatrix();
 }

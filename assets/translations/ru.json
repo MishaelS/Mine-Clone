@@ -405,7 +405,7 @@
     "editor.delete_key": "Удалить ключ",
     "editor.time": "Время: {0} с",
     "editor.timeline_empty": "Выберите или создайте анимацию",
-    "editor.viewport_hint": "СКМ - вращать, Shift+СКМ - сдвиг, колесо - масштаб (Alt+ЛКМ вместо СКМ), Num 1/3/7 - виды, Num 5 - орто, F - к части, ЛКМ - выбрать, Ctrl+Z - отменить, Ctrl+Shift+Z / Ctrl+Y - вернуть",
+    "editor.viewport_hint": "СКМ - вращать, Shift+СКМ - сдвиг, колесо - масштаб (Alt+ЛКМ вместо СКМ), Num 1/3/7 - виды, Num 5 - орто, F - к части, ЛКМ - выбрать, Ctrl+Z - отменить, Ctrl+Shift+Z / Ctrl+Y - вернуть, WASD - перемещение, Q/E - вниз/вверх (Shift - быстрее)",
     "editor.look": "Взгляд",
     "editor.look_enabled": "Следит за взглядом",
     "editor.body_turn_angle": "Туловище поворачивается после, °",

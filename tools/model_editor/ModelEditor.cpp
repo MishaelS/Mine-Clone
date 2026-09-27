@@ -32,11 +32,11 @@ namespace {
     constexpr float GAP               = 6.0f;
     constexpr float PAD               = 10.0f;
 
-    constexpr Color VIEWPORT_BACKGROUND = {48, 48, 52, 255};
+    constexpr Color VIEWPORT_BACKGROUND = {  8,  48,  52, 255};
     constexpr Color PLAYER_VIEW_SKY     = {120, 165, 220, 255};
     constexpr float PLAYER_VIEW_FOV     = 70.0f; // FirstPersonHand's own
     constexpr Color SLOT_BOX            = {120, 220, 255, 255};
-    constexpr Color LETTERBOX           = {20, 20, 22, 255};
+    constexpr Color LETTERBOX           = { 20,  20,  22, 255};
 
     // The first-person arm's pose for each preview_item (as FirstPersonHand
     // plays them): nothing, a block, a tool, any other item.
@@ -48,15 +48,15 @@ namespace {
         }
         return -1;
     }
-    constexpr Color GRID_LINE           = {68, 68, 74, 255};
-    constexpr Color GRID_SUBLINE        = {56, 56, 61, 255};
-    constexpr Color AXIS_X              = {200, 70, 70, 255};
-    constexpr Color AXIS_Z              = {110, 170, 60, 255};
-    constexpr Color SELECTION           = {255, 160, 20, 255};
-    constexpr Color PIVOT               = {90, 170, 255, 255};
-    constexpr Color KEY_SELECTED        = {255, 200, 60, 255};
+    constexpr Color GRID_LINE           = { 68,  68,  74, 255};
+    constexpr Color GRID_SUBLINE        = { 56,  56,  61, 255};
+    constexpr Color AXIS_X              = {200,  70,  70, 255};
+    constexpr Color AXIS_Z              = {110, 170,  60, 255};
+    constexpr Color SELECTION           = {255, 160,  20, 255};
+    constexpr Color PIVOT               = { 90, 170, 255, 255};
+    constexpr Color KEY_SELECTED        = {255, 200,  60, 255};
     constexpr Color KEY_OTHER           = {120, 120, 130, 255};
-    constexpr Color PLAYHEAD            = {80, 150, 255, 255};
+    constexpr Color PLAYHEAD            = { 80, 150, 255, 255};
 
     std::string models_directory() { return std::string(ASSETS_PATH) + "models/"; }
 
@@ -74,7 +74,7 @@ namespace {
     // EntityModelRenderer applies - raymath's MatrixMultiply(a, b) applies a
     // first.
     Matrix part_local_matrix(const ModelPart& part, const PartPose& pose) {
-        Vector3 pivot = Vector3Scale(part.pivot, MODEL_SCALE);
+        Vector3 pivot  = Vector3Scale(part.pivot, MODEL_SCALE);
         Vector3 offset = Vector3Scale(pose.offset, MODEL_SCALE);
         Matrix m = MatrixTranslate(-pivot.x, -pivot.y, -pivot.z);
         m = MatrixMultiply(m, MatrixRotate({1, 0, 0}, pose.rotation.x * DEG2RAD));
@@ -120,8 +120,8 @@ ModelEditor::ModelEditor()
     }
     editor_load_dark_style();
     GuiSetFont(editor_text::font());
-    GuiSetStyle(DEFAULT, TEXT_SIZE, 16);
-    GuiSetStyle(DEFAULT, TEXT_SPACING, 1);
+    GuiSetStyle(DEFAULT, TEXT_SIZE   , 16);
+    GuiSetStyle(DEFAULT, TEXT_SPACING,  1);
 
     std::error_code error;
     const std::string skins_root = std::string(ASSETS_PATH) + "sprites/entities";
@@ -179,6 +179,7 @@ void ModelEditor::run()
                 }
             }
         }
+
         if (playing) {
             if (EntityAnimation* animation = current_animation()) {
                 time += GetFrameTime();
@@ -204,7 +205,7 @@ void ModelEditor::run()
                        scene_rect(viewport), {0, 0}, 0.0f, WHITE);
         label({viewport.x + PAD, viewport.y + viewport.height - ROW - 4, viewport.width - PAD * 2, ROW},
               tr(player_view ? "editor.player_view_hint" : "editor.viewport_hint"));
-        if (player_view) {
+        if (player_view || has_item_slots()) {
             // What the hand holds in the preview.
             const Rectangle combo = preview_combo_rect(viewport);
             label({combo.x, combo.y, 80, ROW}, tr("editor.preview_item"));
@@ -327,6 +328,30 @@ void ModelEditor::update_camera(Rectangle viewport)
         press_position = mouse;
     }
 
+    // W/S forward/back along the view (level), A/D left/right, Q/E down/up
+    // - the orbit centre moves, the camera with it. Faster with Shift, and
+    // the further out it is. Not while typing, with Ctrl/Cmd held (Ctrl+S
+    // saves) or in the player's view (fixed at the eye).
+    const bool command = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL) || IsKeyDown(KEY_LEFT_SUPER) ||
+                         IsKeyDown(KEY_RIGHT_SUPER);
+    if (!typing() && !command && !player_view && !models_dropdown_open) {
+        const float forward_input = (IsKeyDown(KEY_W) ? 1.0f : 0.0f) - (IsKeyDown(KEY_S) ? 1.0f : 0.0f);
+        const float right_input = (IsKeyDown(KEY_D) ? 1.0f : 0.0f) - (IsKeyDown(KEY_A) ? 1.0f : 0.0f);
+        const float up_input = (IsKeyDown(KEY_E) ? 1.0f : 0.0f) - (IsKeyDown(KEY_Q) ? 1.0f : 0.0f);
+        if (forward_input != 0.0f || right_input != 0.0f || up_input != 0.0f) {
+            const Camera3D cam = camera();
+            Vector3 forward = Vector3Subtract(cam.target, cam.position);
+            forward.y = 0.0f;
+            forward = Vector3LengthSqr(forward) > 0.0001f ? Vector3Normalize(forward) : Vector3{0.0f, 0.0f, -1.0f};
+            const Vector3 right = Vector3CrossProduct(forward, {0.0f, 1.0f, 0.0f});
+            const float speed = orbit_distance * 0.8f * (shift ? 3.0f : 1.0f) * GetFrameTime();
+            Vector3 move = Vector3Add(Vector3Scale(forward, forward_input), Vector3Scale(right, right_input));
+            if (Vector3LengthSqr(move) > 1.0f) move = Vector3Normalize(move);
+            move.y = up_input;
+            orbit_target = Vector3Add(orbit_target, Vector3Scale(move, speed));
+        }
+    }
+
     if (navigating && drag_started_here && !player_view) { // the player's view doesn't orbit
         Vector2 delta = GetMouseDelta();
         if (shift) {
@@ -396,6 +421,14 @@ void ModelEditor::draw_viewport(Rectangle viewport)
     EndTextureMode();
 }
 
+bool ModelEditor::has_item_slots() const
+{
+    for (const ModelPart& part : model.parts) {
+        if (!part.item_slot.empty()) return true;
+    }
+    return false;
+}
+
 Rectangle ModelEditor::scene_rect(Rectangle viewport) const
 {
     if (!player_view || viewport.width <= 0 || viewport.height <= 0) return viewport;
@@ -443,7 +476,7 @@ void ModelEditor::draw_item_slots(const ModelPose& pose)
     // Every slot's box, where the game puts that kind of held item - and in
     // the player's view the example item picked above it.
     const char* preview_slot = preview_item == 1 ? "block" : preview_item == 2 ? "tool" : preview_item == 3 ? "item" : "";
-    if (player_view && preview_item != 0 && preview_items_atlas.id == 0) {
+    if (preview_item != 0 && preview_items_atlas.id == 0) {
         preview_items_atlas = LoadTexture(ASSETS_PATH "sprites/items.png");
         preview_blocks_atlas = LoadTexture(ASSETS_PATH "sprites/terrain.png");
         SetTextureFilter(preview_items_atlas, TEXTURE_FILTER_POINT);
@@ -452,7 +485,7 @@ void ModelEditor::draw_item_slots(const ModelPose& pose)
     for (const ModelPart& part : model.parts) {
         if (part.item_slot.empty() || part.cubes.empty()) continue;
         if (!push_item_slot(model, pose, part.item_slot, MODEL_SCALE)) continue;
-        const bool previewed = player_view && part.item_slot == preview_slot;
+        const bool previewed = part.item_slot == preview_slot;
         if (!previewed) {
             DrawCubeWiresV({0, 0, 0}, {1, 1, 1}, Fade(SLOT_BOX, player_view ? 0.5f : 0.8f));
         } else if (preview_item == 1) {
@@ -2296,7 +2329,7 @@ std::string ModelEditor::last_model() const
 
 bool ModelEditor::over_floating_window(Rectangle viewport, Vector2 point) const
 {
-    if (player_view && CheckCollisionPointRec(point, preview_combo_rect(viewport))) return true;
+    if ((player_view || has_item_slots()) && CheckCollisionPointRec(point, preview_combo_rect(viewport))) return true;
     // Mid-move/resize the mouse may run ahead of the window - still its.
     for (int id : {GRAPH_WINDOW, UV_WINDOW}) {
         if (!floating_window_open(id)) continue;

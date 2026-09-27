@@ -2,7 +2,7 @@
 #include "core/TextureManager.hpp"
 #include "model/EntityModelRenderer.hpp"
 #include "model/ModelLibrary.hpp"
-#include "rendering/BlockMesh.hpp"
+#include "rendering/HeldItem.hpp"
 
 #include "raymath.h"
 #include "rlgl.h"
@@ -33,15 +33,6 @@ namespace {
     constexpr float BOB_RATE            = 8.0f;         // how fast bobbing fades in/out (0.4 per tick)
     constexpr float BOB_MAX             = 0.1f;         // blocks/tick of walking that bobs fully
     constexpr float WALK_DISTANCE_SCALE = 0.6f;         // Minecraft's walkDist step per block walked
-
-    // Which item slot (ModelPart::item_slot) a held stack goes in.
-    const char* slot_for(const ItemStack& stack, std::optional<Rectangle>* sprite_out = nullptr) {
-        std::optional<Rectangle> sprite =
-            stack.holds_item() ? std::optional<Rectangle>(get_item_properties(stack.tool).atlas_source)
-                               : get_block_item_sprite(stack.block);
-        if (sprite_out) *sprite_out = sprite;
-        return !sprite ? "block" : stack.is_tool() ? "tool" : "item";
-    }
 
     bool same_item(const ItemStack& a, const ItemStack& b) {
         if (a.empty() || b.empty()) return a.empty() == b.empty();
@@ -95,7 +86,7 @@ void FirstPersonHand::update(float delta_time, const ItemStack& held, Vector3 fe
     empty_seconds = same_item(shown, held) ? empty_seconds + delta_time : 0.0f; // time in the current pose
     animator.update(delta_time, 0.0f);
     animator.clear_manual();
-    animator.add_manual(shown.empty() ? std::string(EMPTY_ANIMATION) : HOLD_ANIMATION_PREFIX + std::string(slot_for(shown)),
+    animator.add_manual(shown.empty() ? std::string(EMPTY_ANIMATION) : HOLD_ANIMATION_PREFIX + std::string(held_item_slot(shown)),
                         empty_seconds);
     if (swing_time >= 0.0f) animator.add_manual(SWING_ANIMATION, swing_time);
 }
@@ -141,15 +132,7 @@ void FirstPersonHand::draw(Color light) const
     draw_entity_model(model, skin, pose, MODEL_PIXEL, light);
 
     // Whatever it holds, filling the model's slot for that kind of item.
-    if (!shown.empty()) {
-        std::optional<Rectangle> sprite;
-        const char* slot = slot_for(shown, &sprite);
-        if (push_item_slot(model, pose, slot, MODEL_PIXEL)) {
-            if (sprite) draw_extruded_sprite(get_item_atlas_texture(), *sprite, light);
-            else draw_block_cube(shown.block, 255, std::nullopt, light);
-            rlPopMatrix();
-        }
-    }
+    draw_held_item(model, pose, shown, MODEL_PIXEL, light);
 
     rlPopMatrix();
     EndShaderMode();

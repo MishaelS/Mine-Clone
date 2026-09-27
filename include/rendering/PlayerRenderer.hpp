@@ -1,5 +1,6 @@
 #pragma once
 
+#include "items/Inventory.hpp"
 #include "model/EntityModel.hpp"
 #include "raylib.h"
 
@@ -20,7 +21,10 @@ public:
     // `sneaking` plays the model's sneaking-state animations (see
     // EntityAnimator). `swing_seconds`: how far into a hit/use swing the
     // right arm is (-1 = none) - plays the model's "swing" animation.
-    void draw(Vector3 feet_position, Vector3 forward, bool sneaking, const World& world, float swing_seconds = -1.0f) const;
+    // `held` is drawn in the model's right hand (its item slots - see
+    // rendering/HeldItem.hpp).
+    void draw(Vector3 feet_position, Vector3 forward, bool sneaking, const World& world, float swing_seconds = -1.0f,
+              const ItemStack& held = {}) const;
 
     // Same model, but rotated by explicit yaw/pitch (degrees) instead of a
     // world-space forward vector, and lit by a single fixed `tint` instead
@@ -31,14 +35,14 @@ public:
     // inventory character preview always reading as evenly lit.
     // `yaw_degrees`/`pitch_degrees` (positive = down) are the look direction
     // - the head follows it, the body only past the head's own limit.
-    void draw_flat(Vector3 feet_position, float yaw_degrees, float pitch_degrees, Color tint) const;
+    void draw_flat(Vector3 feet_position, float yaw_degrees, float pitch_degrees, Color tint, const ItemStack& held = {}) const;
 
     // Asleep in a bed: lying on its back, head toward `head_direction`
     // (horizontal unit vector, the bed's head end), the feet at
     // `bed_feet` - lying down from standing at `stand_feet` as `lie_down`
     // goes 0 -> 1. Plays the model's "sleep" animation, `seconds` in.
     void draw_sleeping(Vector3 stand_feet, Vector3 bed_feet, Vector3 head_direction, float lie_down, float seconds,
-                       const World& world) const;
+                       const World& world, const ItemStack& held = {}) const;
     // Model pixels from the feet to the top of the head, and from the
     // middle of the body to its back - for placing it on a bed.
     static float model_height();

@@ -70,7 +70,10 @@
       "look": false,
       "body_turn_angle": 50,
       "cubes": [{ "origin": [0, 0, -2], "size": [4, 12, 4], "uv": [16, 48] }]
-    }
+    },
+    {"name": "slot_block", "parent": "right_arm", "pivot": [-6.0, 12.0, 2.0], "rotation": [159.25, -43.08, -165.49], "rotation_min": [-180, -180, -180], "rotation_max": [180, 180, 180], "look": false, "body_turn_angle": 50, "item_slot": "block", "cubes": [{"origin": [-7.292, 9.647, -2.708], "size": [6.0, 6.0, 6.0], "uv": [0, 0]}]},
+    {"name": "slot_tool", "parent": "right_arm", "pivot": [-6.0, 12.0, 2.0], "rotation": [90.0, -55.0, 90.0], "rotation_min": [-180, -180, -180], "rotation_max": [180, 180, 180], "look": false, "body_turn_angle": 50, "item_slot": "tool", "cubes": [{"origin": [-9.237, 7.085, 1.575], "size": [13.6, 13.6, 0.85], "uv": [0, 0]}]},
+    {"name": "slot_item", "parent": "right_arm", "pivot": [-6.0, 12.0, 2.0], "rotation": [90.0, 0.0, 180.0], "rotation_min": [-180, -180, -180], "rotation_max": [180, 180, 180], "look": false, "body_turn_angle": 50, "item_slot": "item", "cubes": [{"origin": [-10.4, 10.6, 2.725], "size": [8.8, 8.8, 0.55], "uv": [0, 0]}]}
   ],
   "animations": [
     {
@@ -146,6 +149,7 @@
         { "part": "right_arm", "keys": [{ "time": 0, "rotation": [0, 0, -5] }, { "time": 1.6, "rotation": [-2, 0, -7] }, { "time": 4, "rotation": [0, 0, -5] }] },
         { "part": "left_arm", "keys": [{ "time": 0, "rotation": [0, 0, 5] }, { "time": 1.6, "rotation": [-2, 0, 7] }, { "time": 4, "rotation": [0, 0, 5] }] }
       ]
-    }
+    },
+    {"name": "hold", "length": 1, "loop": true, "trigger": "manual", "blocks_per_loop": 2, "links": [], "graph_position": [420, 268], "tracks": [{"part": "right_arm", "keys": [{"time": 0, "rotation": [-18, 0, 0]}]}]}
   ]
 }

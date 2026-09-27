@@ -126,7 +126,7 @@ namespace {
     // reused every call - LoadRenderTexture()/UnloadRenderTexture() every
     // frame would be wasteful for something drawn every frame the
     // inventory screen is open.
-    void draw_player_preview(Rectangle destination, Vector2 mouse) {
+    void draw_player_preview(Rectangle destination, Vector2 mouse, const ItemStack& held) {
         static RenderTexture2D target = LoadRenderTexture(PREVIEW_RENDER_WIDTH, PREVIEW_RENDER_HEIGHT);
 
         Vector2 box_center = {destination.x + destination.width / 2.0f, destination.y + destination.height / 2.0f};
@@ -144,7 +144,7 @@ namespace {
         ClearBackground(BLANK);
         BeginMode3D(camera);
         BeginShaderMode(entity_cutout_shader()); // the skin's decoration layer: see-through pixels stay see-through
-        PlayerRenderer{}.draw_flat({0.0f, 0.0f, 0.0f}, yaw, pitch, WHITE);
+        PlayerRenderer{}.draw_flat({0.0f, 0.0f, 0.0f}, yaw, pitch, WHITE, held);
         EndShaderMode();
         EndMode3D();
         EndTextureMode();
@@ -512,7 +512,7 @@ std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory, GameMod
             panel_x + INVENTORY_PREVIEW_BOX.x * inventory_scale, panel_y + INVENTORY_PREVIEW_BOX.y * inventory_scale,
             INVENTORY_PREVIEW_BOX.width * inventory_scale, INVENTORY_PREVIEW_BOX.height * inventory_scale,
         };
-        draw_player_preview(preview_destination, GetMousePosition());
+        draw_player_preview(preview_destination, GetMousePosition(), inventory.hotbar[static_cast<size_t>(inventory.selected_slot)]);
     }
 
     // The open furnace's own state (World::furnace_state(), keyed by the

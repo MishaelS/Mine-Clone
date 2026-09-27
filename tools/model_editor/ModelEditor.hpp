@@ -211,6 +211,8 @@ private:
     Texture2D preview_items_atlas{};
     Texture2D preview_blocks_atlas{};
     Rectangle preview_combo_rect(Rectangle viewport) const;
+    // The "in hand" preview picker shows for any model with item slots.
+    bool has_item_slots() const;
     // The game window's width/height (the game's settings.json): the
     // player's view shows exactly that frame, letterboxed in the viewport.
     float game_aspect = 16.0f / 9.0f;

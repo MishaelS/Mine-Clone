@@ -14,7 +14,7 @@
     {
       "name": "arm",
       "parent": "",
-      "pivot": [9.009, -11.963, -7.696],
+      "pivot": [9.6, -15.2, -7.696],
       "rotation": [34.25, 0, -158.2],
       "rotation_min": [-180, -180, -180],
       "rotation_max": [180, 180, 180],
@@ -32,7 +32,7 @@
       "rotation_max": [180, 180, 180],
       "look": false,
       "body_turn_angle": 50,
-      "cubes": [{ "origin": [1.7, -22.6, -9.3], "size": [6, 6, 6], "uv": [0, 0], "rotation": [-32.7, -7.7, 47.8], "rotation_origin": [9.009, -17.583, -7.696] }]
+      "cubes": [{ "origin": [5.7, -24.8, -9.6], "size": [6, 6, 6], "uv": [0, 0], "rotation": [-7.4, 46.4, -44.1], "rotation_origin": [9.009, -17.583, -7.696] }]
     },
     {
       "name": "slot_tool",
@@ -69,10 +69,10 @@
       "links": [],
       "graph_position": [20, 16],
       "tracks": [
-        { "part": "arm",        "keys": [{ "time": 0, "rotation": [0, 0, 0] }, { "time": 0.015, "rotation": [7.13, -16.78, 12.79], "offset": [-2.584, 1.578, -0.501] }, { "time": 0.03, "rotation": [8.35, -21.32, 17.4], "offset": [-3.352, 1.463, -0.989] }, { "time": 0.045, "rotation": [8.65, -23.45, 20.35], "offset": [-3.752, 1.041, -1.453] }, { "time": 0.06, "rotation": [8.51, -24.22, 22.35], "offset": [-3.945, 0.521, -1.881] }, { "time": 0.075, "rotation": [8.13, -24.08, 23.73], "offset": [-4, 0, -2.263] }, { "time": 0.09, "rotation": [7.61, -23.26, 24.68], "offset": [-3.955, -0.473, -2.589] }, { "time": 0.12, "rotation": [6.37, -20.12, 25.71], "offset": [-3.659, -1.183, -3.043] }, { "time": 0.15, "rotation": [5.18, -15.59, 25.87], "offset": [-3.183, -1.542, -3.2] }, { "time": 0.18, "rotation": [4.27, -10.43, 25.04], "offset": [-2.602, -1.581, -3.043] }, { "time": 0.21, "rotation": [3.66, -5.49, 22.63], "offset": [-1.964, -1.369, -2.589] }, { "time": 0.24, "rotation": [3.02, -1.68, 17.84], "offset": [-1.302, -0.985, -1.881] }, { "time": 0.27, "rotation": [1.87, 0.22, 10.11], "offset": [-0.642, -0.507, -0.989] }, { "time": 0.3, "rotation": [0, 0, 0] }] },
+        { "part": "arm", "keys": [{ "time": 0, "rotation": [0, 0, 0] }, { "time": 0.015, "rotation": [7.13, -16.78, 12.79], "offset": [-2.584, 1.578, -0.501] }, { "time": 0.03, "rotation": [8.35, -21.32, 17.4], "offset": [-3.352, 1.463, -0.989] }, { "time": 0.045, "rotation": [8.65, -23.45, 20.35], "offset": [-3.752, 1.041, -1.453] }, { "time": 0.06, "rotation": [8.51, -24.22, 22.35], "offset": [-3.945, 0.521, -1.881] }, { "time": 0.075, "rotation": [8.13, -24.08, 23.73], "offset": [-4, 0, -2.263] }, { "time": 0.09, "rotation": [7.61, -23.26, 24.68], "offset": [-3.955, -0.473, -2.589] }, { "time": 0.12, "rotation": [6.37, -20.12, 25.71], "offset": [-3.659, -1.183, -3.043] }, { "time": 0.15, "rotation": [5.18, -15.59, 25.87], "offset": [-3.183, -1.542, -3.2] }, { "time": 0.18, "rotation": [4.27, -10.43, 25.04], "offset": [-2.602, -1.581, -3.043] }, { "time": 0.21, "rotation": [3.66, -5.49, 22.63], "offset": [-1.964, -1.369, -2.589] }, { "time": 0.24, "rotation": [3.02, -1.68, 17.84], "offset": [-1.302, -0.985, -1.881] }, { "time": 0.27, "rotation": [1.87, 0.22, 10.11], "offset": [-0.642, -0.507, -0.989] }, { "time": 0.3, "rotation": [0, 0, 0] }] },
         { "part": "slot_block", "keys": [{ "time": 0, "rotation": [0, 0, 0] }, { "time": 0.015, "rotation": [0, 0, 0] }, { "time": 0.03, "rotation": [0, 0, 0] }, { "time": 0.045, "rotation": [0, 0, 0] }, { "time": 0.06, "rotation": [0, 0, 0] }, { "time": 0.075, "rotation": [0, 0, 0] }, { "time": 0.09, "rotation": [0, 0, 0] }, { "time": 0.12, "rotation": [0, 0, 0] }, { "time": 0.15, "rotation": [0, 0, 0] }, { "time": 0.18, "rotation": [0, 0, 0] }, { "time": 0.21, "rotation": [0, 0, 0] }, { "time": 0.24, "rotation": [0, 0, 0] }, { "time": 0.27, "rotation": [0, 0, 0] }, { "time": 0.3, "rotation": [0, 0, 0] }] },
-        { "part": "slot_tool",  "keys": [{ "time": 0, "rotation": [0, 0, 0] }, { "time": 0.015, "rotation": [0, 0, 0] }, { "time": 0.03, "rotation": [0, 0, 0] }, { "time": 0.045, "rotation": [0, 0, 0] }, { "time": 0.06, "rotation": [0, 0, 0] }, { "time": 0.075, "rotation": [0, 0, 0] }, { "time": 0.09, "rotation": [0, 0, 0] }, { "time": 0.12, "rotation": [0, 0, 0] }, { "time": 0.15, "rotation": [0, 0, 0] }, { "time": 0.18, "rotation": [0, 0, 0] }, { "time": 0.21, "rotation": [0, 0, 0] }, { "time": 0.24, "rotation": [0, 0, 0] }, { "time": 0.27, "rotation": [0, 0, 0] }, { "time": 0.3, "rotation": [0, 0, 0] }] },
-        { "part": "slot_item",  "keys": [{ "time": 0, "rotation": [0, 0, 0] }, { "time": 0.015, "rotation": [0, 0, 0] }, { "time": 0.03, "rotation": [0, 0, 0] }, { "time": 0.045, "rotation": [0, 0, 0] }, { "time": 0.06, "rotation": [0, 0, 0] }, { "time": 0.075, "rotation": [0, 0, 0] }, { "time": 0.09, "rotation": [0, 0, 0] }, { "time": 0.12, "rotation": [0, 0, 0] }, { "time": 0.15, "rotation": [0, 0, 0] }, { "time": 0.18, "rotation": [0, 0, 0] }, { "time": 0.21, "rotation": [0, 0, 0] }, { "time": 0.24, "rotation": [0, 0, 0] }, { "time": 0.27, "rotation": [0, 0, 0] }, { "time": 0.3, "rotation": [0, 0, 0] }] }
+        { "part": "slot_tool", "keys": [{ "time": 0, "rotation": [0, 0, 0] }, { "time": 0.015, "rotation": [0, 0, 0] }, { "time": 0.03, "rotation": [0, 0, 0] }, { "time": 0.045, "rotation": [0, 0, 0] }, { "time": 0.06, "rotation": [0, 0, 0] }, { "time": 0.075, "rotation": [0, 0, 0] }, { "time": 0.09, "rotation": [0, 0, 0] }, { "time": 0.12, "rotation": [0, 0, 0] }, { "time": 0.15, "rotation": [0, 0, 0] }, { "time": 0.18, "rotation": [0, 0, 0] }, { "time": 0.21, "rotation": [0, 0, 0] }, { "time": 0.24, "rotation": [0, 0, 0] }, { "time": 0.27, "rotation": [0, 0, 0] }, { "time": 0.3, "rotation": [0, 0, 0] }] },
+        { "part": "slot_item", "keys": [{ "time": 0, "rotation": [0, 0, 0] }, { "time": 0.015, "rotation": [0, 0, 0] }, { "time": 0.03, "rotation": [0, 0, 0] }, { "time": 0.045, "rotation": [0, 0, 0] }, { "time": 0.06, "rotation": [0, 0, 0] }, { "time": 0.075, "rotation": [0, 0, 0] }, { "time": 0.09, "rotation": [0, 0, 0] }, { "time": 0.12, "rotation": [0, 0, 0] }, { "time": 0.15, "rotation": [0, 0, 0] }, { "time": 0.18, "rotation": [0, 0, 0] }, { "time": 0.21, "rotation": [0, 0, 0] }, { "time": 0.24, "rotation": [0, 0, 0] }, { "time": 0.27, "rotation": [0, 0, 0] }, { "time": 0.3, "rotation": [0, 0, 0] }] }
       ]
     },
     {

@@ -1768,12 +1768,13 @@ void GameEngine::draw_player_model() const
     if (sleeping) {
         // Lying in the bed at once, like Minecraft.
         player_renderer.draw_sleeping(sleep_stand_feet, sleep_bed_feet, sleep_head_direction, 1.0f,
-                                      sleep_elapsed_seconds, *world);
+                                      sleep_elapsed_seconds, *world, inventory.hotbar[inventory.selected_slot]);
         return;
     }
     Vector3 feet = player.feet_position();
     Vector3 look = Vector3Subtract(camera.target, camera.position);
-    player_renderer.draw(feet, look, player.is_sneaking(), *world, hand.swing_seconds());
+    player_renderer.draw(feet, look, player.is_sneaking(), *world, hand.swing_seconds(),
+                         inventory.hotbar[inventory.selected_slot]);
 }
 
 void GameEngine::draw_hitboxes() const
