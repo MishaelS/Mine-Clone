@@ -286,6 +286,13 @@ public:
     // many cells were actually written.
     int command_fill_region(int min_x, int min_y, int min_z, int max_x, int max_y, int max_z, BlockType type);
 
+    // Swaps the block at (x, y, z) for one that lets light through exactly
+    // the same way (grass <-> dirt, tall grass -> air): no relighting, just
+    // a remesh in the background - cheap enough for random ticks and mobs
+    // (grass spreading, a sheep grazing) changing blocks all over the
+    // place. Anything else goes through place_block()/break_block().
+    void swap_block_same_light(int x, int y, int z, BlockType type);
+
     // Same batching idea as command_fill_region(), for /clone: reads the
     // whole source box (min_x..max_x, min_y..max_y, min_z..max_z) before
     // writing anything back - safe even when the destination overlaps the

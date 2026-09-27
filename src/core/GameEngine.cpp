@@ -9,6 +9,7 @@
 #include "entities/Player.hpp"
 #include "entities/Cow.hpp"
 #include "entities/Npc.hpp"
+#include "entities/Sheep.hpp"
 #include "ui/Widgets.hpp"
 #include "ui/Localization.hpp"
 #include "core/Keybindings.hpp"
@@ -42,6 +43,9 @@ namespace {
 
     constexpr float SURVIVAL_REACH = 4.5f;
     constexpr float CREATIVE_REACH = 5.0f;
+    // Hitting/using a mob reaches less far than a block, like vanilla.
+    constexpr float SURVIVAL_ENTITY_REACH = 3.0f;
+    constexpr float CREATIVE_ENTITY_REACH = 5.0f;
 
     // Subtle atmospheric haze over the whole scene - a constant, very low
     // blend toward the sky's own horizon color, independent of the chunk
@@ -268,6 +272,7 @@ namespace {
     {
         if (type == Cow::TYPE_ID) return std::make_unique<Cow>(feet, yaw, seed);
         if (type == Npc::TYPE_ID) return std::make_unique<Npc>(feet, yaw, seed);
+        if (type == Sheep::TYPE_ID) return std::make_unique<Sheep>(feet, yaw, seed);
         return nullptr;
     }
 
@@ -369,15 +374,16 @@ namespace {
     // time (each cell re-lights/remeshes its whole chunk neighborhood).
     constexpr long long COMMAND_VOLUME_LIMIT = 32768;
 
-    // Cow spawning (see GameEngine::try_spawn_cows()): every few seconds,
-    // while fewer than MAX_NEARBY_COWS roam within NEARBY_RADIUS of the
-    // player, a small herd appears on grass SPAWN_DISTANCE_MIN..MAX blocks
-    // away - out of sight, like Minecraft's own animals being "already
-    // there". MAX_COWS caps the whole world's population.
+    // Animal spawning (see GameEngine::try_spawn_animals()): every few
+    // seconds, while fewer than MAX_NEARBY_ANIMALS roam within NEARBY_RADIUS
+    // of the player, a small herd of cows or sheep appears on grass
+    // SPAWN_DISTANCE_MIN..MAX blocks away - out of sight, like Minecraft's
+    // own animals being "already there". MAX_ANIMALS caps the whole world's
+    // population.
     constexpr uint64_t MOB_SPAWN_INTERVAL_TICKS = 100;
     constexpr float NEARBY_RADIUS = 64.0f;
-    constexpr size_t MAX_NEARBY_COWS = 6;
-    constexpr size_t MAX_COWS = 40;
+    constexpr size_t MAX_NEARBY_ANIMALS = 8;
+    constexpr size_t MAX_ANIMALS = 50;
     constexpr float SPAWN_DISTANCE_MIN = 24.0f;
     constexpr float SPAWN_DISTANCE_MAX = 48.0f;
 
@@ -546,9 +552,13 @@ void GameEngine::tick_mobs()
         // Outside loaded chunks a mob just waits - its ground isn't there.
         if (!world->is_column_loaded(static_cast<int>(std::floor(p.x)), static_cast<int>(std::floor(p.z)))) continue;
         mob->tick(*world, view);
+        // A sheep ate the grass under it: the AI only asks, the world changes here.
+        if (std::optional<Mob::BlockChange> change = mob->take_block_change()) {
+            world->swap_block_same_light(change->x, change->y, change->z, change->block);
+        }
     }
     push_entities_apart();
-    if (game_tick % MOB_SPAWN_INTERVAL_TICKS == 0) try_spawn_cows();
+    if (game_tick % MOB_SPAWN_INTERVAL_TICKS == 0) try_spawn_animals();
 }
 
 void GameEngine::push_entities_apart()
@@ -594,18 +604,19 @@ std::optional<int> GameEngine::grass_spawn_height(int x, int z) const
     return std::nullopt;
 }
 
-void GameEngine::try_spawn_cows()
+void GameEngine::try_spawn_animals()
 {
     const Vector3 feet = player.feet_position();
-    size_t cow_count = 0, nearby = 0;
+    size_t animal_count = 0, nearby = 0;
     for (const auto& mob : mobs) {
-        if (std::string(mob->type_id()) != Cow::TYPE_ID) continue;
-        ++cow_count;
+        const std::string type = mob->type_id();
+        if (type != Cow::TYPE_ID && type != Sheep::TYPE_ID) continue;
+        ++animal_count;
         const Vector3 d = Vector3Subtract(mob->get_position(), feet);
         if (d.x * d.x + d.z * d.z < NEARBY_RADIUS * NEARBY_RADIUS) ++nearby;
     }
-    if (cow_count >= MAX_COWS) return;
-    if (nearby >= MAX_NEARBY_COWS) return;
+    if (animal_count >= MAX_ANIMALS) return;
+    if (nearby >= MAX_NEARBY_ANIMALS) return;
 
     std::uniform_real_distribution<float> angle(0.0f, 2.0f * PI);
     std::uniform_real_distribution<float> distance(SPAWN_DISTANCE_MIN, SPAWN_DISTANCE_MAX);
@@ -621,12 +632,14 @@ void GameEngine::try_spawn_cows()
         // A few tries per cow around the herd's middle - some spots nearby
         // may be a tree or a hole instead of grass.
         int remaining = herd_size(mob_rng);
-        for (int tries = remaining * 3; tries > 0 && remaining > 0 && cow_count < MAX_COWS; --tries) {
+        // Each herd is all cows or all sheep.
+        const char* kind = std::uniform_int_distribution<int>(0, 1)(mob_rng) == 0 ? Cow::TYPE_ID : Sheep::TYPE_ID;
+        for (int tries = remaining * 3; tries > 0 && remaining > 0 && animal_count < MAX_ANIMALS; --tries) {
             const int x = center_x + spread(mob_rng);
             const int z = center_z + spread(mob_rng);
             if (std::optional<int> y = grass_spawn_height(x, z)) {
-                mobs.push_back(std::make_unique<Cow>(Vector3{x + 0.5f, static_cast<float>(*y), z + 0.5f}, yaw(mob_rng), mob_rng()));
-                ++cow_count;
+                mobs.push_back(create_mob(kind, Vector3{x + 0.5f, static_cast<float>(*y), z + 0.5f}, yaw(mob_rng), mob_rng()));
+                ++animal_count;
                 --remaining;
             }
         }
@@ -700,6 +713,72 @@ void GameEngine::spawn_dropped_item(const ItemStack& stack)
 
     dropped_items.push_back(std::make_unique<DroppedItem>(
         spawn_position, stack, launch_velocity, DroppedItemOrigin::PlayerThrown));
+}
+
+Mob* GameEngine::targeted_mob(Vector3 aim, float reach) const
+{
+    Mob* closest = nullptr;
+    float closest_distance = reach;
+    for (const auto& mob : mobs) {
+        std::optional<float> distance = mob->ray_distance(camera.position, aim);
+        if (distance && *distance <= closest_distance) {
+            closest_distance = *distance;
+            closest = mob.get();
+        }
+    }
+    if (closest) {
+        std::optional<World::RaycastHit> block = world->raycast(camera.position, aim, closest_distance);
+        if (block && block->distance < closest_distance) return nullptr; // a wall in the way
+    }
+    return closest;
+}
+
+void GameEngine::hit_mob(Mob& mob)
+{
+    if (!mob.hurt(player.feet_position())) return; // still recovering from the last hit
+    apply_interaction(mob, mob.interact(InteractionTrigger::Hit, inventory.hotbar[inventory.selected_slot]));
+}
+
+bool GameEngine::use_on_mob(Mob& mob)
+{
+    InteractionResult result = mob.interact(InteractionTrigger::Use, inventory.hotbar[inventory.selected_slot]);
+    if (!result.handled) return false;
+    apply_interaction(mob, result);
+    return true;
+}
+
+void GameEngine::apply_interaction(const Mob& mob, const InteractionResult& result)
+{
+    // Drops pop out of the mob's back, scattering a little - like wool off
+    // a sheep.
+    const Vector3 from = Vector3Add(mob.get_position(), {0.0f, mob.height() * 0.75f, 0.0f});
+    auto jitter = [] { return static_cast<float>(GetRandomValue(-100, 100)) / 100.0f * 0.05f; };
+    for (const ItemStack& drop : result.drops) {
+        dropped_items.push_back(std::make_unique<DroppedItem>(from, drop, Vector3{jitter(), 0.12f, jitter()},
+                                                              DroppedItemOrigin::Natural));
+    }
+
+    // One held item becomes another (an empty bucket fills with milk): a
+    // lone one is swapped in place, one out of a stack goes to the inventory.
+    if (result.in_hand) {
+        ItemStack& held = inventory.hotbar[inventory.selected_slot];
+        if (held.count <= 1) {
+            held = *result.in_hand;
+        } else {
+            --held.count;
+            give_player(*result.in_hand);
+        }
+    }
+}
+
+void GameEngine::give_player(const ItemStack& stack)
+{
+    if (stack.empty()) return;
+    const int left = stack.holds_item() ? inventory.add_item(stack.tool, stack.count) : inventory.add(stack.block, stack.count);
+    if (left <= 0) return;
+    ItemStack rest = stack;
+    rest.count = left;
+    spawn_dropped_item(rest);
 }
 
 void GameEngine::close_inventory_screen()
@@ -779,11 +858,19 @@ void GameEngine::update_leaf_decay()
 
 namespace {
     // Real Minecraft's own random-tick rate: this many random block
-    // positions get checked per loaded chunk, per game tick - not every
-    // block every tick (a chunk holds tens of thousands of them), which is
-    // exactly why a lone sapling can sit for minutes before the dispatcher
-    // happens to land on it.
+    // positions get checked per 16-block-tall section of each loaded chunk,
+    // per game tick - not every block every tick (a chunk holds tens of
+    // thousands of them), which is exactly why a lone sapling can sit for
+    // minutes before the dispatcher happens to land on it.
     constexpr int RANDOM_TICK_SPEED = 3;
+    constexpr int RANDOM_TICK_SECTION_HEIGHT = 16;
+
+    // Grass spreading (GameEngine::update_grass()), Minecraft's rules: a
+    // grass block needs this much light above it to spread, tries this
+    // many cells per random tick, within 1 block sideways and 3 down .. 1
+    // up of itself.
+    constexpr int GRASS_SPREAD_MIN_LIGHT = 9;
+    constexpr int GRASS_SPREAD_ATTEMPTS = 4;
 
     // 1-in-7 chance a sapling turns into a tree the random tick that
     // actually lands on it - real Minecraft's own sapling growth odds.
@@ -797,10 +884,11 @@ void GameEngine::update_random_ticks()
 {
     if (!world) return;
 
+    constexpr int SECTIONS = CHUNK_HEIGHT / RANDOM_TICK_SECTION_HEIGHT;
     for (const auto& [chunk_x, chunk_z] : world->loaded_chunk_coordinates()) {
-        for (int i = 0; i < RANDOM_TICK_SPEED; ++i) {
+        for (int i = 0; i < RANDOM_TICK_SPEED * SECTIONS; ++i) {
             int local_x = GetRandomValue(0, CHUNK_SIZE - 1);
-            int local_y = GetRandomValue(0, CHUNK_HEIGHT - 1);
+            int local_y = (i % SECTIONS) * RANDOM_TICK_SECTION_HEIGHT + GetRandomValue(0, RANDOM_TICK_SECTION_HEIGHT - 1);
             int local_z = GetRandomValue(0, CHUNK_SIZE - 1);
             int world_x = chunk_x * CHUNK_SIZE + local_x;
             int world_y = MIN_WORLD_Y + local_y;
@@ -814,10 +902,41 @@ void GameEngine::update_random_ticks()
                 case BlockType::OakSapling:
                     update_sapling_growth(world_x, world_y, world_z);
                     break;
+                case BlockType::Grass:
+                    update_grass(world_x, world_y, world_z);
+                    break;
                 default:
                     break;
             }
         }
+    }
+}
+
+bool GameEngine::grass_can_live(int x, int y, int z) const
+{
+    const BlockType above = world->get_block(x, y + 1, z);
+    if (above == BlockType::Water || above == BlockType::Lava) return false;
+    const BlockProperties& properties = get_block_properties(above);
+    if (properties.has_custom_shape) return false; // slab, stairs, bed... - covers the top
+    return !properties.solid || properties.transparent;
+}
+
+void GameEngine::update_grass(int x, int y, int z)
+{
+    // Covered up: back to dirt.
+    if (!grass_can_live(x, y, z)) {
+        world->swap_block_same_light(x, y, z, BlockType::Dirt);
+        return;
+    }
+
+    // In good light, spread onto uncovered dirt close by.
+    if (world->get_light(x, y + 1, z) < GRASS_SPREAD_MIN_LIGHT) return;
+    for (int i = 0; i < GRASS_SPREAD_ATTEMPTS; ++i) {
+        const int tx = x + GetRandomValue(-1, 1);
+        const int ty = y + GetRandomValue(-3, 1);
+        const int tz = z + GetRandomValue(-1, 1);
+        if (world->get_block(tx, ty, tz) != BlockType::Dirt || !grass_can_live(tx, ty, tz)) continue;
+        world->swap_block_same_light(tx, ty, tz, BlockType::Grass);
     }
 }
 
@@ -1451,7 +1570,10 @@ void GameEngine::execute_chat_command(const std::string& command)
 
     if (name == "summon") {
         if (args.empty() || (args.size() != 1 && args.size() != 4)) { push("command.summon.usage"); return; }
-        if (args[0] != Cow::TYPE_ID && args[0] != Npc::TYPE_ID) { push("command.summon.unknown", {args[0]}); return; }
+        if (args[0] != Cow::TYPE_ID && args[0] != Sheep::TYPE_ID && args[0] != Npc::TYPE_ID) {
+            push("command.summon.unknown", {args[0]});
+            return;
+        }
         Vector3 at = player.feet_position();
         if (args.size() == 4) {
             std::optional<float> x = parse_float(args[1]);
@@ -1829,7 +1951,19 @@ void GameEngine::update(float delta_time)
     // is aimed at (the cell just outside the targeted block, in the
     // direction of the hit face's own outward normal), within the longer
     // PLACE_REACH - or opens a container if the targeted block is one.
-    bool creative_break = world && current_game_mode == GameMode::Creative &&
+    // A mob under the crosshair takes the clicks before any block behind
+    // it: left click hits it, right click uses the held item on it - and
+    // nothing gets mined through it meanwhile.
+    Mob* aimed_mob = world ? targeted_mob(aim, current_game_mode == GameMode::Creative ? CREATIVE_ENTITY_REACH
+                                                                                      : SURVIVAL_ENTITY_REACH)
+                           : nullptr;
+    bool used_on_mob = false;
+    if (aimed_mob) {
+        if (binding_pressed(settings.keybindings[static_cast<size_t>(GameAction::BreakBlock)])) hit_mob(*aimed_mob);
+        if (binding_pressed(settings.keybindings[static_cast<size_t>(GameAction::PlaceBlock)])) used_on_mob = use_on_mob(*aimed_mob);
+    }
+
+    bool creative_break = world && !aimed_mob && current_game_mode == GameMode::Creative &&
         binding_pressed(settings.keybindings[static_cast<size_t>(GameAction::BreakBlock)]);
     if (creative_break) {
         if (auto hit = world->raycast(camera.position, aim, CREATIVE_REACH)) {
@@ -1847,7 +1981,7 @@ void GameEngine::update(float delta_time)
         }
     }
 
-    bool break_held = world && current_game_mode == GameMode::Survival &&
+    bool break_held = world && !aimed_mob && current_game_mode == GameMode::Survival &&
         binding_down(settings.keybindings[static_cast<size_t>(GameAction::BreakBlock)]);
     if (!break_held) {
         is_breaking = false;
@@ -1926,7 +2060,7 @@ void GameEngine::update(float delta_time)
                 breaking_progress = 0.0f;
             }
         }
-    } else if (world && binding_pressed(settings.keybindings[static_cast<size_t>(GameAction::PlaceBlock)])) {
+    } else if (world && !used_on_mob && binding_pressed(settings.keybindings[static_cast<size_t>(GameAction::PlaceBlock)])) {
         // Right-clicking a Workbench/Furnace/Chest opens its container
         // screen instead of placing a block against it - same priority
         // real Minecraft gives it (you can't place a block onto one of
@@ -2009,7 +2143,13 @@ void GameEngine::update(float delta_time)
             if (held && held->heal_amount > 0) {
                 if (current_game_mode == GameMode::Survival && player.health().current() < PlayerHealth::MAX_HEALTH) {
                     player.health().heal(held->heal_amount);
+                    const bool milk = selected.tool == ItemType::MilkBucket;
                     if (--selected.count <= 0) selected.clear();
+                    // Drinking milk leaves the bucket behind.
+                    if (milk) {
+                        if (selected.empty()) selected = ItemRef(ItemType::Bucket).stack(1);
+                        else if (inventory.add_item(ItemType::Bucket, 1) > 0) spawn_dropped_item(ItemRef(ItemType::Bucket).stack(1));
+                    }
                 }
             } else if (targeted_block && !selected.empty() && !selected.holds_item()) {
                 // Right-click-to-place only ever consumes a block stack -
@@ -2445,6 +2585,7 @@ bool GameEngine::open_world(const std::string& folder_name, const GameLoadProgre
         mobs.clear();
         for (const MobSaveState& saved : WorldSave::load_mobs(folder_name)) {
             if (std::unique_ptr<Mob> mob = create_mob(saved.type, saved.position, saved.yaw, mob_rng())) {
+                for (const std::string& state : saved.states) mob->set_state(state, true);
                 mobs.push_back(std::move(mob));
             }
         }
@@ -2505,7 +2646,7 @@ void GameEngine::save_player_state()
 
     std::vector<MobSaveState> saved_mobs;
     saved_mobs.reserve(mobs.size());
-    for (const auto& mob : mobs) saved_mobs.push_back({mob->type_id(), mob->get_position(), mob->get_yaw()});
+    for (const auto& mob : mobs) saved_mobs.push_back({mob->type_id(), mob->get_position(), mob->get_yaw(), mob->states()});
     WorldSave::save_mobs(current_world_folder, saved_mobs);
 
     // Every chest's own storage (see World::all_chest_inventories()) -

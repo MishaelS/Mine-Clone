@@ -1423,6 +1423,29 @@ void World::set_block_and_rebuild(int x, int y, int z, BlockType type)
     remesh_after_edit(x, z);
 }
 
+void World::swap_block_same_light(int x, int y, int z, BlockType type)
+{
+    if (y < MIN_WORLD_Y || y >= MIN_WORLD_Y + CHUNK_HEIGHT) return;
+    const int chunk_x = floor_div(x, CHUNK_SIZE);
+    const int chunk_z = floor_div(z, CHUNK_SIZE);
+    Chunk* chunk = chunk_at(chunk_x, chunk_z);
+    if (chunk == nullptr) return;
+    const int local_x = x - chunk_x * CHUNK_SIZE;
+    const int local_z = z - chunk_z * CHUNK_SIZE;
+    {
+        std::unique_lock<std::shared_mutex> lock(chunk->data_mutex());
+        chunk->set_block(local_x, y - MIN_WORLD_Y, local_z, type);
+        chunk->mark_modified();
+    }
+    // Its own chunk, and a neighbor whose border faces/AO touch it.
+    const int edge_x = local_x == 0 ? -1 : local_x == CHUNK_SIZE - 1 ? 1 : 0;
+    const int edge_z = local_z == 0 ? -1 : local_z == CHUNK_SIZE - 1 ? 1 : 0;
+    request_remesh(chunk_x, chunk_z);
+    if (edge_x != 0) request_remesh(chunk_x + edge_x, chunk_z);
+    if (edge_z != 0) request_remesh(chunk_x, chunk_z + edge_z);
+    if (edge_x != 0 && edge_z != 0) request_remesh(chunk_x + edge_x, chunk_z + edge_z);
+}
+
 void World::remesh_after_edit(int x, int z)
 {
     int chunk_x = floor_div(x, CHUNK_SIZE);

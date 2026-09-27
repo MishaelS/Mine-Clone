@@ -47,6 +47,17 @@ struct ModelCube {
     // cube_draw_bounds(). Its transparent pixels show nothing - only the
     // painted bits stand out, giving the skin some depth.
     bool overlay = false;
+
+    // Drawn this many pixels bigger on every side (Minecraft's "inflate") -
+    // e.g. a sheep's wool wrapped loosely around its body.
+    float inflate = 0.0f;
+
+    // Whether a cube drawn bigger than `size` (inflate, a decoration's gap)
+    // stretches its skin layout over the bigger box - Minecraft's own way,
+    // what its sheep wool texture is drawn for. Off (the default), the
+    // layout is as big as the cube is drawn: one skin pixel per model pixel,
+    // never stretched.
+    bool stretch_texture = false;
 };
 
 constexpr float MODEL_OVERLAY_GAP = 0.5f; // model pixels
@@ -124,6 +135,11 @@ struct EntityModel {
     int skin_height = 64;
     std::vector<ModelPart> parts;
     std::vector<EntityAnimation> animations;
+    // Other models (by name, assets/models/<name>.json) drawn on top of this
+    // one in the same pose, each with its own skin - matched part by part
+    // by name. A sheep's wool is one: a layer the game hides once it's
+    // sheared (see Mob::shows_layer()).
+    std::vector<std::string> layers;
 
     int find_part(const std::string& part_name) const; // -1 if absent
 };
@@ -138,6 +154,10 @@ using ModelPose = std::vector<PartPose>;
 // The player-shaped starting point: body (the root) with head, arms and
 // legs attached, laid out on the standard 64x64 player skin.
 EntityModel make_humanoid_model();
+
+// `pose` (of `from`) for `to`: each of `to`'s parts takes the pose of the
+// part of `from` with the same name - how a layer model follows its base.
+ModelPose map_pose(const EntityModel& from, const ModelPose& pose, const EntityModel& to);
 
 std::optional<EntityModel> load_entity_model(const std::string& path);
 bool save_entity_model(const EntityModel& model, const std::string& path);
@@ -169,7 +189,14 @@ public:
     // Moving animations it doesn't link to.
     ModelPose pose(const EntityModel& model) const;
 
+    // The Manual animation game code started `seconds` ago ("" = none) -
+    // played on top of everything else; a non-looping one ends by itself
+    // after its length. Set every frame by whoever draws the entity.
+    void set_manual(const std::string& name, float seconds);
+
 private:
+    std::string manual_name;
+    float manual_time = 0.0f;
     float time = 0.0f;            // seconds
     float distance = 0.0f;        // blocks walked
     float moving_weight = 0.0f;   // 0 standing .. 1 at full walking speed
@@ -188,6 +215,7 @@ constexpr const char* HEAD_PART = "head";
 // as the cube under it hovers all round - and a decoration sitting on a
 // cube's side moves away from it by the gap, keeping its own size (a
 // 1-pixel detail stays 1 pixel). Its skin layout always follows `size`.
+// Either way ModelCube::inflate then grows it on every side.
 BoundingBox cube_draw_bounds(const ModelPart& part, const ModelCube& cube);
 
 // The part that looks (ModelPart::look), -1 if none.

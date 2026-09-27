@@ -13,6 +13,9 @@ Cow::Cow(Vector3 feet_position, float yaw_degrees, uint32_t seed)
     ai::AnimalAiSettings settings;
     settings.tempt_items = {ItemType::Wheat};
     ai::add_animal_goals(goals, settings);
+
+    // Milking: right click holding an empty bucket - one of them fills.
+    add_interaction(on_use().holding(ItemType::Bucket).gives_in_hand(ItemType::MilkBucket));
 }
 
 const EntityModel& Cow::model() const

@@ -16,6 +16,9 @@ namespace {
     constexpr float LOOK_AWAY_CHANCE = 0.5f;   // after watching the player
     constexpr float LOOK_AWAY_SPREAD = 60.0f;  // degrees either side of straight away
     constexpr float RANDOM_LOOK_CHANCE = 0.02f;
+    constexpr float PANIC_SPREAD = 60.0f;      // degrees either side of straight away from the threat
+    constexpr float PANIC_DISTANCE_MIN = 5.0f; // blocks per dash
+    constexpr float PANIC_DISTANCE_MAX = 9.0f;
 
     // A point `yaw` degrees around from its eyes, level with them.
     Vector3 point_toward(const Mob& mob, float yaw)
@@ -85,6 +88,46 @@ std::optional<Vector3> RandomStrollGoal::pick_target(Mob& mob, const World& worl
         }
     }
     return best;
+}
+
+bool PanicGoal::can_use(Mob& mob, const AiContext& context)
+{
+    if (!mob.recently_hurt()) return false;
+    // Away from whoever hit it - the player as they are now, if there is
+    // one, so it keeps fleeing a chasing player - a few blocks off, somewhere
+    // it can stand.
+    const Vector3 feet = mob.get_position();
+    const Vector3 threat = context.player.present ? context.player.feet : mob.hurt_source();
+    float away = std::atan2(feet.x - threat.x, feet.z - threat.z) * RAD2DEG;
+    if (std::fabs(feet.x - threat.x) + std::fabs(feet.z - threat.z) < 0.01f) away = mob.body_yaw();
+    for (int i = 0; i < 10; ++i) {
+        const float yaw = (away + (mob.random_float() * 2.0f - 1.0f) * PANIC_SPREAD) * DEG2RAD;
+        const float distance = PANIC_DISTANCE_MIN + mob.random_float() * (PANIC_DISTANCE_MAX - PANIC_DISTANCE_MIN);
+        const int x = static_cast<int>(std::floor(feet.x + std::sin(yaw) * distance));
+        const int z = static_cast<int>(std::floor(feet.z + std::cos(yaw) * distance));
+        const int y = static_cast<int>(std::floor(feet.y)) + mob.random_int(-2, 2);
+        if (!context.world.is_column_loaded(x, z)) continue;
+        if (std::optional<PathNode> cell = standing_cell_near(context.world, x, y, z, mob.path_settings().height_cells, 2)) {
+            target = cell->center();
+            return true;
+        }
+    }
+    return false;
+}
+
+bool PanicGoal::can_continue(Mob& mob, const AiContext&)
+{
+    return !mob.navigation().done();
+}
+
+void PanicGoal::start(Mob& mob, const AiContext& context)
+{
+    mob.navigation().move_to(mob, context.world, target, speed);
+}
+
+void PanicGoal::stop(Mob& mob)
+{
+    mob.navigation().stop();
 }
 
 bool LookAtPlayerGoal::player_in_range(Mob& mob, const AiContext& context) const

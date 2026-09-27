@@ -53,6 +53,7 @@ add_executable(${PROJECT_NAME}
     src/entities/Cow.cpp
     src/entities/Mob.cpp
     src/entities/Npc.cpp
+    src/entities/Sheep.cpp
     src/entities/ai/Goal.cpp
     src/entities/ai/Pathfinder.cpp
     src/entities/ai/Controls.cpp

@@ -32,12 +32,12 @@ namespace {
         {{{1, 1, 0}, {1, 1, 1}, {1, 0, 1}, {1, 0, 0}}, { 1, 0, 0}, 0.72f},
     }};
 
-    // Standard Minecraft box-UV layout of a w x h x d cube whose layout
-    // starts at (u, v): a cross of the six faces - top/bottom on the first
+    // Standard Minecraft box-UV layout of a w x h x d box whose layout
+    // starts at `uv`: a cross of the six faces - top/bottom on the first
     // row, the four sides below them. Same face order as FACES.
-    std::array<Rectangle, 6> box_uv(const ModelCube& cube) {
-        const float u = cube.uv.x, v = cube.uv.y;
-        const float w = cube.size.x, h = cube.size.y, d = cube.size.z;
+    std::array<Rectangle, 6> box_uv(Vector2 uv, Vector3 size) {
+        const float u = uv.x, v = uv.y;
+        const float w = size.x, h = size.y, d = size.z;
         return {{
             {u + d        , v    , w, d},             // top
             {u + d + w    , v    , w, d},         // bottom
@@ -51,7 +51,7 @@ namespace {
     void draw_cube(const ModelPart& part, const ModelCube& cube, const Texture2D& skin, float skin_w, float skin_h,
                    float scale, Color tint) {
         const bool textured = skin.id != 0;
-        const std::array<Rectangle, 6> uvs = cube_face_uvs(cube);
+        const std::array<Rectangle, 6> uvs = cube_face_uvs(part, cube);
         const bool rotated = cube.rotation.x != 0.0f || cube.rotation.y != 0.0f || cube.rotation.z != 0.0f;
         const Matrix turn = cube_rotation_matrix(cube, scale);
         constexpr float inset = 1.0f / 1024.0f; // stay just inside each face's pixels
@@ -192,9 +192,15 @@ Matrix cube_rotation_matrix(const ModelCube& cube, float scale)
     return MatrixMultiply(m, MatrixTranslate(o.x, o.y, o.z));
 }
 
-std::array<Rectangle, 6> cube_face_uvs(const ModelCube& cube)
+std::array<Rectangle, 6> cube_face_uvs(const ModelPart& part, const ModelCube& cube)
 {
-    std::array<Rectangle, 6> faces = box_uv(cube);
+    // Laid out as big as the cube is drawn, unless it stretches its texture.
+    Vector3 size = cube.size;
+    if (!cube.stretch_texture) {
+        const BoundingBox drawn = cube_draw_bounds(part, cube);
+        size = Vector3Subtract(drawn.max, drawn.min);
+    }
+    std::array<Rectangle, 6> faces = box_uv(cube.uv, size);
     for (int f = 0; f < 6; ++f) {
         if (cube.face_uv[f]) {
             faces[f].x = cube.face_uv[f]->x;

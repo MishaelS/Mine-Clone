@@ -57,6 +57,7 @@ namespace content {
         // Food
         shaped(I::GoldenApple  ,    {"GGG", "GAG", "GGG"},  {{'G', B::GoldBlock}, {'A', I::Apple}});
         shaped(I::Bread        ,    {"WWW"}              ,  {{'W', I::Wheat}});
+        shaped(I::Bucket       ,    {"I I", " I "}       ,  {{'I', I::IronIngot}});
 
         // Storage blocks
         storage_block(B::IronBlock   , I::IronIngot);

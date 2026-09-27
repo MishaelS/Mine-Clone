@@ -47,10 +47,10 @@ namespace ai {
 
     void add_npc_goals(GoalSelector& goals, const NpcAiSettings& settings) {
         StrollSettings stroll;
-        stroll.speed = settings.stroll_speed;
-        stroll.avoid_water = true;
-        stroll.home = settings.home;
-        stroll.home_radius = settings.home_radius;
+        stroll.speed            = settings.stroll_speed;
+        stroll.avoid_water      = true;
+        stroll.home             = settings.home;
+        stroll.home_radius      = settings.home_radius;
         stroll.horizontal_range = 8;
 
         goals.add(0, std::make_unique<FloatGoal>());

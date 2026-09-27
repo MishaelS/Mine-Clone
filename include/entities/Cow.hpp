@@ -3,7 +3,8 @@
 #include "entities/Mob.hpp"
 
 // A cow: an animal (see ai/MobAI.hpp) - wanders about along planned paths,
-// glances at a player close by, and follows one holding wheat. Drawn from
+// glances at a player close by, follows one holding wheat, and gives milk
+// to a right click with an empty bucket. Drawn from
 // assets/models/cow.json - its "idle" animation always, "walk" while it
 // moves.
 class Cow : public Mob {

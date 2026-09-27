@@ -109,6 +109,7 @@ ModelEditor::ModelEditor()
 ModelEditor::~ModelEditor()
 {
     if (skin.id != 0) UnloadTexture(skin);
+    unload_layer_previews();
     if (viewport_texture.id != 0) UnloadRenderTexture(viewport_texture);
     editor_text::unload();
     CloseWindow();
@@ -143,6 +144,7 @@ void ModelEditor::run()
             }
         }
 
+        update_floating_windows(viewport);
         update_camera(viewport);
         draw_viewport(viewport);
 
@@ -155,8 +157,9 @@ void ModelEditor::run()
               tr("editor.viewport_hint"));
         draw_timeline(timeline_rect());
         draw_right_panel(right_panel_rect());
-        if (graph_open) draw_graph_window(graph_window_rect(viewport));
-        if (uv_open) draw_uv_window(uv_window_rect(viewport));
+        // The one on top last.
+        draw_floating_window(top_window == UV_WINDOW ? GRAPH_WINDOW : UV_WINDOW);
+        draw_floating_window(top_window);
         draw_top_bar(top_bar_rect());
         EndDrawing();
         commit_history();
@@ -268,7 +271,14 @@ void ModelEditor::draw_viewport(Rectangle viewport)
     rlPushMatrix();
     rlRotatef(displayed_body_yaw(), 0.0f, 1.0f, 0.0f); // the look preview may turn the whole body
     BeginShaderMode(entity_cutout_shader());
-    draw_entity_model(model, skin, displayed_pose(), MODEL_SCALE);
+    const ModelPose pose = displayed_pose();
+    draw_entity_model(model, skin, pose, MODEL_SCALE);
+    if (show_layers) {
+        refresh_layer_previews();
+        for (const LayerPreview& layer : layer_previews) {
+            draw_entity_model(layer.model, layer.skin, map_pose(model, pose, layer.model), MODEL_SCALE);
+        }
+    }
     EndShaderMode();
     draw_selection();
     rlPopMatrix();
@@ -496,6 +506,34 @@ void ModelEditor::draw_right_panel(Rectangle bounds)
         y += 84 + GAP;
     }
 
+    // Layers: other models drawn over this one (a sheep's wool), by name.
+    GuiLine({x, y, width, ROW}, tr("editor.layers").c_str());
+    y += ROW;
+    {
+        if (!typing()) {
+            std::string joined;
+            for (size_t i = 0; i < model.layers.size(); ++i) joined += (i ? ", " : "") + model.layers[i];
+            std::snprintf(layers_text, sizeof(layers_text), "%s", joined.c_str());
+        }
+        if (text_field({x, y, width, ROW}, layers_text, sizeof(layers_text))) {
+            std::vector<std::string> names;
+            std::stringstream list(layers_text);
+            std::string name;
+            while (std::getline(list, name, ',')) {
+                name.erase(0, name.find_first_not_of(" \t"));
+                name.erase(name.find_last_not_of(" \t") + 1);
+                if (!name.empty() && name != model_name) names.push_back(name);
+            }
+            if (names != model.layers) {
+                model.layers = names;
+                mark_dirty();
+            }
+        }
+        y += ROW + GAP;
+        GuiCheckBox({x, y + 4, ROW - 8, ROW - 8}, tr("editor.show_layers").c_str(), &show_layers);
+        y += ROW + GAP;
+    }
+
     // Parts
     GuiLine({x, y, width, ROW}, tr("editor.parts").c_str());
     y += ROW;
@@ -647,6 +685,29 @@ float ModelEditor::draw_part_properties(float x, float y, float width)
             y += ROW + GAP;
             if (vec3_row(tr("editor.cube_rotation"), cube.rotation, -180, 180)) mark_dirty();
             if (vec3_row(tr("editor.cube_rotation_origin"), cube.rotation_origin, -256, 256)) mark_dirty();
+
+            // Inflate: drawn this much bigger on every side, the skin layout
+            // unchanged (a sheep's loose wool), in 0.05-pixel steps.
+            label({x, y, label_w, ROW}, tr("editor.inflate"));
+            {
+                float inflate = cube.inflate;
+                char value_text[16];
+                std::snprintf(value_text, sizeof(value_text), "%.2f", inflate);
+                GuiSlider({x + label_w, y, width - label_w - 44, ROW}, nullptr, value_text, &inflate, 0.0f, 4.0f);
+                inflate = std::round(inflate * 20.0f) / 20.0f;
+                if (inflate != cube.inflate) {
+                    cube.inflate = inflate;
+                    mark_dirty();
+                }
+            }
+            y += ROW + GAP;
+            bool stretch = cube.stretch_texture;
+            GuiCheckBox({x, y + 4, ROW - 8, ROW - 8}, tr("editor.stretch_texture").c_str(), &stretch);
+            if (stretch != cube.stretch_texture) {
+                cube.stretch_texture = stretch;
+                mark_dirty();
+            }
+            y += ROW + GAP;
 
             // Decoration layer: this cube hovers half a pixel off the ones
             // under it - or add such a layer over this cube in one go (same
@@ -901,6 +962,9 @@ void ModelEditor::new_model()
     pending_open.clear();
     model = make_humanoid_model();
     if (model_name[0] != '\0') model.name = model_name;
+    uv_zoom = 0.0f;
+    graph_zoom = 1.0f;
+    graph_pan = {0, 0};
     load_skin(model.skin);
     animation_index = -1;
     time = 0.0f;
@@ -927,6 +991,9 @@ void ModelEditor::open_model()
     }
     model = std::move(*loaded);
     if (model.name.empty()) model.name = model_name;
+    uv_zoom = 0.0f; // fit the new model's skin
+    graph_zoom = 1.0f;
+    graph_pan = {0, 0};
     load_skin(model.skin);
     animation_index = model.animations.empty() ? -1 : 0;
     if (EntityAnimation* animation = current_animation()) {
@@ -947,6 +1014,32 @@ void ModelEditor::open_model()
 
 namespace {
     constexpr size_t MAX_UNDO_STEPS = 200;
+}
+
+void ModelEditor::unload_layer_previews()
+{
+    for (LayerPreview& layer : layer_previews) {
+        if (layer.skin.id != 0) UnloadTexture(layer.skin);
+    }
+    layer_previews.clear();
+}
+
+void ModelEditor::refresh_layer_previews()
+{
+    if (layer_previews_for == model.layers) return;
+    unload_layer_previews();
+    layer_previews_for = model.layers;
+    for (const std::string& name : model.layers) {
+        std::optional<EntityModel> loaded = load_entity_model(models_directory() + name + ".json");
+        if (!loaded) continue; // a name with no model yet - nothing to show
+        LayerPreview layer;
+        layer.model = std::move(*loaded);
+        if (!layer.model.skin.empty()) {
+            layer.skin = LoadTexture((std::string(ASSETS_PATH) + layer.model.skin).c_str());
+            if (layer.skin.id != 0) SetTextureFilter(layer.skin, TEXTURE_FILTER_POINT);
+        }
+        layer_previews.push_back(std::move(layer));
+    }
 }
 
 ModelEditor::HistoryState ModelEditor::current_state() const
@@ -1054,6 +1147,7 @@ void ModelEditor::load_skin(const std::string& path)
 {
     if (skin.id != 0) UnloadTexture(skin);
     skin = {};
+    if (path != model.skin) uv_zoom = 0.0f; // another skin: fit it afresh
     model.skin = path;
     if (path.empty()) return;
     skin = LoadTexture((std::string(ASSETS_PATH) + path).c_str());
@@ -1263,9 +1357,25 @@ void ModelEditor::draw_graph_window(Rectangle bounds)
         graph_open = false;
         return;
     }
+    if (GuiButton({bounds.x + bounds.width - 106, bounds.y + 3, 78, 18}, tr("editor.view_reset").c_str())) {
+        graph_zoom = 1.0f;
+        graph_pan = {0, 0};
+    }
     const Rectangle area = {bounds.x + 2, bounds.y + 26, bounds.width - 4, bounds.height - 28};
     const Vector2 mouse = GetMousePosition();
-    const bool mouse_in_area = CheckCollisionPointRec(mouse, area) && !models_dropdown_open;
+    const bool mouse_in_area = CheckCollisionPointRec(mouse, area) && !models_dropdown_open && !mouse_blocked;
+
+    // Zoom about the mouse: the point under it stays put.
+    const float wheel = GetMouseWheelMove();
+    if (mouse_in_area && wheel != 0.0f) {
+        const float zoomed = std::clamp(graph_zoom * std::pow(1.15f, wheel), 0.35f, 2.5f);
+        const Vector2 at = {mouse.x - area.x, mouse.y - area.y};
+        graph_pan = Vector2Subtract(at, Vector2Scale(Vector2Subtract(at, graph_pan), zoomed / graph_zoom));
+        graph_zoom = zoomed;
+    }
+    const float zoom = graph_zoom;
+    const Vector2 origin = {area.x + graph_pan.x, area.y + graph_pan.y};
+    const float port = std::max(3.0f, PORT * zoom);
 
     // Blocks without a stored place get a tidy grid position.
     for (size_t i = 0; i < model.animations.size(); ++i) {
@@ -1274,14 +1384,14 @@ void ModelEditor::draw_graph_window(Rectangle bounds)
     }
     auto node_rect = [&](size_t i) {
         Vector2 p = model.animations[i].graph_position;
-        return Rectangle{area.x + p.x, area.y + p.y, NODE_W, NODE_H};
+        return Rectangle{origin.x + p.x * zoom, origin.y + p.y * zoom, NODE_W * zoom, NODE_H * zoom};
     };
     auto input_port = [&](size_t i) { Rectangle r = node_rect(i); return Vector2{r.x, r.y + r.height * 0.5f}; };
     auto output_port = [&](size_t i) { Rectangle r = node_rect(i); return Vector2{r.x + r.width, r.y + r.height * 0.5f}; };
     auto node_under_mouse = [&]() -> int {
         for (int i = static_cast<int>(model.animations.size()) - 1; i >= 0; --i) {
             Rectangle r = node_rect(i);
-            Rectangle grab = {r.x - PORT * 2, r.y, r.width + PORT * 2, r.height}; // the input port counts too
+            Rectangle grab = {r.x - port * 2, r.y, r.width + port * 2, r.height}; // the input port counts too
             if (CheckCollisionPointRec(mouse, grab)) return i;
         }
         return -1;
@@ -1307,9 +1417,10 @@ void ModelEditor::draw_graph_window(Rectangle bounds)
             Vector2 from = output_port(i), to = input_port(target);
             DrawLineBezier(from, to, 2.5f, KEY_SELECTED);
             Vector2 middle = Vector2Lerp(from, to, 0.5f);
-            bool hovered = CheckCollisionPointCircle(mouse, middle, 8.0f);
-            DrawCircleV(middle, 8.0f, hovered ? Color{220, 70, 70, 255} : Color{90, 90, 96, 255});
-            DrawTextEx(editor_text::font(), "x", {middle.x - 4, middle.y - 8}, 16, 1, WHITE);
+            const float dot = std::max(5.0f, 8.0f * zoom);
+            bool hovered = CheckCollisionPointCircle(mouse, middle, dot);
+            DrawCircleV(middle, dot, hovered ? Color{220, 70, 70, 255} : Color{90, 90, 96, 255});
+            DrawTextEx(editor_text::font(), "x", {middle.x - dot * 0.5f, middle.y - dot}, dot * 2.0f, 1, WHITE);
             if (hovered && mouse_in_area && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                 remove_from = static_cast<int>(i);
                 remove_link = static_cast<int>(l);
@@ -1324,28 +1435,37 @@ void ModelEditor::draw_graph_window(Rectangle bounds)
         const bool selected = static_cast<int>(i) == animation_index;
         DrawRectangleRounded(r, 0.18f, 6, NODE_FILL[std::min<int>(static_cast<int>(animation.trigger), 3)]);
         DrawRectangleRoundedLinesEx(r, 0.18f, 6, selected ? 2.5f : 1.0f, selected ? SELECTION : Color{20, 20, 24, 255});
-        DrawTextEx(editor_text::font(), animation.name.c_str(), {r.x + 12, r.y + 8}, 18, 1, WHITE);
+        DrawTextEx(editor_text::font(), animation.name.c_str(), {r.x + 12 * zoom, r.y + 8 * zoom}, 18 * zoom, 1, WHITE);
         const char* trigger_keys[] = {"editor.trigger_manual", "editor.trigger_always", "editor.trigger_moving", "editor.trigger_sneaking"};
         DrawTextEx(editor_text::font(), tr(trigger_keys[std::min<int>(static_cast<int>(animation.trigger), 3)]).c_str(),
-                   {r.x + 12, r.y + 30}, 15, 1, Fade(text_color, 0.8f));
-        DrawCircleV(input_port(i), PORT, Color{180, 180, 190, 255});
-        const bool out_hovered = CheckCollisionPointCircle(mouse, output_port(i), PORT + 3);
-        DrawCircleV(output_port(i), PORT, out_hovered ? KEY_SELECTED : Color{180, 180, 190, 255});
+                   {r.x + 12 * zoom, r.y + 30 * zoom}, 15 * zoom, 1, Fade(text_color, 0.8f));
+        DrawCircleV(input_port(i), port, Color{180, 180, 190, 255});
+        const bool out_hovered = CheckCollisionPointCircle(mouse, output_port(i), port + 3);
+        DrawCircleV(output_port(i), port, out_hovered ? KEY_SELECTED : Color{180, 180, 190, 255});
     }
 
     // Interaction: drag from a right-side dot onto another block to link
-    // them; drag a block to move it; click a block to open that animation.
-    if (mouse_in_area && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && remove_from < 0) {
+    // them; drag a block to move it; click a block to open that animation;
+    // drag empty space (or middle / Alt+left drag anywhere) to pan.
+    const bool alt = IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT);
+    if (mouse_in_area && (IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE) || (alt && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)))) {
+        graph_panning = true;
+        graph_pan_grab = Vector2Subtract(mouse, graph_pan);
+    } else if (mouse_in_area && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && remove_from < 0) {
         graph_link_from = -1;
         for (size_t i = 0; i < model.animations.size(); ++i) {
-            if (CheckCollisionPointCircle(mouse, output_port(i), PORT + 3)) graph_link_from = static_cast<int>(i);
+            if (CheckCollisionPointCircle(mouse, output_port(i), port + 3)) graph_link_from = static_cast<int>(i);
         }
         if (graph_link_from < 0) {
             int node = node_under_mouse();
+            if (node < 0) {
+                graph_panning = true;
+                graph_pan_grab = Vector2Subtract(mouse, graph_pan);
+            }
             if (node >= 0) {
                 graph_drag_node = node;
                 Rectangle r = node_rect(node);
-                graph_drag_grab = {mouse.x - r.x, mouse.y - r.y};
+                graph_drag_grab = {(mouse.x - r.x) / zoom, (mouse.y - r.y) / zoom};
                 if (animation_index != node) {
                     animation_index = node;
                     time = 0.0f;
@@ -1372,9 +1492,10 @@ void ModelEditor::draw_graph_window(Rectangle bounds)
     }
     if (graph_drag_node >= 0 && graph_drag_node < static_cast<int>(model.animations.size())) {
         if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-            Vector2 target = {mouse.x - graph_drag_grab.x - area.x, mouse.y - graph_drag_grab.y - area.y};
-            target.x = std::clamp(target.x, 1.0f, std::max(1.0f, area.width - NODE_W));
-            target.y = std::clamp(target.y, 1.0f, std::max(1.0f, area.height - NODE_H));
+            // Whole graph units, so saved positions stay tidy.
+            Vector2 target = {std::round((mouse.x - origin.x) / zoom - graph_drag_grab.x),
+                              std::round((mouse.y - origin.y) / zoom - graph_drag_grab.y)};
+            if (target.x == 0.0f && target.y == 0.0f) target.x = 1.0f; // (0, 0) means "no place yet"
             Vector2& position = model.animations[graph_drag_node].graph_position;
             if (position.x != target.x || position.y != target.y) {
                 position = target;
@@ -1382,6 +1503,13 @@ void ModelEditor::draw_graph_window(Rectangle bounds)
             }
         } else {
             graph_drag_node = -1;
+        }
+    }
+    if (graph_panning) {
+        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) || IsMouseButtonDown(MOUSE_BUTTON_MIDDLE)) {
+            graph_pan = Vector2Subtract(mouse, graph_pan_grab);
+        } else {
+            graph_panning = false;
         }
     }
     if (remove_from >= 0) {
@@ -1433,10 +1561,101 @@ std::string ModelEditor::last_model() const
 
 // ------------------------------------------------------------ UV window --
 
-bool ModelEditor::over_floating_window(Rectangle viewport, Vector2 point) const
+bool ModelEditor::over_floating_window(Rectangle, Vector2 point) const
 {
-    return (graph_open && CheckCollisionPointRec(point, graph_window_rect(viewport))) ||
-           (uv_open && CheckCollisionPointRec(point, uv_window_rect(viewport)));
+    // Mid-move/resize the mouse may run ahead of the window - still its.
+    for (int id : {GRAPH_WINDOW, UV_WINDOW}) {
+        if (!floating_window_open(id)) continue;
+        const FloatingWindow& window = floating_window(id);
+        if (window.drag != FloatingWindow::Drag::None || CheckCollisionPointRec(point, window.screen)) return true;
+    }
+    return false;
+}
+
+namespace {
+    constexpr float WINDOW_TITLE_HEIGHT = 24.0f;
+    constexpr float WINDOW_TITLE_BUTTONS = 110.0f; // right end of the title bar: view button + close
+    constexpr float WINDOW_GRIP = 16.0f;           // resize corner
+}
+
+void ModelEditor::update_floating_windows(Rectangle viewport)
+{
+    update_floating_window(graph_window, GRAPH_WINDOW, viewport, graph_window_rect(viewport), {280, 180});
+    update_floating_window(uv_window, UV_WINDOW, viewport, uv_window_rect(viewport), {240, 240});
+}
+
+void ModelEditor::update_floating_window(FloatingWindow& window, int id, Rectangle viewport, Rectangle default_rect,
+                                         Vector2 min_size)
+{
+    if (window.rect.width <= 0.0f) {
+        window.rect = {default_rect.x - viewport.x, default_rect.y - viewport.y, default_rect.width, default_rect.height};
+    }
+    const Vector2 mouse = GetMousePosition();
+    if (!floating_window_open(id)) {
+        window.drag = FloatingWindow::Drag::None;
+    } else if (window.drag == FloatingWindow::Drag::None) {
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !models_dropdown_open && !mouse_covered_by_other(id) &&
+            CheckCollisionPointRec(mouse, window.screen)) {
+            top_window = id;
+            const Rectangle& s = window.screen;
+            const Rectangle title = {s.x, s.y, s.width - WINDOW_TITLE_BUTTONS, WINDOW_TITLE_HEIGHT};
+            const Rectangle grip = {s.x + s.width - WINDOW_GRIP, s.y + s.height - WINDOW_GRIP, WINDOW_GRIP, WINDOW_GRIP};
+            if (CheckCollisionPointRec(mouse, grip)) {
+                window.drag = FloatingWindow::Drag::Resize;
+                window.grab = {mouse.x - window.rect.width, mouse.y - window.rect.height};
+            } else if (CheckCollisionPointRec(mouse, title)) {
+                window.drag = FloatingWindow::Drag::Move;
+                window.grab = {mouse.x - window.rect.x, mouse.y - window.rect.y};
+            }
+        }
+    } else if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+        window.drag = FloatingWindow::Drag::None;
+    } else if (window.drag == FloatingWindow::Drag::Move) {
+        window.rect.x = mouse.x - window.grab.x;
+        window.rect.y = mouse.y - window.grab.y;
+    } else {
+        window.rect.width = mouse.x - window.grab.x;
+        window.rect.height = mouse.y - window.grab.y;
+    }
+
+    // Always whole, inside the viewport, and not smaller than its minimum.
+    window.rect.width = std::clamp(window.rect.width, min_size.x, std::max(min_size.x, viewport.width - 8.0f));
+    window.rect.height = std::clamp(window.rect.height, min_size.y, std::max(min_size.y, viewport.height - 8.0f));
+    window.rect.x = std::clamp(window.rect.x, 0.0f, std::max(0.0f, viewport.width - window.rect.width));
+    window.rect.y = std::clamp(window.rect.y, 0.0f, std::max(0.0f, viewport.height - window.rect.height));
+    window.screen = {std::floor(viewport.x + window.rect.x), std::floor(viewport.y + window.rect.y),
+                     std::floor(window.rect.width), std::floor(window.rect.height)};
+}
+
+bool ModelEditor::mouse_covered_by_other(int id) const
+{
+    const int other = id == GRAPH_WINDOW ? UV_WINDOW : GRAPH_WINDOW;
+    return top_window == other && floating_window_open(other) &&
+           CheckCollisionPointRec(GetMousePosition(), floating_window(other).screen);
+}
+
+void ModelEditor::draw_floating_window(int id)
+{
+    if (!floating_window_open(id)) return;
+    const FloatingWindow& window = floating_window(id);
+    // Under the other window here: its controls don't react to the mouse.
+    mouse_blocked = mouse_covered_by_other(id) || window.drag != FloatingWindow::Drag::None;
+    const bool lock = mouse_covered_by_other(id);
+    if (lock) GuiLock();
+    if (id == GRAPH_WINDOW) draw_graph_window(window.screen);
+    else draw_uv_window(window.screen);
+    if (lock) GuiUnlock();
+    mouse_blocked = false;
+
+    // Resize grip: three short diagonals in the corner.
+    if (floating_window_open(id)) {
+        const Rectangle& s = window.screen;
+        const Color grip = gui_color(DEFAULT, BORDER_COLOR_NORMAL);
+        for (int i = 1; i <= 3; ++i) {
+            const float d = static_cast<float>(i) * 4.0f;
+            DrawLineEx({s.x + s.width - d - 2, s.y + s.height - 2}, {s.x + s.width - 2, s.y + s.height - d - 2}, 1.5f, grip);
+        }
+    }
 }
 
 Rectangle ModelEditor::uv_window_rect(Rectangle viewport) const
@@ -1460,6 +1679,7 @@ void ModelEditor::draw_uv_window(Rectangle bounds)
         uv_open = false;
         return;
     }
+    if (GuiButton({bounds.x + bounds.width - 106, bounds.y + 3, 78, 18}, tr("editor.view_fit").c_str())) uv_zoom = 0.0f;
     // The hint along the bottom, wrapped to the window's width.
     constexpr float HINT_FONT = 14.0f, HINT_LINE = 17.0f;
     std::vector<std::string> hint_lines(1);
@@ -1488,13 +1708,37 @@ void ModelEditor::draw_uv_window(Rectangle bounds)
         return;
     }
 
-    // Whole-pixel zoom that fits, the skin centered in the window.
+    // The skin at a whole number of screen pixels per skin pixel - its own
+    // proportions, never stretched to the window. Fitted (and centered) on
+    // first sight or with "Fit"; the wheel zooms about the mouse, dragging
+    // empty space (or middle / Alt+left drag) pans.
     const float skin_w = static_cast<float>(model.skin_width), skin_h = static_cast<float>(model.skin_height);
-    const float zoom = std::max(1.0f, std::floor(std::min(area.width / skin_w, area.height / skin_h)));
-    const Vector2 origin = {std::floor(area.x + (area.width - skin_w * zoom) * 0.5f),
-                            std::floor(area.y + (area.height - skin_h * zoom) * 0.5f)};
+    if (uv_zoom <= 0.0f) {
+        uv_zoom = std::max(1.0f, std::floor(std::min(area.width / skin_w, area.height / skin_h)));
+        uv_pan = {std::floor((area.width - skin_w * uv_zoom) * 0.5f), std::floor((area.height - skin_h * uv_zoom) * 0.5f)};
+    }
+    const Vector2 mouse = GetMousePosition();
+    const bool mouse_in = CheckCollisionPointRec(mouse, area) && !models_dropdown_open && !mouse_blocked;
+    const float wheel = GetMouseWheelMove();
+    if (mouse_in && wheel != 0.0f) {
+        static constexpr float LEVELS[] = {1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 20, 24, 28, 32, 40, 48};
+        constexpr int LEVEL_COUNT = static_cast<int>(sizeof(LEVELS) / sizeof(LEVELS[0]));
+        int level = 0;
+        while (level + 1 < LEVEL_COUNT && LEVELS[level + 1] <= uv_zoom) ++level;
+        level = std::clamp(level + (wheel > 0.0f ? 1 : -1), 0, LEVEL_COUNT - 1);
+        const float zoomed = LEVELS[level];
+        const Vector2 at = {mouse.x - area.x, mouse.y - area.y};
+        uv_pan = Vector2Subtract(at, Vector2Scale(Vector2Subtract(at, uv_pan), zoomed / uv_zoom));
+        uv_pan = {std::round(uv_pan.x), std::round(uv_pan.y)};
+        uv_zoom = zoomed;
+    }
+    const float zoom = uv_zoom;
+    const Vector2 origin = {area.x + uv_pan.x, area.y + uv_pan.y};
     const Rectangle canvas = {origin.x, origin.y, skin_w * zoom, skin_h * zoom};
     auto to_screen = [&](Rectangle r) { return Rectangle{origin.x + r.x * zoom, origin.y + r.y * zoom, r.width * zoom, r.height * zoom}; };
+
+    BeginScissorMode(static_cast<int>(area.x), static_cast<int>(area.y), static_cast<int>(area.width), static_cast<int>(area.height));
+    DrawRectangleRec(area, Color{30, 30, 34, 255});
 
     // Checkerboard under the skin, so transparent pixels read as empty.
     const float check = zoom * 4.0f;
@@ -1525,7 +1769,7 @@ void ModelEditor::draw_uv_window(Rectangle bounds)
         for (size_t c = 0; c < model.parts[p].cubes.size(); ++c) {
             const bool this_part = static_cast<int>(p) == selected_part;
             const bool this_cube = this_part && static_cast<int>(c) == selected_cube;
-            const std::array<Rectangle, 6> faces = cube_face_uvs(model.parts[p].cubes[c]);
+            const std::array<Rectangle, 6> faces = cube_face_uvs(model.parts[p], model.parts[p].cubes[c]);
             for (int f = 0; f < 6; ++f) {
                 const Rectangle r = to_screen(faces[f]);
                 if (this_cube && uv_side >= 0 && f != uv_side) {
@@ -1545,11 +1789,10 @@ void ModelEditor::draw_uv_window(Rectangle bounds)
             }
         }
     }
+    EndScissorMode();
 
     // Interaction: press on a side to grab it (selecting that part/cube),
     // drag to move by whole skin pixels; right click puts a side back.
-    const Vector2 mouse = GetMousePosition();
-    const bool mouse_in = CheckCollisionPointRec(mouse, area) && !models_dropdown_open;
     auto side_under_mouse = [&](int& part, int& cube, int& face) {
         // The selected cube wins over anything overlapping it, then the
         // selected part's other cubes, then the rest.
@@ -1559,7 +1802,7 @@ void ModelEditor::draw_uv_window(Rectangle bounds)
                     const bool this_part = static_cast<int>(p) == selected_part;
                     const bool this_cube = this_part && static_cast<int>(c) == selected_cube;
                     if ((pass == 0) != this_cube || (pass == 1 && (!this_part || this_cube)) || (pass == 2 && this_part)) continue;
-                    const std::array<Rectangle, 6> faces = cube_face_uvs(model.parts[p].cubes[c]);
+                    const std::array<Rectangle, 6> faces = cube_face_uvs(model.parts[p], model.parts[p].cubes[c]);
                     for (int f = 0; f < 6; ++f) {
                         if (CheckCollisionPointRec(mouse, to_screen(faces[f]))) {
                             part = static_cast<int>(p); cube = static_cast<int>(c); face = f;
@@ -1573,7 +1816,11 @@ void ModelEditor::draw_uv_window(Rectangle bounds)
     };
 
     if (mouse_in && IsKeyPressed(KEY_ESCAPE)) uv_side = -1;
-    if (mouse_in && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+    const bool alt = IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT);
+    if (mouse_in && (IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE) || (alt && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)))) {
+        uv_panning = true;
+        uv_pan_grab = Vector2Subtract(mouse, uv_pan);
+    } else if (mouse_in && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         int part, cube, face;
         if (side_under_mouse(part, cube, face)) {
             // First click on a layout takes it whole; clicking it again
@@ -1588,12 +1835,15 @@ void ModelEditor::draw_uv_window(Rectangle bounds)
             uv_drag_face = face;
             uv_drag_single = uv_side >= 0 || IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
             uv_drag_mouse = mouse;
-            const Rectangle side = cube_face_uvs(grabbed)[face];
+            const Rectangle side = cube_face_uvs(model.parts[selected_part], grabbed)[face];
             uv_drag_value = uv_drag_single ? Vector2{side.x, side.y} : grabbed.uv;
         } else {
-            // Empty spot: back to moving whole layouts.
+            // Empty spot: back to moving whole layouts - and a drag from
+            // here pans the view.
             uv_side = -1;
             uv_clicked_part = uv_clicked_cube = -1;
+            uv_panning = true;
+            uv_pan_grab = Vector2Subtract(mouse, uv_pan);
         }
     }
     if (mouse_in && IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
@@ -1625,6 +1875,14 @@ void ModelEditor::draw_uv_window(Rectangle bounds)
             }
         } else {
             uv_drag_face = -1;
+        }
+    }
+    if (uv_panning) {
+        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) || IsMouseButtonDown(MOUSE_BUTTON_MIDDLE)) {
+            const Vector2 pan = Vector2Subtract(mouse, uv_pan_grab);
+            uv_pan = {std::round(pan.x), std::round(pan.y)};
+        } else {
+            uv_panning = false;
         }
     }
 }

@@ -11,7 +11,7 @@ Application::Application(int screen_width, int screen_height, const char* title)
     : settings(SettingsIO::load())
 {
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
-    InitWindow(settings.window_width > 0 ? settings.window_width : screen_width,
+    InitWindow(settings.window_width  > 0 ? settings.window_width  : screen_width,
                settings.window_height > 0 ? settings.window_height : screen_height, title);
     SetWindowMinSize(960, 540);
 

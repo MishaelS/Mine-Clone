@@ -34,11 +34,31 @@ private:
     Vector3 planned_for = {0.0f, 0.0f, 0.0f}; // where the player stood when the path was planned
 };
 
+// Now and then lowers its head and eats the grass it stands on: tall grass
+// at its feet goes, or else the grass block under it turns to dirt
+// (Mob::request_block_change()). Then Mob::on_ate_grass() - a sheared
+// sheep grows its wool back. Its model's Manual "eat" animation (head down
+// to the ground, chewing) plays meanwhile.
+class EatGrassGoal : public Goal {
+public:
+    EatGrassGoal() : Goal(MOVE_FLAG | LOOK_FLAG | JUMP_FLAG) {}
+    bool can_use(Mob& mob, const AiContext& context) override;
+    bool can_continue(Mob& mob, const AiContext& context) override;
+    void start(Mob& mob, const AiContext& context) override;
+    void stop(Mob& mob) override;
+    void tick(Mob& mob, const AiContext& context) override;
+
+private:
+    int ticks = 0;
+};
+
 struct AnimalAiSettings {
     std::vector<ItemType> tempt_items; // what makes it follow a player
     float tempt_speed = 1.25f;         // speed modifiers - see Mob::walk_speed()
     float stroll_speed = 1.0f;
     float look_range = 6.0f;           // blocks
+    float panic_speed = 2.0f;          // fleeing after being hit: twice its walk
+    bool eats_grass = false;           // see EatGrassGoal
 };
 
 void add_animal_goals(GoalSelector& goals, const AnimalAiSettings& settings);

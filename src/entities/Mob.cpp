@@ -1,6 +1,8 @@
 #include "entities/Mob.hpp"
 #include "core/TextureManager.hpp"
+#include "core/Tick.hpp"
 #include "model/EntityModelRenderer.hpp"
+#include "model/ModelLibrary.hpp"
 #include "rendering/EntityLighting.hpp"
 #include "world/World.hpp"
 
@@ -23,6 +25,12 @@ namespace {
     constexpr float COLLISION_EPSILON = 0.001f;
     constexpr float PUSH_DECAY = 0.6f; // share of a shove still moving it the next tick
     constexpr float DEFAULT_HEAD_TURN_LIMIT = 75.0f;
+
+    // Being hit - vanilla's knockback and invulnerability time.
+    constexpr float KNOCKBACK_SPEED = 0.4f;  // blocks/tick, fading like a push
+    constexpr float KNOCKBACK_LIFT = 0.36f;  // blocks/tick up, when on the ground
+    constexpr int HURT_TICKS = 10;           // red flash, and no new hit counts meanwhile
+    constexpr int HURT_MEMORY_TICKS = 100;   // see Mob::recently_hurt()
 }
 
 Mob::Mob(Vector3 feet_position, float yaw_degrees, uint32_t seed, Dimensions dimensions)
@@ -44,6 +52,9 @@ void Mob::tick(const World& world, const ai::PlayerView& player)
     previous_head_yaw = head_yaw_degrees;
     previous_head_pitch = head_pitch_degrees;
     jumping = false;
+    ++age_ticks;
+    if (hurt_ticks > 0) --hurt_ticks;
+    if (hurt_memory_ticks > 0) --hurt_memory_ticks;
 
     // Goals decide where to go and look; navigation turns that into the
     // next waypoint, the controls into body/head turning and walk input.
@@ -126,6 +137,12 @@ void Mob::move(const World& world)
     motion.current = feet;
 }
 
+void Mob::play_animation(const std::string& name)
+{
+    manual_animation = name;
+    manual_animation_start = age_ticks;
+}
+
 void Mob::turn_body_toward(float yaw, float max_step)
 {
     body_yaw_degrees += std::clamp(wrap_degrees(yaw - body_yaw_degrees), -max_step, max_step);
@@ -164,16 +181,32 @@ void Mob::render(float tick_alpha, const World& world) const
     last_render_position = position;
     rendered_before = true;
     animator.update(GetFrameTime(), moved, false);
+    // Timed by game ticks, so it stays in step with the AI that started it.
+    animator.set_manual(manual_animation,
+                        (static_cast<float>(age_ticks - manual_animation_start) + tick_alpha) * TICK_DURATION);
 
     ModelPose pose = animator.pose(entity);
     apply_head_look(entity, pose, wrap_degrees(head_yaw - yaw), head_pitch);
 
     const Texture2D& skin = entity.skin.empty() ? Texture2D{} : TextureManager::get(entity.skin);
-    const Color tint = entity_environment_tint(world, Vector3Add(position, {0.0f, dimensions.height * 0.5f, 0.0f}));
+    Color tint = entity_environment_tint(world, Vector3Add(position, {0.0f, dimensions.height * 0.5f, 0.0f}));
+    if (hurt_ticks > 0) {
+        // Just hit: flushed red, like Minecraft.
+        tint.g = static_cast<unsigned char>(tint.g * 0.4f);
+        tint.b = static_cast<unsigned char>(tint.b * 0.4f);
+    }
     rlPushMatrix();
     rlTranslatef(position.x, position.y, position.z);
     rlRotatef(yaw, 0.0f, 1.0f, 0.0f);
     draw_entity_model(entity, skin, pose, model_scale(), tint);
+    // Its layers (a sheep's wool) on top, in the same pose.
+    for (const std::string& layer_name : entity.layers) {
+        if (!shows_layer(layer_name)) continue;
+        const EntityModel& layer = entity_model(layer_name);
+        if (layer.parts.empty()) continue;
+        const Texture2D& layer_skin = layer.skin.empty() ? Texture2D{} : TextureManager::get(layer.skin);
+        draw_entity_model(layer, layer_skin, map_pose(entity, pose, layer), model_scale(), tint);
+    }
     rlPopMatrix();
 }
 
@@ -201,4 +234,66 @@ bool Mob::intersects_block(int x, int y, int z) const
     return feet.x + half > x && feet.x - half < x + 1.0f &&
            feet.y + dimensions.height > y && feet.y < y + 1.0f &&
            feet.z + half > z && feet.z - half < z + 1.0f;
+}
+
+std::optional<float> Mob::ray_distance(Vector3 origin, Vector3 direction) const
+{
+    const Vector3 feet = motion.current;
+    const float half = dimensions.width * 0.5f;
+    const RayCollision hit = GetRayCollisionBox(
+        {origin, direction}, {{feet.x - half, feet.y, feet.z - half}, {feet.x + half, feet.y + dimensions.height, feet.z + half}});
+    if (!hit.hit) return std::nullopt;
+    return hit.distance;
+}
+
+bool Mob::hurt(Vector3 from)
+{
+    if (hurt_ticks > 0) return false;
+    hurt_ticks = HURT_TICKS;
+    hurt_memory_ticks = HURT_MEMORY_TICKS;
+    hurt_from = from;
+
+    Vector3 away = {motion.current.x - from.x, 0.0f, motion.current.z - from.z};
+    const float length = std::sqrt(away.x * away.x + away.z * away.z);
+    away = length > 0.001f ? Vector3Scale(away, 1.0f / length) : Vector3{std::sin(body_yaw_degrees * DEG2RAD), 0.0f, std::cos(body_yaw_degrees * DEG2RAD)};
+    push_velocity = Vector3Add(Vector3Scale(push_velocity, 0.5f), Vector3Scale(away, KNOCKBACK_SPEED));
+    if (grounded) velocity.y = KNOCKBACK_LIFT;
+    return true;
+}
+
+InteractionResult Mob::interact(InteractionTrigger trigger, const ItemStack& held)
+{
+    InteractionResult result;
+    for (const InteractionRule& rule : interactions) {
+        if (rule.trigger != trigger || !rule.holds_right_item(held)) continue;
+        if (!rule.required_state.empty() && !has_state(rule.required_state)) continue;
+        if (!rule.blocking_state.empty() && has_state(rule.blocking_state)) continue;
+        result.handled = true; // a matching right click is used up even when its chance misses
+        if (random_float() >= rule.probability) continue;
+
+        if (rule.drop) result.drops.push_back(rule.drop->stack(random_int(rule.drop_min, std::max(rule.drop_min, rule.drop_max))));
+        if (rule.hand_result && !result.in_hand) result.in_hand = rule.hand_result->stack(1);
+        if (!rule.state_to_set.empty()) set_state(rule.state_to_set, true);
+        if (!rule.state_to_clear.empty()) set_state(rule.state_to_clear, false);
+    }
+    return result;
+}
+
+bool Mob::has_state(const std::string& state) const
+{
+    return std::find(state_flags.begin(), state_flags.end(), state) != state_flags.end();
+}
+
+void Mob::set_state(const std::string& state, bool on)
+{
+    auto found = std::find(state_flags.begin(), state_flags.end(), state);
+    if (on && found == state_flags.end()) state_flags.push_back(state);
+    if (!on && found != state_flags.end()) state_flags.erase(found);
+}
+
+std::optional<Mob::BlockChange> Mob::take_block_change()
+{
+    std::optional<BlockChange> change = requested_change;
+    requested_change.reset();
+    return change;
 }

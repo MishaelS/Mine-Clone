@@ -116,15 +116,29 @@ private:
     // falling items move at Minecraft's own fixed rate.
     void tick_dropped_items();
 
-    // One tick for every mob (cows, NPCs) in a loaded chunk, plus - every
-    // few seconds - a herd of cows spawning on grass some way off if few are
-    // around (see try_spawn_cows()).
+    // One tick for every mob (animals, NPCs) in a loaded chunk, plus -
+    // every few seconds - a herd of cows or sheep spawning on grass some way
+    // off if few animals are around (see try_spawn_animals()).
     void tick_mobs();
 
     // Every pair of overlapping hitboxes (mob-mob, player-mob) gets nudged
     // apart this tick - see push_apart() in the .cpp.
     void push_entities_apart();
-    void try_spawn_cows();
+    void try_spawn_animals();
+
+    // The mob under the crosshair within `reach`, unless a block is in
+    // front of it - that one gets the click instead.
+    Mob* targeted_mob(Vector3 aim, float reach) const;
+    // Left click on a mob: hurts it (knockback, red flash, panic) and runs
+    // its Hit interaction rules. Right click: its Use rules - true if one
+    // applied, so the click isn't also a block placement.
+    void hit_mob(Mob& mob);
+    bool use_on_mob(Mob& mob);
+    // Carries out what an interaction rule produced: drops by the mob, the
+    // held item turned into another.
+    void apply_interaction(const Mob& mob, const InteractionResult& result);
+    // Into the inventory, or dropped at the player's feet if it's full.
+    void give_player(const ItemStack& stack);
     // Feet height for a mob on the grass at column (x, z) - loaded, grass
     // on top, two free cells above it - or nothing.
     std::optional<int> grass_spawn_height(int x, int z) const;
@@ -191,6 +205,14 @@ private:
     // since this runs at an arbitrary world position at runtime, not
     // bounded to one already-open Chunk.
     void update_sapling_growth(int x, int y, int z);
+    // Grass under something that covers it (see grass_can_live()) dies back
+    // to dirt; uncovered, well-lit grass spreads onto uncovered dirt next to
+    // it - Minecraft's own grass random tick.
+    void update_grass(int x, int y, int z);
+    // Nothing on top of block (x, y, z) that keeps grass from living there:
+    // no water/lava, no full opaque block, no slab/stairs - plants, torches,
+    // glass and leaves are fine.
+    bool grass_can_live(int x, int y, int z) const;
 
     // Called right after any block is removed - ShortGrass (and anything
     // else non-solid that needs ground under it) can't stay floating in

@@ -190,7 +190,7 @@ namespace ai {
 
         int best = 0;
         float best_distance = distance(start, target_center);
-        int found = -1;
+        int found   = -1;
         int visited = 0;
         std::vector<Step> steps;
         while (!open.empty() && visited < settings.max_visited_nodes) {

@@ -29,7 +29,9 @@ void push_part_transform(const EntityModel& model, const ModelPose& pose, int pa
 // the vertex).
 Matrix cube_rotation_matrix(const ModelCube& cube, float scale);
 
-// Where each side of `cube` sits on the skin (skin pixels), in
-// MODEL_FACE_IDS order: the standard Minecraft box layout from its uv, with
+// Where each side of `cube` (one of `part`'s) sits on the skin (skin
+// pixels), in MODEL_FACE_IDS order: the standard Minecraft box layout from
+// its uv, sized like the cube is drawn (cube_draw_bounds() - so the texture
+// is never stretched) or like `size` for ModelCube::stretch_texture, with
 // any per-side override (ModelCube::face_uv) applied.
-std::array<Rectangle, 6> cube_face_uvs(const ModelCube& cube);
+std::array<Rectangle, 6> cube_face_uvs(const ModelPart& part, const ModelCube& cube);

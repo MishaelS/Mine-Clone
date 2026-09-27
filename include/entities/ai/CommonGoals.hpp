@@ -43,6 +43,21 @@ private:
     Vector3 target = {0.0f, 0.0f, 0.0f};
 };
 
+// Just hit (Mob::recently_hurt()): runs away from the player, dash after
+// dash, at `speed` (twice its walk for animals) for a few seconds.
+class PanicGoal : public Goal {
+public:
+    explicit PanicGoal(float speed) : Goal(MOVE_FLAG), speed(speed) {}
+    bool can_use(Mob& mob, const AiContext& context) override;
+    bool can_continue(Mob& mob, const AiContext& context) override;
+    void start(Mob& mob, const AiContext& context) override;
+    void stop(Mob& mob) override;
+
+private:
+    float speed;
+    Vector3 target = {0.0f, 0.0f, 0.0f};
+};
+
 // A player close by catches its eye now and then: it turns its head to
 // them, watches for a few seconds, then - loses interest and turns away.
 class LookAtPlayerGoal : public Goal {

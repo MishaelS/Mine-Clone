@@ -388,7 +388,13 @@ namespace WorldSave {
         for (size_t i = 0; i < mobs.size(); ++i) {
             const MobSaveState& mob = mobs[i];
             out << "    { \"type\": \"" << json_escape(mob.type) << "\", \"position\": { \"x\": " << mob.position.x
-                << ", \"y\": " << mob.position.y << ", \"z\": " << mob.position.z << " }, \"yaw\": " << mob.yaw << " }";
+                << ", \"y\": " << mob.position.y << ", \"z\": " << mob.position.z << " }, \"yaw\": " << mob.yaw;
+            if (!mob.states.empty()) {
+                out << ", \"states\": [";
+                for (size_t s = 0; s < mob.states.size(); ++s) out << (s ? ", " : "") << "\"" << json_escape(mob.states[s]) << "\"";
+                out << "]";
+            }
+            out << " }";
             if (i + 1 < mobs.size()) out << ",";
             out << "\n";
         }
@@ -411,6 +417,9 @@ namespace WorldSave {
                     static_cast<float>(entry["position"]["z"].as_number(0.0)),
                 };
                 mob.yaw = static_cast<float>(entry["yaw"].as_number(0.0));
+                for (const Json& state : entry["states"].as_array()) {
+                    if (!state.as_string().empty()) mob.states.push_back(state.as_string());
+                }
                 if (!mob.type.empty()) result.push_back(mob);
             }
         } catch (const std::exception&) {

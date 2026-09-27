@@ -1,12 +1,16 @@
 #pragma once
 
 #include "entities/Entity.hpp"
+#include "entities/Interaction.hpp"
 #include "entities/ai/Controls.hpp"
 #include "entities/ai/Goal.hpp"
 #include "core/TickMotion.hpp"
 #include "model/EntityModel.hpp"
 
 #include <cstdint>
+#include <optional>
+#include <string>
+#include <vector>
 #include <random>
 
 class World;
@@ -54,7 +58,46 @@ public:
     // there is refused.
     bool intersects_block(int x, int y, int z) const;
 
+    // A ray (from the player's eyes) hitting its hitbox: how far along, or
+    // nothing if it misses.
+    std::optional<float> ray_distance(Vector3 origin, Vector3 direction) const;
+
+    // The player hits it: knocked back away from `from` and flashes red.
+    // False (nothing happens) while it's still recovering from the last hit
+    // - half a second, like Minecraft.
+    bool hurt(Vector3 from);
+    // The player acts on it holding `held`: every one of its interaction
+    // rules (add_interaction()) matching gets its chance to fire.
+    InteractionResult interact(InteractionTrigger trigger, const ItemStack& held);
+
+    // Named on/off states the interaction rules and AI read and change -
+    // "sheared", say. Saved with the mob.
+    bool has_state(const std::string& state) const;
+    void set_state(const std::string& state, bool on);
+    const std::vector<std::string>& states() const { return state_flags; }
+
+    // A block the AI wants changed (a sheep eating grass), for GameEngine to
+    // carry out after the tick - the AI only ever reads the world. Only a
+    // swap that keeps the light as it was (see World::swap_block_same_light()).
+    struct BlockChange {
+        int x, y, z;
+        BlockType block;
+    };
+    void request_block_change(BlockChange change) { requested_change = change; }
+    std::optional<BlockChange> take_block_change();
+
     // --- For the AI (entities/ai/) ---
+
+    // Hit within the last few seconds - panicking animals run about.
+    bool recently_hurt() const { return hurt_memory_ticks > 0; }
+    Vector3 hurt_source() const { return hurt_from; } // where the last hit came from
+    // Ate grass (ai::EatGrassGoal) - a sheep grows its wool back.
+    virtual void on_ate_grass() {}
+
+    // Plays one of its model's Manual animations (the sheep's "eat") from
+    // this tick on, on top of walking/idle; stop_animation() cuts it short.
+    void play_animation(const std::string& name);
+    void stop_animation() { manual_animation.clear(); }
 
     ai::Navigation& navigation() { return path_navigation; }
     const ai::Navigation& navigation() const { return path_navigation; }
@@ -91,6 +134,10 @@ public:
 protected:
     // World units per model pixel.
     virtual float model_scale() const { return 1.0f / 16.0f; }
+    // Whether its model's layer `layer` (EntityModel::layers) is drawn now.
+    virtual bool shows_layer(const std::string&) const { return true; }
+
+    void add_interaction(const InteractionRule& rule) { interactions.push_back(rule); }
 
     ai::GoalSelector goals;
 
@@ -111,6 +158,16 @@ private:
     float forward_speed = 0.0f;
     bool jumping = false;
     Vector3 push_velocity = {0.0f, 0.0f, 0.0f}; // blocks/tick, from push()
+
+    std::vector<InteractionRule> interactions;
+    std::vector<std::string> state_flags;
+    std::optional<BlockChange> requested_change;
+    int hurt_ticks = 0;        // red flash + no new hits while > 0
+    int hurt_memory_ticks = 0; // see recently_hurt()
+    Vector3 hurt_from = {0.0f, 0.0f, 0.0f};
+    int age_ticks = 0;
+    std::string manual_animation; // see play_animation()
+    int manual_animation_start = 0;
 
     ai::Navigation path_navigation;
     ai::MoveControl movement;

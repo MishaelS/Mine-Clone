@@ -71,6 +71,7 @@ struct MobSaveState {
     std::string type;                      // Mob::type_id() - "cow", "npc"
     Vector3 position = {0.0f, 0.0f, 0.0f}; // feet
     float yaw = 0.0f;                      // degrees
+    std::vector<std::string> states;       // Mob::states() - "sheared"...
 };
 
 // A Chest's own 27-slot storage at a specific block position - see

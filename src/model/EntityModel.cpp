@@ -89,9 +89,9 @@ EntityModel make_humanoid_model()
     auto part = [&model](const char* name, const char* parent, Vector3 pivot, Vector3 min, Vector3 max,
                          ModelCube cube) {
         ModelPart p;
-        p.name = name;
+        p.name   = name;
         p.parent = parent;
-        p.pivot = pivot;
+        p.pivot  = pivot;
         p.rotation_min = min;
         p.rotation_max = max;
         p.cubes.push_back(cube);
@@ -99,12 +99,12 @@ EntityModel make_humanoid_model()
     };
     // Feet at y = 0, 32 pixels (2 blocks) tall, facing +Z; the entity's
     // right side is -X. Pivots sit where each part hinges on the body.
-    part("body", "", {0, 24, 0}, {-30, -45, -15}, {30, 45, 15}, {{-4, 12, -2}, {8, 12, 4}, {16, 16}});
-    part("head", "body", {0, 24, 0}, {-60, -80, -20}, {60, 80, 20}, {{-4, 24, -4}, {8, 8, 8}, {0, 0}});
+    part("body"     , ""    , { 0, 24, 0}, { -30, -45, -15}, {30, 45, 15}, {{-4, 12, -2}, {8, 12, 4}, {16, 16}});
+    part("head"     , "body", { 0, 24, 0}, { -60, -80, -20}, {60, 80, 20}, {{-4, 24, -4}, {8,  8, 8}, { 0,  0}});
     part("right_arm", "body", {-5, 22, 0}, {-180, -30, -90}, {90, 30, 10}, {{-8, 12, -2}, {4, 12, 4}, {40, 16}});
-    part("left_arm", "body", {5, 22, 0}, {-180, -30, -10}, {90, 30, 90}, {{4, 12, -2}, {4, 12, 4}, {32, 48}});
-    part("right_leg", "body", {-2, 12, 0}, {-90, -20, -30}, {90, 20, 10}, {{-4, 0, -2}, {4, 12, 4}, {0, 16}});
-    part("left_leg", "body", {2, 12, 0}, {-90, -20, -10}, {90, 20, 30}, {{0, 0, -2}, {4, 12, 4}, {16, 48}});
+    part("left_arm" , "body", { 5, 22, 0}, {-180, -30, -10}, {90, 30, 90}, {{ 4, 12, -2}, {4, 12, 4}, {32, 48}});
+    part("right_leg", "body", {-2, 12, 0}, { -90, -20, -30}, {90, 20, 10}, {{-4,  0, -2}, {4, 12, 4}, { 0, 16}});
+    part("left_leg" , "body", { 2, 12, 0}, { -90, -20, -10}, {90, 20, 30}, {{ 0,  0, -2}, {4, 12, 4}, {16, 48}});
     model.parts[model.find_part(HEAD_PART)].look = true;
     return model;
 }
@@ -126,6 +126,11 @@ std::optional<EntityModel> load_entity_model(const std::string& path)
             model.skin_width = std::max(1, static_cast<int>(skin_size[0].as_number(64)));
             model.skin_height = std::max(1, static_cast<int>(skin_size[1].as_number(64)));
         }
+
+        for (const Json& layer : root["layers"].as_array()) {
+            if (!layer.as_string().empty()) model.layers.push_back(layer.as_string());
+        }
+
         bool any_look_node = false;
         for (const Json& p : root["parts"].as_array()) {
             ModelPart part;
@@ -134,9 +139,9 @@ std::optional<EntityModel> load_entity_model(const std::string& path)
                 any_look_node = true;
             }
             part.body_turn_angle = std::clamp(static_cast<float>(p["body_turn_angle"].as_number(part.body_turn_angle)), 0.0f, 180.0f);
-            part.name = p["name"].as_string();
+            part.name   = p["name"].as_string();
             part.parent = p["parent"].as_string();
-            part.pivot = read_vec3(p["pivot"], part.pivot);
+            part.pivot  = read_vec3(p["pivot"], part.pivot);
             part.rotation_min = read_vec3(p["rotation_min"], part.rotation_min);
             part.rotation_max = read_vec3(p["rotation_max"], part.rotation_max);
             for (const Json& c : p["cubes"].as_array()) {
@@ -148,6 +153,8 @@ std::optional<EntityModel> load_entity_model(const std::string& path)
                 cube.rotation = read_vec3(c["rotation"], cube.rotation);
                 cube.rotation_origin = read_vec3(c["rotation_origin"], cube.rotation_origin);
                 cube.overlay = c["overlay"].as_bool(false);
+                cube.inflate = std::max(0.0f, static_cast<float>(c["inflate"].as_number(0.0)));
+                cube.stretch_texture = c["stretch_texture"].as_bool(false);
                 for (int f = 0; f < 6; ++f) {
                     const std::vector<Json>& face = c["face_uv"][MODEL_FACE_IDS[f]].as_array();
                     if (face.size() >= 2) {
@@ -158,10 +165,12 @@ std::optional<EntityModel> load_entity_model(const std::string& path)
             }
             model.parts.push_back(part);
         }
+
         // Saved before look nodes existed: the head looks, as it always did.
         if (!any_look_node) {
             if (int head = model.find_part(HEAD_PART); head >= 0) model.parts[head].look = true;
         }
+
         for (const Json& a : root["animations"].as_array()) {
             EntityAnimation animation;
             animation.name = a["name"].as_string();
@@ -176,6 +185,7 @@ std::optional<EntityModel> load_entity_model(const std::string& path)
             if (position.size() >= 2) {
                 animation.graph_position = {static_cast<float>(position[0].as_number()), static_cast<float>(position[1].as_number())};
             }
+
             animation.blocks_per_loop = std::max(0.1f, static_cast<float>(a["blocks_per_loop"].as_number(2.0)));
             for (const Json& t : a["tracks"].as_array()) {
                 ModelTrack track;
@@ -205,6 +215,11 @@ bool save_entity_model(const EntityModel& model, const std::string& path)
     out << "  \"name\": \"" << escape(model.name) << "\",\n";
     out << "  \"skin\": \"" << escape(model.skin) << "\",\n";
     out << "  \"skin_size\": [" << model.skin_width << ", " << model.skin_height << "],\n";
+    if (!model.layers.empty()) {
+        out << "  \"layers\": [";
+        for (size_t i = 0; i < model.layers.size(); ++i) out << (i ? ", " : "") << "\"" << escape(model.layers[i]) << "\"";
+        out << "],\n";
+    }
     out << "  \"parts\": [";
     for (size_t i = 0; i < model.parts.size(); ++i) {
         const ModelPart& part = model.parts[i];
@@ -225,6 +240,8 @@ bool save_entity_model(const EntityModel& model, const std::string& path)
                 out << ", \"rotation\": " << vec3(cube.rotation) << ", \"rotation_origin\": " << vec3(cube.rotation_origin);
             }
             if (cube.overlay) out << ", \"overlay\": true";
+            if (cube.inflate != 0.0f) out << ", \"inflate\": " << number(cube.inflate);
+            if (cube.stretch_texture) out << ", \"stretch_texture\": true";
             bool any_face = false;
             for (int f = 0; f < 6; ++f) {
                 if (!cube.face_uv[f]) continue;
@@ -279,17 +296,18 @@ Vector3 clamp_rotation(const ModelPart& part, Vector3 rotation)
 const char* animation_trigger_id(AnimationTrigger trigger)
 {
     switch (trigger) {
-        case AnimationTrigger::Always: return "always";
-        case AnimationTrigger::Moving: return "moving";
+        case AnimationTrigger::Always:    return "always";
+        case AnimationTrigger::Moving:    return "moving";
         case AnimationTrigger::Sneaking: return "sneaking";
-        default:                       return "manual";
+        default:
+            return "manual";
     }
 }
 
 AnimationTrigger animation_trigger_from_id(const std::string& id)
 {
-    if (id == "always") return AnimationTrigger::Always;
-    if (id == "moving") return AnimationTrigger::Moving;
+    if (id == "always"  ) return AnimationTrigger::Always;
+    if (id == "moving"  ) return AnimationTrigger::Moving;
     if (id == "sneaking") return AnimationTrigger::Sneaking;
     return AnimationTrigger::Manual;
 }
@@ -305,7 +323,7 @@ void add_animation(const EntityModel& model, const EntityAnimation& animation, f
         if (index < 0) continue;
         PartPose sampled = sample_track(track, t, length, animation.loop);
         pose[index].rotation = Vector3Add(pose[index].rotation, Vector3Scale(sampled.rotation, weight));
-        pose[index].offset = Vector3Add(pose[index].offset, Vector3Scale(sampled.offset, weight));
+        pose[index].offset   = Vector3Add(pose[index].offset, Vector3Scale(sampled.offset, weight));
     }
 }
 
@@ -345,6 +363,12 @@ void EntityAnimator::update(float delta_time, float moved, bool sneaking)
     sneaking_weight += ((sneaking ? 1.0f : 0.0f) - sneaking_weight) * rate;
 }
 
+void EntityAnimator::set_manual(const std::string& name, float seconds)
+{
+    manual_name = name;
+    manual_time = std::max(0.0f, seconds);
+}
+
 ModelPose EntityAnimator::pose(const EntityModel& model) const
 {
     // How strongly an active state (only Sneaking so far) holds each
@@ -376,6 +400,11 @@ ModelPose EntityAnimator::pose(const EntityModel& model) const
             }
             case AnimationTrigger::Sneaking:
                 add_animation(model, animation, time, sneaking_weight, pose);
+                break;
+            case AnimationTrigger::Manual:
+                if (animation.name == manual_name && (animation.loop || manual_time <= animation.length)) {
+                    add_animation(model, animation, manual_time, 1.0f, pose);
+                }
                 break;
             default:
                 break;
@@ -427,7 +456,8 @@ BoundingBox cube_draw_bounds(const ModelPart& part, const ModelCube& cube)
 {
     const Vector3 low = cube.origin;
     const Vector3 high = Vector3Add(cube.origin, cube.size);
-    if (!cube.overlay) return {low, high};
+    const Vector3 grow = {cube.inflate, cube.inflate, cube.inflate};
+    if (!cube.overlay) return {Vector3Subtract(low, grow), Vector3Add(high, grow)};
 
     constexpr float TOUCH_EPSILON = 0.001f;
     auto near = [](float a, float b) { return std::fabs(a - b) < TOUCH_EPSILON; };
@@ -456,8 +486,18 @@ BoundingBox cube_draw_bounds(const ModelPart& part, const ModelCube& cube)
             if (near(axis(high, a), axis(base_low, a))) shift[a] = -MODEL_OVERLAY_GAP;     // sits on its - side
         }
     }
-    return {{low.x - grow_low[0] + shift[0], low.y - grow_low[1] + shift[1], low.z - grow_low[2] + shift[2]},
-            {high.x + grow_high[0] + shift[0], high.y + grow_high[1] + shift[1], high.z + grow_high[2] + shift[2]}};
+    return {Vector3Subtract({low.x - grow_low[0] + shift[0], low.y - grow_low[1] + shift[1], low.z - grow_low[2] + shift[2]}, grow),
+            Vector3Add({high.x + grow_high[0] + shift[0], high.y + grow_high[1] + shift[1], high.z + grow_high[2] + shift[2]}, grow)};
+}
+
+ModelPose map_pose(const EntityModel& from, const ModelPose& pose, const EntityModel& to)
+{
+    ModelPose mapped(to.parts.size());
+    for (size_t i = 0; i < to.parts.size(); ++i) {
+        const int source = from.find_part(to.parts[i].name);
+        if (source >= 0 && source < static_cast<int>(pose.size())) mapped[i] = pose[static_cast<size_t>(source)];
+    }
+    return mapped;
 }
 
 int look_part(const EntityModel& model)
