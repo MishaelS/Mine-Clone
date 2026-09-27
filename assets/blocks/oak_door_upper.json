@@ -1,0 +1,22 @@
+{
+  "id": 80,
+  "name": "oak_door_upper",
+  "sound": "wood",
+  "hardness": 3,
+  "tool": "axe",
+  "density": 0.6,
+  "luminance": 0,
+  "shape": "door",
+  "solid": false,
+  "transparent": true,
+  "cutout": true,
+  "pair": { "half": "upper", "partner": "oak_door_lower", "item": false },
+  "faces": {
+    "top": { "tile": [1, 5] },
+    "bottom": { "tile": [1, 5] },
+    "north": { "tile": [1, 5] },
+    "south": { "tile": [1, 5] },
+    "east": { "tile": [1, 5] },
+    "west": { "tile": [1, 5] }
+  }
+}

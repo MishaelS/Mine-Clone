@@ -45,10 +45,12 @@ namespace content {
         when_broken(B::SpruceFoliage    ).drop(I::Sapling   ).chance(0.05f).drop(I::Stick).chance(0.025f);
         when_broken(B::BirchFoliage     ).drop(I::Sapling   ).chance(0.05f).drop(I::Stick).chance(0.025f);
 
-        // Two-cell blocks: either half gives back the one placeable item.
-        when_broken(B::BedFoot          ).drop(B::BedHead      );
-        when_broken(B::OakDoorUpper     ).drop(B::OakDoorLower );
-        when_broken(B::IronDoorUpper    ).drop(B::IronDoorLower);
+        // Two-cell blocks (their files' "pair"): either half gives back the
+        // one placeable item.
+        for (BlockType type : all_block_types()) {
+            const BlockProperties& properties = get_block_properties(type);
+            if (!properties.is_item && properties.partner != BlockType::Air) when_broken(type).drop(properties.partner);
+        }
 
         // Nothing at all
         when_broken(B::Glass            ).drop_nothing();

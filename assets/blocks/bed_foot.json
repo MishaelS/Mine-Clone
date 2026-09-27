@@ -1,0 +1,23 @@
+{
+  "id": 84,
+  "name": "bed_foot",
+  "sound": "wood",
+  "hardness": 0.2,
+  "tool": "axe",
+  "density": 0.6,
+  "luminance": 0,
+  "shape": "bed",
+  "solid": false,
+  "transparent": true,
+  "cutout": true,
+  "pair": { "half": "foot", "partner": "bed_head", "item": false },
+  "end": [5, 9],
+  "faces": {
+    "top": { "tile": [6, 8] },
+    "bottom": { "tile": [4, 0] },
+    "north": { "tile": [6, 9] },
+    "south": { "tile": [6, 9] },
+    "east": { "tile": [6, 9] },
+    "west": { "tile": [6, 9] }
+  }
+}

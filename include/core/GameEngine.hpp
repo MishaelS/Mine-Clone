@@ -224,14 +224,14 @@ private:
     // glass and leaves are fine.
     bool grass_can_live(int x, int y, int z) const;
 
-    // Called right after any block is removed - ShortGrass (and anything
-    // else non-solid that needs ground under it) can't stay floating in
-    // place the way real Minecraft's own tufts/flowers can't either: if
-    // ShortGrass is sitting directly above the now-empty cell, it pops
+    // Called right after any block is removed - a plant (anything with a
+    // soil list, BlockProperties::placed_on) can't stay floating in place
+    // the way real Minecraft's own tufts/flowers can't either: if one is
+    // sitting directly above a cell that's no longer its soil, it pops
     // immediately (not a delayed decay like leaves - support loss is
     // instant in vanilla too), dropping through the same
     // resolve_block_drops() table a manual break would (bare-handed).
-    void check_grass_support_above(int x, int y, int z);
+    void check_plant_support_above(int x, int y, int z);
     // Called right after a block is removed: anything mounted on it (a
     // torch on that wall - see BlockProperties::attach_*) has lost its
     // support and breaks off, dropping as an item, same as vanilla.

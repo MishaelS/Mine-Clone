@@ -216,7 +216,14 @@ enum class BlockRenderShape : uint8_t { Cube, Cross, Shaped };
 //   Cake     - eaten a slice at a time
 //   Torch    - a stick on the floor or a wall, no collision
 //   Door, Bed - two-cell blocks (their halves are separate blocks)
-enum class BlockShapeKind : uint8_t { Cube, Slab, Stairs, Trapdoor, Cake, Torch, Door, Bed, Count };
+//   Cross    - a plant: two crossed planes, no collision
+//   Fluid    - water, lava: flows and is drawn by the game's own fluid code
+enum class BlockShapeKind : uint8_t { Cube, Slab, Stairs, Trapdoor, Cake, Torch, Door, Bed, Cross, Fluid, Count };
+
+// A face recolored per column by the biome it's in instead of its own tint
+// (which is then only its color out of the world): grass (a grass block's
+// top, tall grass) or foliage (leaves) - Minecraft's biome colormap idea.
+enum class BiomeTint : uint8_t { None, Grass, Foliage };
 
 // How a block looks and is aimed at in one of its states (a torch: on the
 // floor, on a wall - see shape_state_index() in core/BlockShape.hpp): its
@@ -354,6 +361,28 @@ struct BlockProperties {
     int item_sprite_y;
     // Its hitbox and model placement per state - see BlockStateModel.
     std::array<BlockStateModel, MAX_BLOCK_STATES> state_models;
+    // A two-cell block (a door, a bed) is two blocks, one per cell:
+    // `pair_half` says which this is - 0 the cell it's placed at (a door's
+    // lower half, a bed's foot), 1 the other (the door's upper half, one
+    // up; the bed's head, one along its facing) - and `partner` the other
+    // half's block. Only one half is an item (`is_item`): the other can't
+    // be picked or placed alone and drops that one. Air/0/true for
+    // everything else.
+    BlockType partner;
+    uint8_t pair_half;
+    bool is_item;
+    // A directional block that joins a same-facing neighbor beside it into
+    // one wide block (two chests into a large chest): its front and back
+    // then show these wide-art halves instead - fronts [0] for the half
+    // with its partner on the right of its facing (ChestPart::Primary), [1]
+    // for the other; backs [2] and [3] the same way.
+    bool joins_sideways;
+    std::array<Rectangle, 4> joined_uvs;
+    // Faces recolored by their biome (BiomeTint), indexed by BlockFace.
+    std::array<BiomeTint, 6> biome_tints;
+    // Can only be placed on (and stays only on) one of these - a plant's
+    // soil. Empty: anywhere.
+    std::vector<BlockType> placed_on;
     // Its own model from parts (a torch's stick and flame) - drawn instead
     // of its shape's boxes when not empty. Rendering only: collision and
     // the hitbox stay its shape's / its state's.
@@ -419,6 +448,10 @@ bool block_is_directional(BlockType type);
 // place_door()/place_bed()/place_chest()), not as a GameEngine follow-up
 // step the way this predicate drives for every other directional block.
 bool block_needs_facing(BlockType type);
+
+// Whether `type` may stand on `below` - a plant on its soil (BlockProperties::
+// placed_on); true for any block that doesn't care.
+bool block_can_stay_on(BlockType type, BlockType below);
 
 // True for a block that mounts onto something (see BlockProperties::
 // attach_*) - placed through World::place_attached_block() rather than the

@@ -246,31 +246,31 @@ public:
     // player adds the missing slab half to the same cell, Minecraft-style.
     bool combine_slab(int x, int y, int z);
 
-    // Atomically places both halves of a door: `lower_type` (OakDoorLower
-    // or IronDoorLower) at (x, y, z), its matching upper half directly
-    // above. Requires a solid block below (same "needs support" class as
-    // Torch/OakSapling in place_block()'s own precondition chain). Rolls
-    // the lower half back via break_block() if the upper half can't be
-    // placed (blocked, out of range, ...), so a door can never end up
-    // half-placed. Both halves are given the same `facing`; hinge side is
-    // fixed left for now (see BlockInstanceState's own comment).
-    bool place_door(int x, int y, int z, BlockType lower_type, HorizontalDirection facing);
+    // Atomically places both halves of a two-cell block (a door, a bed -
+    // BlockProperties::partner/pair_half) from the half that's its item:
+    // half 0 at (x, y, z), half 1 where pair_partner_offset() puts it - a
+    // door's upper half above, a bed's head one cell along `facing` (toward
+    // the placing player, since `facing` comes from
+    // direction_facing_player()). A door needs a solid block below. Rolls
+    // the first half back via break_block() if the second can't be placed
+    // (blocked, out of range, ...), so it never ends up half-placed. Both
+    // halves get the same `facing`; a door's hinge side is fixed left for
+    // now (see BlockInstanceState's own comment).
+    bool place_pair(int x, int y, int z, BlockType item_type, HorizontalDirection facing);
+    // The step from a placed two-cell block's half at (x, y, z) to its other
+    // half - nullopt if it isn't one or its other half isn't there.
+    std::optional<FaceOffset> pair_partner_step(int x, int y, int z) const;
 
-    // Atomically places a bed: BedFoot at (x, y, z), BedHead (the pillow
-    // end) one cell away in `facing`'s direction - toward the placing
-    // player, since `facing` comes from direction_facing_player() - rolled
-    // back via break_block() if the head cell can't be placed.
-    bool place_bed(int x, int y, int z, HorizontalDirection facing);
-
-    // Places a single Chest at (x, y, z), then checks its 4 horizontal
-    // neighbors for another single Chest with matching facing to merge
-    // into a large/double chest - refused (this chest stays single) if
+    // Places a single `type` (a block that joins sideways - BlockProperties::
+    // joins_sideways, a chest) at (x, y, z), then checks its 4 horizontal
+    // neighbors for another single one with matching facing to merge into
+    // a wide block (a large chest) - refused (this one stays single) if
     // either diagonal neighbor of the resulting pair is already part of a
-    // different large chest. See core/BlockShape.hpp's ChestPart/
+    // different one. See core/BlockShape.hpp's ChestPart/
     // BlockStateBits::MULTIBLOCK_PART_MASK for how the pairing itself is
     // stored; inventories are never moved (World::chest_inventory() stays
     // keyed per-position), only the pairing flag changes.
-    bool place_chest(int x, int y, int z, HorizontalDirection facing);
+    bool place_joining(int x, int y, int z, BlockType type, HorizontalDirection facing);
 
     // Unconditionally overwrites every cell in the box from (min_x, min_y,
     // min_z) to (max_x, max_y, max_z) inclusive with `type` - for chat

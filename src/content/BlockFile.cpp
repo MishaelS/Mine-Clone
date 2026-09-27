@@ -47,11 +47,24 @@ namespace block_file {
 
     const char* state_id(int shape, int state) {
         if (static_cast<BlockShapeKind>(shape) == BlockShapeKind::Torch) return state == 0 ? "floor" : "wall";
+        if (static_cast<BlockShapeKind>(shape) == BlockShapeKind::Door) return state == 0 ? "closed" : "open";
         return "default";
+    }
+
+    const char* half_id(int shape, int half) {
+        if (static_cast<BlockShapeKind>(shape) == BlockShapeKind::Bed) return half == 0 ? "foot" : "head";
+        return half == 0 ? "lower" : "upper";
     }
 
     StateModel default_state(int shape, int state) {
         StateModel model;
+        if (static_cast<BlockShapeKind>(shape) == BlockShapeKind::Cross) {
+            // Vanilla's plant box: 12x13 px, centered.
+            model.has_hitbox = true;
+            model.hitbox_from = {2, 0, 2};
+            model.hitbox_to = {14, 13, 14};
+            return model;
+        }
         if (static_cast<BlockShapeKind>(shape) != BlockShapeKind::Torch) return model;
         model.has_hitbox = true;
         if (state == 0) {
@@ -178,6 +191,33 @@ namespace block_file {
                 block.item_sprite_y = static_cast<int>(sprite[1].as_number());
             }
             block.side_inset = std::clamp(static_cast<int>(root["side_inset"].as_number(0)), 0, 8);
+            auto tile_of = [](const Json& value, int& x, int& y) {
+                const std::vector<Json>& tile = value.as_array();
+                if (tile.size() < 2) return false;
+                x = std::clamp(static_cast<int>(tile[0].as_number()), 0, ATLAS_TILES - 1);
+                y = std::clamp(static_cast<int>(tile[1].as_number()), 0, ATLAS_TILES - 1);
+                return true;
+            };
+            for (const Json& soil : root["placed_on"].as_array()) {
+                if (!soil.as_string().empty()) block.placed_on.push_back(soil.as_string());
+            }
+            const Json& pair = root["pair"];
+            if (pair.get_type() == Json::Type::Object) {
+                block.half = pair["half"].as_string() == half_id(block.shape, 1) ? 1 : 0;
+                block.partner = pair["partner"].as_string();
+                block.item = pair["item"].as_bool(true);
+            }
+            block.has_end = tile_of(root["end"], block.end_x, block.end_y);
+            const Json& joins = root["joins"];
+            if (joins.get_type() == Json::Type::Object) {
+                block.joins = true;
+                for (int i = 0; i < 4; ++i) {
+                    const std::vector<Json>& list = joins[i < 2 ? "front" : "back"].as_array();
+                    if (list.size() > static_cast<size_t>(i % 2)) {
+                        tile_of(list[static_cast<size_t>(i % 2)], block.joined[static_cast<size_t>(i)][0], block.joined[static_cast<size_t>(i)][1]);
+                    }
+                }
+            }
             // Its parts; a torch without any gets its vanilla ones.
             if (root["elements"].get_type() == Json::Type::Array) {
                 for (const Json& saved : root["elements"].as_array()) {
@@ -229,6 +269,7 @@ namespace block_file {
                     block.faces[f].tile_y = std::clamp(static_cast<int>(tile[1].as_number()), 0, ATLAS_TILES - 1);
                 }
 
+                block.faces[f].biome = index_of(BIOME_IDS, face["biome"].as_string("none"), 0);
                 const std::vector<Json>& tint = face["tint"].as_array();
                 if (tint.size() >= 3) {
                     auto channel = [&](size_t i, double fallback) {
@@ -271,6 +312,22 @@ namespace block_file {
         if (block.damages_on_touch) out << "  \"damages_on_touch\": true,\n";
         if (block.directional) out << "  \"directional\": true,\n";
         if (block.side_inset != 0) out << "  \"side_inset\": " << block.side_inset << ",\n";
+        if (is_pair_kind(static_cast<BlockShapeKind>(block.shape))) {
+            out << "  \"pair\": { \"half\": \"" << half_id(block.shape, block.half) << "\", \"partner\": \"" << escape(block.partner)
+                << "\"" << (block.item ? "" : ", \"item\": false") << " },\n";
+        }
+        if (block.has_end) out << "  \"end\": [" << block.end_x << ", " << block.end_y << "],\n";
+        if (!block.placed_on.empty()) {
+            out << "  \"placed_on\": [";
+            for (size_t i = 0; i < block.placed_on.size(); ++i) out << (i ? ", " : "") << "\"" << escape(block.placed_on[i]) << "\"";
+            out << "],\n";
+        }
+        if (block.joins && block.shape == 0 && block.directional) {
+            auto tile = [&](int i) {
+                return "[" + std::to_string(block.joined[static_cast<size_t>(i)][0]) + ", " + std::to_string(block.joined[static_cast<size_t>(i)][1]) + "]";
+            };
+            out << "  \"joins\": { \"front\": [" << tile(0) << ", " << tile(1) << "], \"back\": [" << tile(2) << ", " << tile(3) << "] },\n";
+        }
         if (!block.elements.empty()) {
             out << "  \"elements\": [\n";
             for (size_t e = 0; e < block.elements.size(); ++e) {
@@ -333,6 +390,7 @@ namespace block_file {
                 out << ", \"tint\": [" << static_cast<int>(face.tint.r) << ", " << static_cast<int>(face.tint.g) << ", "
                     << static_cast<int>(face.tint.b) << ", " << static_cast<int>(face.tint.a) << "]";
             }
+            if (face.biome != 0) out << ", \"biome\": \"" << BIOME_IDS[std::clamp(face.biome, 0, BIOME_COUNT - 1)] << "\"";
             out << " }" << (f < 5 ? "," : "") << "\n";
         }
         out << "  }\n}\n";

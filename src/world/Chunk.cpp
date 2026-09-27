@@ -1936,9 +1936,10 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                     float block = static_cast<float>(get_block_light(x, y, z)) / static_cast<float>(MAX_LIGHT);
                     float sky_fraction[4] = {sky, sky, sky, sky};
                     float block_fraction[4] = {block, block, block, block};
-                    Color tint = type == BlockType::ShortGrass
-                        ? column_grass_tint[z * CHUNK_SIZE + x]
-                        : properties.texture_tints[static_cast<int>(BlockFace::North)];
+                    const BiomeTint biome = properties.biome_tints[static_cast<int>(BlockFace::North)];
+                    Color tint = biome == BiomeTint::Grass     ? column_grass_tint[z * CHUNK_SIZE + x]
+                               : biome == BiomeTint::Foliage   ? column_foliage_tint[z * CHUNK_SIZE + x]
+                                                               : properties.texture_tints[static_cast<int>(BlockFace::North)];
                     for (const Face& cross_face : CROSS_FACES) {
                         append_face(mesh_data, cross_face, center,
                             properties.texture_uvs[static_cast<int>(BlockFace::North)],
@@ -2027,7 +2028,7 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                             // Tile choice, crop and orientation all live in
                             // shaped_face_texture() (core/BlockShape.hpp).
                             if (!from_elements) {
-                                texture = shaped_face_texture(type, state, properties, block_face, box);
+                                texture = shaped_face_texture(state, properties, block_face, box);
                                 if (texture.hidden) continue;
                             }
                             Vector3 face_center = Vector3Subtract(box_center, Vector3Scale(box_face.normal, texture.inset));
@@ -2291,9 +2292,9 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                     // darkens *visibility* (World::draw's underwater fog
                     // override, set_chunk_fog), not the water block itself.
                     Color tint = properties.texture_tints[face];
-                    if (type == BlockType::Grass && face == static_cast<int>(BlockFace::Top)) {
+                    if (properties.biome_tints[face] == BiomeTint::Grass) {
                         tint = column_grass_tint[z * CHUNK_SIZE + x];
-                    } else if (type == BlockType::Foliage) {
+                    } else if (properties.biome_tints[face] == BiomeTint::Foliage) {
                         tint = column_foliage_tint[z * CHUNK_SIZE + x];
                     }
 
@@ -2320,17 +2321,18 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                         // Every other face keeps the plain single-chest
                         // side texture, same as texture_face above already
                         // gives it.
-                        if (type == BlockType::Chest) {
+                        if (properties.joins_sideways) {
                             uint16_t packed = get_block_state(x, y, z);
                             ChestPart part = static_cast<ChestPart>(
                                 (packed & BlockStateBits::MULTIBLOCK_PART_MASK) >> BlockStateBits::MULTIBLOCK_PART_SHIFT);
                             if (part != ChestPart::Single) {
                                 bool is_back = face == static_cast<int>(BlockFace::North) + (static_cast<int>(facing) ^ 1);
+                                const size_t half = part == ChestPart::Primary ? 0 : 1;
                                 if (is_front) {
-                                    face_uv = block_atlas_tile_uv(part == ChestPart::Primary ? 9 : 10, 2);
+                                    face_uv = properties.joined_uvs[half];
                                     face_uv_overridden = true;
                                 } else if (is_back) {
-                                    face_uv = block_atlas_tile_uv(part == ChestPart::Primary ? 9 : 10, 3);
+                                    face_uv = properties.joined_uvs[2 + half];
                                     face_uv_overridden = true;
                                 }
                             }

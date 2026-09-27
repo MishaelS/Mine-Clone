@@ -7,7 +7,7 @@
   "density": 1.4,
   "luminance": 0,
   "faces": {
-    "top": { "tile": [0, 0], "tint": [124, 189, 107, 255] },
+    "top": { "tile": [0, 0], "tint": [124, 189, 107, 255], "biome": "grass" },
     "bottom": { "tile": [2, 0] },
     "north": { "tile": [3, 0] },
     "south": { "tile": [3, 0] },

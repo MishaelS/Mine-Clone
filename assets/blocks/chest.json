@@ -7,6 +7,7 @@
   "density": 0.6,
   "luminance": 0,
   "directional": true,
+  "joins": { "front": [[9, 2], [10, 2]], "back": [[9, 3], [10, 3]] },
   "faces": {
     "top": { "tile": [9, 1] },
     "bottom": { "tile": [9, 1] },

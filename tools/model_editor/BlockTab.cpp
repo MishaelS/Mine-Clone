@@ -31,11 +31,9 @@ namespace {
 
     // Each face's brightness in the preview, like the game's own face shading.
     constexpr float FACE_SHADE[6] = {1.0f, 0.5f, 0.8f, 0.8f, 0.6f, 0.6f};
-    // The six faces' names, then a cake's cut (BlockFile::cut_*).
-    constexpr int CUT_FACE = 6;
-    constexpr const char* FACE_KEYS[7] = {"editor.block_face.top",   "editor.block_face.bottom", "editor.block_face.north",
-                                          "editor.block_face.south", "editor.block_face.east",   "editor.block_face.west",
-                                          "editor.block_face.cut"};
+    // The six faces' names.
+    constexpr const char* FACE_KEYS[6] = {"editor.block_face.top",   "editor.block_face.bottom", "editor.block_face.north",
+                                          "editor.block_face.south", "editor.block_face.east",   "editor.block_face.west"};
     // Each face's corners exactly as the game's chunk mesher lays a cube out
     // (Chunk.cpp's unit_cube_faces(), counter-clockwise from outside), a
     // unit cube about the origin; textured u = 0,1,1,0 and v = 0,0,1,1 over
@@ -107,9 +105,51 @@ namespace {
         return y + 2;
     }
 
+    // Its shape - a fluid drawn here as the plain cube it is out of the
+    // game's own fluid code.
     BlockShapeKind kind_of(const block_file::BlockFile& block)
     {
-        return static_cast<BlockShapeKind>(block.shape);
+        const BlockShapeKind kind = static_cast<BlockShapeKind>(block.shape);
+        return kind == BlockShapeKind::Fluid ? BlockShapeKind::Cube : kind;
+    }
+
+    // A tile a block of some shape has besides its six faces, listed as
+    // more rows under them (face index 6 on): a cake's cut, a bed half's
+    // end, a joining block's four halves of its wide art.
+    struct TileSlot {
+        const char* key;
+        int* x;
+        int* y;
+        bool* has;   // set once a tile is picked - nullptr: always there
+        int outline; // the face the preview frames for it
+    };
+    std::vector<TileSlot> extra_slots(block_file::BlockFile& block)
+    {
+        std::vector<TileSlot> slots;
+        const BlockShapeKind kind = kind_of(block);
+        if (kind == BlockShapeKind::Cake) slots.push_back({"editor.block_face.cut", &block.cut_x, &block.cut_y, &block.has_cut, 2});
+        if (kind == BlockShapeKind::Bed) {
+            // Shown facing north: the head's end is its north face, the foot's its south.
+            slots.push_back({"editor.block_face.end", &block.end_x, &block.end_y, &block.has_end, block.half == 1 ? 2 : 3});
+        }
+        if (kind == BlockShapeKind::Cube && block.directional && block.joins) {
+            constexpr const char* KEYS[4] = {"editor.block_face.joined_front_right", "editor.block_face.joined_front_left",
+                                             "editor.block_face.joined_back_right", "editor.block_face.joined_back_left"};
+            for (size_t i = 0; i < 4; ++i) slots.push_back({KEYS[i], &block.joined[i][0], &block.joined[i][1], nullptr, i < 2 ? 3 : 2});
+        }
+        return slots;
+    }
+    std::vector<TileSlot> extra_slots(const block_file::BlockFile& block)
+    {
+        return extra_slots(const_cast<block_file::BlockFile&>(block));
+    }
+
+    // Face or extra slot `index`'s name.
+    std::string slot_name(const block_file::BlockFile& block, int index)
+    {
+        if (index < 6) return tr(FACE_KEYS[index]);
+        const std::vector<TileSlot> slots = extra_slots(block);
+        return index - 6 < static_cast<int>(slots.size()) ? tr(slots[static_cast<size_t>(index - 6)].key) : std::string();
     }
 
     // How it's shown here: facing north - also how one placed while looking
@@ -138,9 +178,11 @@ namespace {
     }
 
     // What the crosshair aims at in `state` (the game's get_outline_shape()):
-    // its own hitbox, else its shape, else the whole cell.
+    // nothing if it can't be aimed at, else its own hitbox, else its shape,
+    // else the whole cell.
     BlockShapeBoxes hitbox_boxes(const block_file::BlockFile& block, const BlockInstanceState& state)
     {
+        if (!block.selectable) return BlockShapeBoxes{}; // nothing to aim at (water)
         const BlockStateModel model = state_model_of(block, state);
         if (!model.has_hitbox) return block_boxes(block, state);
         BlockShapeBoxes result;
@@ -164,6 +206,7 @@ namespace {
             int x, y, z;
             const block_file::BlockFile* block;
             BlockInstanceState state{};
+            int joined = 0; // see emit_block()
         };
         std::vector<Cell> cells;
 
@@ -268,7 +311,7 @@ namespace {
         int part;
         int face;
     };
-    std::optional<PickedFace> face_under_ray(const block_file::BlockFile& block, const BlockInstanceState& state, Ray ray)
+    std::optional<PickedFace> face_under_ray(const block_file::BlockFile& block, const BlockInstanceState& state, Vector3 origin, Ray ray)
     {
         const bool parts = has_elements(block);
         const BlockShapeBoxes boxes = block_boxes(block, state);
@@ -284,7 +327,7 @@ namespace {
                 }
                 Vector3 corners[4];
                 for (int c = 0; c < 4; ++c) {
-                    corners[c] = Vector3Subtract(placed_point(block, state, box_corner(box, f, c)), {0.5f, 0.5f, 0.5f});
+                    corners[c] = Vector3Add(origin, placed_point(block, state, box_corner(box, f, c)));
                 }
                 const RayCollision hit = GetRayCollisionQuad(ray, corners[0], corners[1], corners[2], corners[3]);
                 if (hit.hit && hit.distance < nearest) {
@@ -302,6 +345,28 @@ namespace {
     // `scene` it stands in (at cell cx, cy, cz) it is also culled against
     // its neighbors and lit per corner (AO) the way daylight lights blocks;
     // alone, just direction-shaded.
+    // A plant's two crossed planes (Chunk.cpp's CROSS_FACES - each plane
+    // twice, once per side), its north tile evenly lit.
+    constexpr Vector3 CROSS_CORNERS[4][4] = {
+        {{0, 1, 0}, {1, 1, 1}, {1, 0, 1}, {0, 0, 0}},
+        {{1, 1, 1}, {0, 1, 0}, {0, 0, 0}, {1, 0, 1}},
+        {{1, 1, 0}, {0, 1, 1}, {0, 0, 1}, {1, 0, 0}},
+        {{0, 1, 1}, {1, 1, 0}, {1, 0, 0}, {0, 0, 1}},
+    };
+    void emit_cross(const block_file::BlockFile& block, Vector3 origin)
+    {
+        const block_file::Face& face = block.faces[2];
+        const Rectangle uv = {face.tile_x / 16.0f, face.tile_y / 16.0f, 1.0f / 16.0f, 1.0f / 16.0f};
+        for (const auto& quad : CROSS_CORNERS) {
+            for (int c = 0; c < 4; ++c) {
+                const Vector3 p = Vector3Add(origin, quad[c]);
+                rlColor4ub(face.tint.r, face.tint.g, face.tint.b, face.tint.a);
+                rlTexCoord2f(uv.x + CORNER_U[c] * uv.width, uv.y + CORNER_V[c] * uv.height);
+                rlVertex3f(p.x, p.y, p.z);
+            }
+        }
+    }
+
     // emit_block() for a block drawn from its own parts: each enabled face
     // with its own piece of the side's tile, from outside, inside or both
     // (its normal setting) - as the game's mesher does.
@@ -353,11 +418,24 @@ namespace {
         }
     }
 
+    // One tile of terrain.png in 0..1 atlas units.
+    Rectangle atlas_tile(int x, int y)
+    {
+        return {x / 16.0f, y / 16.0f, 1.0f / 16.0f, 1.0f / 16.0f};
+    }
+
+    // `joined`: a block that joins sideways (a chest) drawn as a half of its
+    // wide block - 1 the half with its partner on the right of its facing
+    // (ChestPart::Primary), 2 the other; 0 alone.
     void emit_block(const block_file::BlockFile& block, const BlockInstanceState& state, Vector3 origin,
-                    const Scene* scene, int cx, int cy, int cz)
+                    const Scene* scene, int cx, int cy, int cz, int joined = 0)
     {
         if (has_elements(block)) {
             emit_elements(block, state, origin, scene, cx, cy, cz);
+            return;
+        }
+        if (kind_of(block) == BlockShapeKind::Cross) {
+            emit_cross(block, origin);
             return;
         }
         const BlockShapeKind kind = kind_of(block);
@@ -386,40 +464,53 @@ namespace {
                 }
 
                 // Which tile: a directional cube's front is its south face,
-                // every other side its east one; a bitten cake shows its cut.
+                // every other side its east one - a joined half's front and
+                // back its piece of the wide art; a shaped block's face
+                // cropped, turned and mirrored as the game does
+                // (shaped_kind_face_texture(): a bitten cake's cut, a bed's
+                // end, a door's hinge side).
                 int texture_face = f;
                 if (block.directional && kind == BlockShapeKind::Cube && f >= 2) texture_face = f == 3 ? 3 : 4;
                 const block_file::Face& face = block.faces[texture_face];
-                Rectangle tile = {face.tile_x / 16.0f, face.tile_y / 16.0f, 1.0f / 16.0f, 1.0f / 16.0f};
-                if (kind == BlockShapeKind::Cake && block.has_cut && state.bite_count > 0 &&
-                    f == 2 + static_cast<int>(state.facing)) {
-                    tile = {block.cut_x / 16.0f, block.cut_y / 16.0f, 1.0f / 16.0f, 1.0f / 16.0f};
+                Rectangle tile = atlas_tile(face.tile_x, face.tile_y);
+                if (kind == BlockShapeKind::Cube && block.joins && joined != 0 && (f == 2 || f == 3)) {
+                    const std::array<int, 2>& wide = block.joined[static_cast<size_t>((f == 3 ? 0 : 2) + joined - 1)];
+                    tile = atlas_tile(wide[0], wide[1]);
                 }
                 Rectangle uv = tile;
                 bool flat = false;
-                if (kind == BlockShapeKind::Torch) {
-                    const ShapedFaceTexture torch = torch_face_texture(tile, static_cast<BlockFace>(f), box);
-                    if (torch.hidden) continue;
-                    uv = torch.uv;
-                    flat = torch.flat_shade;
-                } else if (kind != BlockShapeKind::Cube) {
-                    uv = crop_tile_to_box(tile, static_cast<BlockFace>(f), box);
+                int turns = 0;
+                float inset = 0.0f;
+                if (kind != BlockShapeKind::Cube) {
+                    const ShapedFaceTexture shaped = shaped_kind_face_texture(
+                        kind, block.half, state, static_cast<BlockFace>(f), box, tile,
+                        block.has_cut ? std::optional<Rectangle>(atlas_tile(block.cut_x, block.cut_y)) : std::nullopt,
+                        block.has_end ? std::optional<Rectangle>(atlas_tile(block.end_x, block.end_y)) : std::nullopt);
+                    if (shaped.hidden) continue;
+                    uv = shaped.uv;
+                    flat = shaped.flat_shade;
+                    turns = shaped.quarter_turns;
+                    inset = shaped.inset;
                 }
 
+                // Slot k sits at corner (k + turns) - a turned face (a bed's
+                // top) keeps its texture corners and moves its positions.
                 float light[4];
                 for (int c = 0; c < 4; ++c) {
-                    const float ao = scene && !flat ? AO_BRIGHTNESS[vertex_ao(*scene, cx, cy, cz, normal, FACE_CORNERS[f][c])] : 1.0f;
+                    const int corner = (c + turns) % 4;
+                    const float ao = scene && !flat ? AO_BRIGHTNESS[vertex_ao(*scene, cx, cy, cz, normal, FACE_CORNERS[f][corner])] : 1.0f;
                     light[c] = (flat ? 1.0f : FACE_SHADE[f]) * ao;
                 }
                 // Split along the brighter diagonal, as the game does.
                 const int first = light[1] + light[3] > light[0] + light[2] ? 1 : 0;
                 for (int k = 0; k < 4; ++k) {
                     const int c = (first + k) % 4;
-                    Vector3 p = box_corner(box, f, c);
-                    // A cactus-like cube's sides drawn inward.
+                    Vector3 p = box_corner(box, f, (c + turns) % 4);
+                    // A cactus-like cube's sides drawn inward; a bed's underside up at its frame.
                     if (kind == BlockShapeKind::Cube && f >= 2 && block.side_inset > 0) {
                         p = Vector3Subtract(p, Vector3Scale(normal, block.side_inset / 16.0f));
                     }
+                    if (inset != 0.0f) p = Vector3Subtract(p, Vector3Scale(normal, inset));
                     if (placed) p = place_model_point(model, state.attachment, p);
                     p = Vector3Add(origin, p);
                     rlColor4ub(static_cast<unsigned char>(face.tint.r * light[c]), static_cast<unsigned char>(face.tint.g * light[c]),
@@ -429,6 +520,49 @@ namespace {
                 }
             }
         }
+    }
+}
+
+namespace {
+    // What's drawn beside a block to make it whole: a two-cell block's
+    // other half (its file's "pair"), or - the "large" view - a second one
+    // joined to it (a large chest). `offset` is its cell from the block's.
+    struct Companion {
+        const block_file::BlockFile* block;
+        Vector3 offset;
+        int joined_self;  // emit_block()'s `joined` for the block itself...
+        int joined_other; // ...and for the companion
+    };
+    std::optional<Companion> companion_of(const std::vector<block_file::BlockFile>& blocks, const block_file::BlockFile& block,
+                                          const BlockInstanceState& state, bool large_view)
+    {
+        const BlockShapeKind kind = kind_of(block);
+        if (is_pair_kind(kind)) {
+            for (const block_file::BlockFile& other : blocks) {
+                if (other.name != block.partner || &other == &block) continue;
+                const FaceOffset step = pair_partner_offset(kind, block.half, state.facing);
+                return Companion{&other, {static_cast<float>(step.dx), static_cast<float>(step.dy), static_cast<float>(step.dz)}, 0, 0};
+            }
+            return std::nullopt;
+        }
+        // Joined along +x: seen from the front (south), the right one has
+        // its partner on the right of its facing - the primary half.
+        if (kind == BlockShapeKind::Cube && block.directional && block.joins && large_view) return Companion{&block, {1, 0, 0}, 2, 1};
+        return std::nullopt;
+    }
+
+    // How much farther the preview's camera stands back: a pair is twice as big.
+    float preview_zoom(const std::optional<Companion>& companion)
+    {
+        return companion ? 1.6f : 1.0f;
+    }
+
+    // Where the preview puts a block's cell so it and its companion are
+    // centered on the orbit point.
+    Vector3 preview_origin(const std::optional<Companion>& companion)
+    {
+        const Vector3 center = {-0.5f, -0.5f, -0.5f};
+        return companion ? Vector3Subtract(center, Vector3Scale(companion->offset, 0.5f)) : center;
     }
 }
 
@@ -597,7 +731,7 @@ void ModelEditor::run_blocks_frame()
         const block_file::BlockFile& block = blocks[static_cast<size_t>(selected_block)];
         label({view.x + PAD, view.y + PAD, view.width - PAD * 2, ROW},
               display_name(block.name) + "  (" + block.name + ", id " + std::to_string(block.id) + ")   " +
-                  tr(FACE_KEYS[selected_face]));
+                  slot_name(block, selected_face));
         // Which of its states is shown (a torch: on the floor, on a wall).
         const int states = shape_state_count(kind_of(block));
         if (block_state_view >= states) block_state_view = 0;
@@ -607,7 +741,15 @@ void ModelEditor::run_blocks_frame()
                       tr(std::string("editor.block_state.") + block_file::state_id(block.shape, s)).c_str(), &shown);
             if (shown) block_state_view = s;
         }
-        GuiCheckBox({view.x + PAD, view.y + PAD + (ROW + GAP) * (states > 1 ? 2 : 1) + 4, ROW - 8, ROW - 8},
+        // A block that joins sideways: alone, or joined into its wide block.
+        const bool joins = kind_of(block) == BlockShapeKind::Cube && block.directional && block.joins;
+        for (int v = 0; joins && v < 2; ++v) {
+            bool shown = block_large_view == (v == 1);
+            GuiToggle({view.x + PAD + v * (130 + GAP), view.y + PAD + ROW + GAP, 130, ROW},
+                      tr(v == 0 ? "editor.block_view_single" : "editor.block_view_large").c_str(), &shown);
+            if (shown) block_large_view = v == 1;
+        }
+        GuiCheckBox({view.x + PAD, view.y + PAD + (ROW + GAP) * (states > 1 || joins ? 2 : 1) + 4, ROW - 8, ROW - 8},
                     tr("editor.hitbox_show").c_str(), &show_hitbox);
     }
     // Over the view's top right corner: how the game will show it.
@@ -789,7 +931,7 @@ void ModelEditor::draw_block_properties(Rectangle bounds)
         GuiComboBox({x + label_w, y, width - label_w, ROW}, items.c_str(), &chosen);
         if (chosen != block.shape) {
             block.shape = chosen;
-            if (kind_of(block) != BlockShapeKind::Cake && selected_face == CUT_FACE) selected_face = 0;
+            if (selected_face >= 6) selected_face = 0;
             for (int s = 0; s < MAX_BLOCK_STATES; ++s) block.states[static_cast<size_t>(s)] = block_file::default_state(block.shape, s);
             block.elements = block_file::default_elements(block.shape);
             block_state_view = 0;
@@ -798,6 +940,35 @@ void ModelEditor::draw_block_properties(Rectangle bounds)
         }
         y += ROW + GAP;
         small_hint(tr(std::string("editor.shape_hint.") + block_file::SHAPE_IDS[block.shape]));
+    }
+    {
+        // Its soil: the blocks it can stand on, by name, comma separated.
+        std::string soil;
+        for (size_t i = 0; i < block.placed_on.size(); ++i) soil += (i ? ", " : "") + block.placed_on[i];
+        label({x, y, label_w, ROW}, tr("editor.block_placed_on"));
+        if (string_field({x + label_w, y, width - label_w, ROW}, soil)) {
+            block.placed_on.clear();
+            std::string name;
+            for (size_t i = 0; i <= soil.size(); ++i) {
+                const char c = i < soil.size() ? soil[i] : ',';
+                if (c == ',' || c == ' ' || c == ';') {
+                    if (!name.empty()) block.placed_on.push_back(name);
+                    name.clear();
+                } else {
+                    name += c;
+                }
+            }
+            mark_block_dirty();
+        }
+        y += ROW + 2;
+        std::string unknown;
+        for (const std::string& name : block.placed_on) {
+            bool found = false;
+            for (const block_file::BlockFile& other : blocks) found = found || other.name == name;
+            if (!found) unknown += (unknown.empty() ? "" : ", ") + name;
+        }
+        if (!unknown.empty()) small_hint(tr_format("editor.block_placed_on_unknown", {unknown}), true);
+        else small_hint(tr(block.placed_on.empty() ? "editor.block_placed_on_anywhere" : "editor.block_placed_on_hint"));
     }
     if (kind_of(block) == BlockShapeKind::Slab) {
         // What two halves in one cell become - another block, by name.
@@ -813,46 +984,81 @@ void ModelEditor::draw_block_properties(Rectangle bounds)
                                               : "= " + found,
                    !block.double_block.empty() && found.empty());
     }
+    if (is_pair_kind(kind_of(block))) {
+        // Which half this is, and its other half - by name.
+        label({x, y, label_w, ROW}, tr("editor.block_half"));
+        const std::string halves = tr(std::string("editor.half.") + block_file::half_id(block.shape, 0)) + ";" +
+                                   tr(std::string("editor.half.") + block_file::half_id(block.shape, 1));
+        int chosen_half = block.half;
+        GuiComboBox({x + label_w, y, width - label_w, ROW}, halves.c_str(), &chosen_half);
+        if (chosen_half != block.half) {
+            block.half = chosen_half;
+            mark_block_dirty();
+        }
+        y += ROW + GAP;
+        label({x, y, label_w, ROW}, tr("editor.block_partner"));
+        if (string_field({x + label_w, y, width - label_w, ROW}, block.partner)) mark_block_dirty();
+        y += ROW + 2;
+        const block_file::BlockFile* partner = nullptr;
+        for (const block_file::BlockFile& other : blocks) {
+            if (other.name == block.partner && &other != &block) partner = &other;
+        }
+        if (!partner) small_hint(tr("editor.block_partner_missing"), true);
+        else if (partner->partner != block.name) small_hint(tr_format("editor.block_partner_mismatch", {display_name(partner->name)}), true);
+        else if (partner->half == block.half) small_hint(tr("editor.block_partner_same_half"), true);
+        else small_hint("= " + display_name(partner->name));
+        flag(tr("editor.block_pair_item"), block.item);
+        small_hint(tr(block.item ? "editor.block_pair_item_hint" : "editor.block_pair_not_item_hint"));
+    }
+    if (kind_of(block) == BlockShapeKind::Cube && block.directional) {
+        // Two of it side by side, facing the same way, become one wide block.
+        flag(tr("editor.block_joins"), block.joins);
+        if (block.joins) small_hint(tr("editor.block_joins_hint"));
+    }
 
-    // Its six faces (a cake also its cut): pick one, then its tile below.
+    // Its six faces and any extra tiles (a cake's cut, a bed's end, a large
+    // chest's halves): pick one, then its tile below.
     y += GAP;
     section(tr("editor.block_faces"));
     const Texture2D& atlas = terrain_atlas();
-    const int face_rows = kind_of(block) == BlockShapeKind::Cake ? 7 : 6;
+    const std::vector<TileSlot> extras = extra_slots(block);
+    const int face_rows = 6 + static_cast<int>(extras.size());
     if (selected_face >= face_rows) selected_face = 0;
+    const bool extra_picked = selected_face >= 6;
+    constexpr float ROW_LABEL = 205.0f;
     for (int f = 0; f < face_rows; ++f) {
-        const bool cut = f == CUT_FACE;
-        const int tile_x = cut ? block.cut_x : block.faces[f].tile_x;
-        const int tile_y = cut ? block.cut_y : block.faces[f].tile_y;
-        const Color tint = cut ? block.faces[3].tint : block.faces[f].tint;
+        const TileSlot* slot = f >= 6 ? &extras[static_cast<size_t>(f - 6)] : nullptr;
+        const int tile_x = slot ? *slot->x : block.faces[f].tile_x;
+        const int tile_y = slot ? *slot->y : block.faces[f].tile_y;
+        const Color tint = slot ? block.faces[3].tint : block.faces[f].tint; // an extra tile takes its side's tint
         bool picked = f == selected_face;
-        GuiToggle({x, y, 150, ROW}, tr(FACE_KEYS[f]).c_str(), &picked);
+        GuiToggle({x, y, ROW_LABEL, ROW}, (slot ? tr(slot->key) : tr(FACE_KEYS[f])).c_str(), &picked);
         if (picked) selected_face = f;
-        if (!cut || block.has_cut) {
-            DrawTexturePro(atlas, tile_source(tile_x, tile_y), {x + 158, y + 1, ROW - 2, ROW - 2}, {0, 0}, 0.0f, tint);
-            label({x + 158 + ROW + 4, y, 90, ROW}, std::to_string(tile_x) + ", " + std::to_string(tile_y));
+        if (!slot || !slot->has || *slot->has) {
+            DrawTexturePro(atlas, tile_source(tile_x, tile_y), {x + ROW_LABEL + 8, y + 1, ROW - 2, ROW - 2}, {0, 0}, 0.0f, tint);
+            label({x + ROW_LABEL + 8 + ROW + 4, y, 90, ROW}, std::to_string(tile_x) + ", " + std::to_string(tile_y));
         } else {
-            label({x + 158, y, width - 158, ROW}, tr("editor.block_cut_none"));
+            label({x + ROW_LABEL + 8, y, width - ROW_LABEL - 8, ROW}, tr("editor.block_cut_none"));
         }
         y += ROW + 2;
     }
     y += GAP;
     const float half = (width - GAP) * 0.5f;
-    GuiSetState(selected_face == CUT_FACE ? STATE_DISABLED : STATE_NORMAL);
-    if (GuiButton({x, y, half, ROW}, tr("editor.block_to_all").c_str()) && selected_face != CUT_FACE) {
+    GuiSetState(extra_picked ? STATE_DISABLED : STATE_NORMAL);
+    if (GuiButton({x, y, half, ROW}, tr("editor.block_to_all").c_str()) && !extra_picked) {
         for (int f = 0; f < 6; ++f) block.faces[f] = block.faces[selected_face];
         mark_block_dirty();
     }
-    if (GuiButton({x + half + GAP, y, half, ROW}, tr("editor.block_to_sides").c_str()) && selected_face != CUT_FACE) {
+    if (GuiButton({x + half + GAP, y, half, ROW}, tr("editor.block_to_sides").c_str()) && !extra_picked) {
         for (int f = 2; f < 6; ++f) block.faces[f] = block.faces[selected_face];
         mark_block_dirty();
     }
     GuiSetState(STATE_NORMAL);
     y += ROW + GAP;
 
-    // The picked face's tint: its swatch, then red, green, blue, alpha (the
-    // cut has none of its own - it takes its side's).
-    if (selected_face != CUT_FACE) {
+    // The picked face's tint: its swatch, then red, green, blue, alpha (an
+    // extra tile has none of its own - it takes its side's).
+    if (!extra_picked) {
         block_file::Face& face = block.faces[selected_face];
         label({x, y, width - ROW - GAP, ROW}, tr("editor.block_tint"));
         DrawRectangleRec({x + width - ROW, y, ROW, ROW}, face.tint);
@@ -867,7 +1073,11 @@ void ModelEditor::draw_block_properties(Rectangle bounds)
                 mark_block_dirty();
             }
         }
-        y += ROW + GAP * 2;
+        y += ROW + GAP;
+        // Recolored per biome in the world (the tint above is then its color
+        // in the inventory and here).
+        combo(tr("editor.block_biome"), face.biome, block_file::BIOME_IDS, block_file::BIOME_COUNT, "editor.biome.");
+        y += GAP;
     }
 
     // A tile picker over a whole 16x16 atlas; `picked` outlines the current
@@ -901,14 +1111,14 @@ void ModelEditor::draw_block_properties(Rectangle bounds)
     {
         std::vector<std::pair<int, int>> used;
         for (int f = 0; f < 6; ++f) used.push_back({block.faces[f].tile_x, block.faces[f].tile_y});
-        const bool cut = selected_face == CUT_FACE;
-        const int px = cut ? block.cut_x : block.faces[selected_face].tile_x;
-        const int py = cut ? block.cut_y : block.faces[selected_face].tile_y;
-        if (auto clicked = atlas_picker(atlas, px, py, !cut || block.has_cut, used)) {
-            if (cut) {
-                block.has_cut = true;
-                block.cut_x = clicked->first;
-                block.cut_y = clicked->second;
+        const TileSlot* slot = extra_picked ? &extras[static_cast<size_t>(selected_face - 6)] : nullptr;
+        const int px = slot ? *slot->x : block.faces[selected_face].tile_x;
+        const int py = slot ? *slot->y : block.faces[selected_face].tile_y;
+        if (auto clicked = atlas_picker(atlas, px, py, !slot || !slot->has || *slot->has, used)) {
+            if (slot) {
+                if (slot->has) *slot->has = true;
+                *slot->x = clicked->first;
+                *slot->y = clicked->second;
             } else {
                 block.faces[selected_face].tile_x = clicked->first;
                 block.faces[selected_face].tile_y = clicked->second;
@@ -1008,10 +1218,10 @@ void ModelEditor::draw_block_hitbox_panel(Rectangle bounds)
     block_file::StateModel& state = block.states[static_cast<size_t>(block_state_view)];
 
     // The box: where it lies (its min corner) and how big, in texture pixels.
-    if (kind != BlockShapeKind::Cube && kind != BlockShapeKind::Torch) {
+    if (kind != BlockShapeKind::Cube && kind != BlockShapeKind::Torch && kind != BlockShapeKind::Cross) {
         hint(tr("editor.hitbox_is_shape"));
     } else {
-        if (kind == BlockShapeKind::Cube) {
+        if (kind == BlockShapeKind::Cube || kind == BlockShapeKind::Cross) {
             bool own = state.has_hitbox;
             GuiCheckBox({x, y + 4, ROW - 8, ROW - 8}, tr("editor.hitbox_own").c_str(), &own);
             if (own != state.has_hitbox) {
@@ -1308,10 +1518,12 @@ void ModelEditor::update_block_camera(Rectangle view)
     // A plain click on a face picks it.
     if (over && !block_view_dragging && IsMouseButtonReleased(MOUSE_BUTTON_LEFT) &&
         Vector2Distance(block_press_position, mouse) < 4.0f && selected_block >= 0) {
+        const block_file::BlockFile& picked_block = blocks[static_cast<size_t>(selected_block)];
+        const float distance = block_distance * preview_zoom(companion_of(blocks, picked_block, display_state(picked_block, block_state_view), block_large_view));
         Camera3D cam{};
         cam.target = {0, 0, 0};
-        cam.position = {block_distance * std::cos(block_pitch) * std::sin(block_yaw), block_distance * std::sin(block_pitch),
-                        block_distance * std::cos(block_pitch) * std::cos(block_yaw)};
+        cam.position = {distance * std::cos(block_pitch) * std::sin(block_yaw), distance * std::sin(block_pitch),
+                        distance * std::cos(block_pitch) * std::cos(block_yaw)};
         cam.up = {0, 1, 0};
         cam.fovy = 45.0f;
         cam.projection = CAMERA_PERSPECTIVE;
@@ -1321,7 +1533,8 @@ void ModelEditor::update_block_camera(Rectangle view)
         // moved/tilted, where it's drawn).
         const block_file::BlockFile& block = blocks[static_cast<size_t>(selected_block)];
         const BlockInstanceState state = display_state(block, block_state_view);
-        if (const std::optional<PickedFace> picked = face_under_ray(block, state, ray)) {
+        const Vector3 origin = preview_origin(companion_of(blocks, block, state, block_large_view));
+        if (const std::optional<PickedFace> picked = face_under_ray(block, state, origin, ray)) {
             selected_face = picked->face;
             if (has_elements(block)) selected_element = picked->part;
         }
@@ -1337,10 +1550,15 @@ void ModelEditor::draw_block_preview(Rectangle view)
         block_view_texture = LoadRenderTexture(width, height);
     }
 
+    float distance = block_distance;
+    if (selected_block >= 0) {
+        const block_file::BlockFile& shown = blocks[static_cast<size_t>(selected_block)];
+        distance *= preview_zoom(companion_of(blocks, shown, display_state(shown, block_state_view), block_large_view));
+    }
     Camera3D cam{};
     cam.target = {0, 0, 0};
-    cam.position = {block_distance * std::cos(block_pitch) * std::sin(block_yaw), block_distance * std::sin(block_pitch),
-                    block_distance * std::cos(block_pitch) * std::cos(block_yaw)};
+    cam.position = {distance * std::cos(block_pitch) * std::sin(block_yaw), distance * std::sin(block_pitch),
+                    distance * std::cos(block_pitch) * std::cos(block_yaw)};
     cam.up = {0, 1, 0};
     cam.fovy = 45.0f;
     cam.projection = CAMERA_PERSPECTIVE;
@@ -1357,7 +1575,9 @@ void ModelEditor::draw_block_preview(Rectangle view)
         const block_file::BlockFile& block = blocks[static_cast<size_t>(selected_block)];
         const BlockInstanceState state = display_state(block, block_state_view);
         const Texture2D& atlas = terrain_atlas();
-        const Vector3 origin = {-0.5f, -0.5f, -0.5f}; // centered on the orbit point
+        // With its other half / its joined twin, the pair centered on the orbit point.
+        const std::optional<Companion> companion = companion_of(blocks, block, state, block_large_view);
+        const Vector3 origin = preview_origin(companion);
         // A cutout block's far faces show through its holes; a block made of
         // parts is shown the way the game draws it - back faces culled - so
         // which way each face looks (its normal setting) can be seen.
@@ -1366,7 +1586,10 @@ void ModelEditor::draw_block_preview(Rectangle view)
         if (!parts) rlDisableBackfaceCulling();
         rlSetTexture(atlas.id);
         rlBegin(RL_QUADS);
-        emit_block(block, state, origin, nullptr, 0, 0, 0);
+        emit_block(block, state, origin, nullptr, 0, 0, 0, companion ? companion->joined_self : 0);
+        if (companion) {
+            emit_block(*companion->block, state, Vector3Add(origin, companion->offset), nullptr, 0, 0, 0, companion->joined_other);
+        }
         rlEnd();
         rlSetTexture(0);
         rlDrawRenderBatchActive();
@@ -1386,7 +1609,10 @@ void ModelEditor::draw_block_preview(Rectangle view)
         // surface (a cake's cut: its north side, where it's first bitten) -
         // made of parts: on the picked part, which is framed too, with its
         // faces' normals (while its model is being edited).
-        const int outlined = selected_face == CUT_FACE ? 2 : selected_face;
+        const std::vector<TileSlot> extras = extra_slots(block);
+        const int outlined = selected_face < 6 ? selected_face
+                           : selected_face - 6 < static_cast<int>(extras.size()) ? extras[static_cast<size_t>(selected_face - 6)].outline
+                                                                                 : 0;
         const Vector3 lift = Vector3Scale(FACE_NORMALS[outlined], 0.004f);
         if (parts) {
             selected_element = std::clamp(selected_element, 0, static_cast<int>(block.elements.size()) - 1);
@@ -1462,7 +1688,7 @@ namespace {
             if (cell.block->translucent != translucent_pass) continue;
             emit_block(*cell.block, cell.state,
                        {static_cast<float>(cell.x) - 0.5f, static_cast<float>(cell.y) - 0.5f, static_cast<float>(cell.z) - 0.5f},
-                       &scene, cell.x, cell.y, cell.z);
+                       &scene, cell.x, cell.y, cell.z, cell.joined);
         }
         rlEnd();
         rlSetTexture(0);
@@ -1500,10 +1726,22 @@ void ModelEditor::draw_block_game_view(Rectangle bounds)
     Scene scene;
     const BlockInstanceState state = display_state(block, block_state_view);
     for (int x = -3; x <= 4; ++x) {
-        for (int z = -3; z <= 3; ++z) scene.cells.push_back({x, -1, z, floor, {}});
+        for (int z = -3; z <= 3; ++z) scene.cells.push_back({x, -1, z, floor, {}, 0});
     }
-    scene.cells.push_back({0, 0, 0, &block, state});
-    scene.cells.push_back({1, 0, 0, &block, state});
+    // Joined into one wide block, or each with its other half.
+    const std::optional<Companion> companion = companion_of(blocks, block, state, block_large_view);
+    if (companion && companion->block == &block) {
+        scene.cells.push_back({0, 0, 0, &block, state, companion->joined_self});
+        scene.cells.push_back({1, 0, 0, &block, state, companion->joined_other});
+    } else {
+        for (int x = 0; x <= 1; ++x) {
+            scene.cells.push_back({x, 0, 0, &block, state, 0});
+            if (companion) {
+                scene.cells.push_back({x + static_cast<int>(companion->offset.x), static_cast<int>(companion->offset.y),
+                                       static_cast<int>(companion->offset.z), companion->block, state, 0});
+            }
+        }
+    }
     // On a wall: a stone wall behind them to hang on.
     if (state.attachment != BlockFace::Bottom && state.attachment != BlockFace::Top) {
         const block_file::BlockFile* wall = floor;
@@ -1511,7 +1749,7 @@ void ModelEditor::draw_block_game_view(Rectangle bounds)
             if (candidate.name == "stone") wall = &candidate;
         }
         for (int x = -3; x <= 4; ++x) {
-            for (int y = 0; y <= 2; ++y) scene.cells.push_back({x, y, -1, wall, {}});
+            for (int y = 0; y <= 2; ++y) scene.cells.push_back({x, y, -1, wall, {}, 0});
         }
     }
 
@@ -1520,6 +1758,10 @@ void ModelEditor::draw_block_game_view(Rectangle bounds)
     Camera3D cam{};
     cam.position = {-0.55f, 1.05f, 2.25f};
     cam.target = {0.5f, 0.05f, 0.0f};
+    if (companion && companion->offset.y != 0.0f) { // a door: two blocks tall
+        cam.position = {-0.9f, 1.6f, 3.1f};
+        cam.target = {0.5f, 0.55f, 0.0f};
+    }
     cam.up = {0, 1, 0};
     cam.fovy = 60.0f;
     cam.projection = CAMERA_PERSPECTIVE;
@@ -1565,6 +1807,12 @@ void ModelEditor::draw_block_inventory_icon(Rectangle bounds)
     DrawRectangleRec({cell.x, cell.y + cell.height - scale, cell.width, scale}, WHITE);
     DrawRectangleRec({cell.x + cell.width - scale, cell.y, scale, cell.height}, WHITE);
 
+    // The half of a two-cell block that isn't an item never shows up there.
+    if (is_pair_kind(kind_of(block)) && !block.item) {
+        draw_hint(cell.x + cell.width + PAD, cell.y, inside.width - cell.width - PAD * 2,
+                  tr_format("editor.block_not_item", {display_name(block.partner)}), false);
+        return;
+    }
     const Texture2D& atlas = terrain_atlas();
     auto face = [&](int f) {
         const block_file::Face& source = block.faces[f];
@@ -1575,6 +1823,11 @@ void ModelEditor::draw_block_inventory_icon(Rectangle bounds)
         // A flat sprite from sprites/items.png, as the game shows a torch.
         DrawTexturePro(items_atlas(), {block.item_sprite_x * 16.0f, block.item_sprite_y * 16.0f, 16.0f, 16.0f}, icon, {0, 0}, 0.0f,
                        WHITE);
+    } else if (kind_of(block) == BlockShapeKind::Cross) {
+        // Its north tile, flat - as the game's inventory shows a plant.
+        const block_file::Face& side = block.faces[2];
+        const Rectangle flat = {icon.x + icon.width * 0.16f, icon.y + icon.height * 0.04f, icon.width * 0.68f, icon.height * 0.92f};
+        DrawTexturePro(atlas, tile_source(side.tile_x, side.tile_y), flat, {0, 0}, 0.0f, side.tint);
     } else if (kind_of(block) != BlockShapeKind::Cube) {
         draw_shaped_icon(icon, atlas, item_shape_of_kind(kind_of(block)), face(0), face(3), face(4));
     } else {

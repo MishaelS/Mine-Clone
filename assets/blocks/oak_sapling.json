@@ -1,0 +1,27 @@
+{
+  "id": 73,
+  "name": "oak_sapling",
+  "sound": "grass",
+  "hardness": 0,
+  "tool": "shovel",
+  "density": 0.1,
+  "luminance": 0,
+  "shape": "cross",
+  "item_sprite": [14, 2],
+  "solid": false,
+  "replaceable": true,
+  "transparent": true,
+  "cutout": true,
+  "placed_on": ["grass", "dirt"],
+  "states": {
+    "default": { "hitbox": [2, 0, 2, 14, 13, 14] }
+  },
+  "faces": {
+    "top": { "tile": [15, 0] },
+    "bottom": { "tile": [15, 0] },
+    "north": { "tile": [15, 0] },
+    "south": { "tile": [15, 0] },
+    "east": { "tile": [15, 0] },
+    "west": { "tile": [15, 0] }
+  }
+}

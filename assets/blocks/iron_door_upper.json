@@ -1,0 +1,22 @@
+{
+  "id": 82,
+  "name": "iron_door_upper",
+  "sound": "metal",
+  "hardness": 5,
+  "tool": "pickaxe",
+  "density": 5,
+  "luminance": 0,
+  "shape": "door",
+  "solid": false,
+  "transparent": true,
+  "cutout": true,
+  "pair": { "half": "upper", "partner": "iron_door_lower", "item": false },
+  "faces": {
+    "top": { "tile": [2, 5] },
+    "bottom": { "tile": [2, 5] },
+    "north": { "tile": [2, 5] },
+    "south": { "tile": [2, 5] },
+    "east": { "tile": [2, 5] },
+    "west": { "tile": [2, 5] }
+  }
+}

@@ -9,11 +9,11 @@
 #include <string>
 #include <vector>
 
-// A block described in a file of its own, assets/blocks/<name>.json - a full
-// cube or one of the single-cell shapes (slab, stairs, trapdoor, cake,
-// torch). What the model editor's "Blocks" tab edits and the game registers
-// at startup (see content::register_block_files()). Fluids, plants, doors and
-// beds stay in src/content/Blocks.cpp for now.
+// A block described in a file of its own, assets/blocks/<name>.json - every
+// block: full cubes, the single-cell shapes (slab, stairs, trapdoor, cake,
+// torch), the two-cell halves (door, bed), plants and fluids. What the model
+// editor's "Blocks" tab edits and the game registers at startup (see
+// content::register_block_files()).
 //
 // Only needs the JSON reader, raylib and the pure shape geometry
 // (core/BlockShapeKinds.cpp) - the editor uses it without the game's block
@@ -30,11 +30,13 @@ namespace block_file {
     constexpr const char* TOOL_IDS[] = {"none", "sword", "pickaxe", "shovel", "axe", "hoe"};
     constexpr int TOOL_COUNT = static_cast<int>(sizeof(TOOL_IDS) / sizeof(TOOL_IDS[0]));
 
-    // BlockShapeKind, in its own order - the shapes a block file can take
-    // (doors and beds stay in code for now).
-    constexpr const char* SHAPE_IDS[] = {"cube", "slab", "stairs", "trapdoor", "cake", "torch", "door", "bed"};
+    // BlockShapeKind, in its own order - the shapes a block file can take.
+    constexpr const char* SHAPE_IDS[] = {"cube", "slab", "stairs", "trapdoor", "cake", "torch", "door", "bed", "cross", "fluid"};
     constexpr int SHAPE_COUNT = static_cast<int>(sizeof(SHAPE_IDS) / sizeof(SHAPE_IDS[0]));
-    constexpr int FILE_SHAPE_COUNT = 6; // the first SHAPE_IDS the editor offers
+    constexpr int FILE_SHAPE_COUNT = SHAPE_COUNT; // the SHAPE_IDS the editor offers
+    // BiomeTint, in its own order.
+    constexpr const char* BIOME_IDS[] = {"none", "grass", "foliage"};
+    constexpr int BIOME_COUNT = 3;
 
     // ElementNormal, in its own order.
     constexpr const char* NORMAL_IDS[] = {"out", "in", "both"};
@@ -47,6 +49,7 @@ namespace block_file {
         int tile_x = 0; // column/row in sprites/terrain.png
         int tile_y = 0;
         Color tint = WHITE; // multiplied into the tile - alpha is opacity for translucent blocks
+        int biome = 0;      // index into BIOME_IDS - recolored by its biome in the world (tint is then its color elsewhere)
     };
 
     // Its hitbox and model placement in one state (BlockStateModel), in
@@ -104,6 +107,21 @@ namespace block_file {
         int item_sprite_y = -1;
         int side_inset = 0; // side faces drawn this many texture pixels in (cactus)
 
+        // One half of a two-cell block (a door, a bed): which half
+        // (half_id()), the other half's block by name, and whether this is
+        // the half that's the item (the other drops it).
+        int half = 0;
+        std::string partner;
+        bool item = true;
+        bool has_end = false;     // a bed half's outer end tile (its headboard / foot end)
+        int end_x = 0, end_y = 0;
+        // Joins a same-facing neighbor beside it into one wide block (a large
+        // chest): fronts for the two halves, then backs - [0]/[2] the half
+        // with its partner on the right of its facing, [1]/[3] the other.
+        std::vector<std::string> placed_on; // placed only on (and stays only on) these blocks, by name - a plant's soil
+        bool joins = false;
+        std::array<std::array<int, 2>, 4> joined{{{9, 2}, {10, 2}, {9, 3}, {10, 3}}};
+
         std::array<Face, 6> faces{};
         // Per state of its shape (shape_state_count()): a torch's "floor"
         // and "wall", anything else's one "default".
@@ -123,6 +141,10 @@ namespace block_file {
     std::array<float, 4> face_uv(const Element& element, int face);
     // In the game's units.
     std::vector<BlockElement> to_elements(const std::vector<Element>& elements);
+
+    // A two-cell block's halves by `shape`: a door's "lower"/"upper", a
+    // bed's "foot"/"head" (0 is the cell it's placed at).
+    const char* half_id(int shape, int half);
 
     // The key a state is saved under (a torch: "floor", "wall").
     const char* state_id(int shape, int state);

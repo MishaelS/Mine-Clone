@@ -1099,38 +1099,28 @@ std::optional<BlockType> World::break_block(int x, int y, int z)
     BlockType broken = get_block(x, y, z);
     if (broken == BlockType::Bedrock || !get_block_properties(broken).selectable) return std::nullopt;
 
-    // Door/bed are two-cell objects - breaking either half silently
-    // removes both (only the half the player actually targeted goes
-    // through resolve_block_drops(), so exactly one drop happens either
-    // way). A large chest's halves demote to independent single chests
-    // instead - their own inventories are untouched, never merged/moved.
-    // The partner is only cleared if it really is the matching half - never
-    // whatever unrelated block happens to sit where a partner would be.
-    auto clear_partner = [this](int px, int py, int pz, BlockType expected) {
-        if (get_block(px, py, pz) == expected) set_block_and_rebuild(px, py, pz, BlockType::Air);
-    };
-    if (broken == BlockType::OakDoorLower) {
-        clear_partner(x, y + 1, z, BlockType::OakDoorUpper);
-    } else if (broken == BlockType::IronDoorLower) {
-        clear_partner(x, y + 1, z, BlockType::IronDoorUpper);
-    } else if (broken == BlockType::OakDoorUpper) {
-        clear_partner(x, y - 1, z, BlockType::OakDoorLower);
-    } else if (broken == BlockType::IronDoorUpper) {
-        clear_partner(x, y - 1, z, BlockType::IronDoorLower);
-    } else if (broken == BlockType::BedHead || broken == BlockType::BedFoot) {
-        // Head sits one cell from the foot in the stored facing's direction
-        // - see place_bed().
-        DirectionOffset step = horizontal_direction_offset(get_block_orientation(x, y, z));
-        if (broken == BlockType::BedFoot) clear_partner(x + step.dx, y, z + step.dz, BlockType::BedHead);
-        else clear_partner(x - step.dx, y, z - step.dz, BlockType::BedFoot);
-    } else if (broken == BlockType::Chest) {
+    // A two-cell block (a door, a bed - BlockProperties::partner) is one
+    // object - breaking either half silently removes both (only the half
+    // the player actually targeted goes through resolve_block_drops(), so
+    // exactly one drop happens either way). A large chest's halves demote
+    // to independent single chests instead - their own inventories are
+    // untouched, never merged/moved. The partner is only cleared if it
+    // really is the matching half - never whatever unrelated block happens
+    // to sit where a partner would be.
+    const BlockProperties& broken_properties = get_block_properties(broken);
+    if (broken_properties.partner != BlockType::Air && is_pair_kind(broken_properties.shape_kind)) {
+        const FaceOffset step = pair_partner_offset(broken_properties.shape_kind, broken_properties.pair_half, get_block_orientation(x, y, z));
+        if (get_block(x + step.dx, y + step.dy, z + step.dz) == broken_properties.partner) {
+            set_block_and_rebuild(x + step.dx, y + step.dy, z + step.dz, BlockType::Air);
+        }
+    } else if (broken_properties.joins_sideways) {
         ChestPart part = chest_part_at(*this, x, y, z);
         if (part != ChestPart::Single) {
             DirectionOffset right_step = horizontal_direction_offset(horizontal_direction_right_of(get_block_orientation(x, y, z)));
             int sign = part == ChestPart::Primary ? 1 : -1;
             int partner_x = x + right_step.dx * sign;
             int partner_z = z + right_step.dz * sign;
-            if (get_block(partner_x, y, partner_z) == BlockType::Chest) {
+            if (get_block(partner_x, y, partner_z) == broken) {
                 set_block_state(partner_x, y, partner_z, 0);
             }
         }
@@ -1147,11 +1137,8 @@ bool World::place_block(int x, int y, int z, BlockType type)
     if (y < MIN_WORLD_Y || y >= MIN_WORLD_Y + CHUNK_HEIGHT) return false;
     if (chunk_at(floor_div(x, CHUNK_SIZE), floor_div(z, CHUNK_SIZE)) == nullptr) return false;
     if (type == BlockType::Air || !get_block_properties(get_block(x, y, z)).replaceable) return false;
-    if (type == BlockType::ShortGrass && get_block(x, y - 1, z) != BlockType::Grass) return false;
-    if (type == BlockType::OakSapling) {
-        BlockType below = get_block(x, y - 1, z);
-        if (below != BlockType::Grass && below != BlockType::Dirt) return false;
-    }
+    // A plant only on its soil (BlockProperties::placed_on).
+    if (!block_can_stay_on(type, get_block(x, y - 1, z))) return false;
     // An attachable block (a torch - see BlockProperties::attach_*) placed
     // through this generic path has no clicked face to mount against, so it
     // can only stand on the floor, and only where there's a real centered
@@ -1213,39 +1200,38 @@ bool World::combine_slab(int x, int y, int z)
     return true;
 }
 
-bool World::place_door(int x, int y, int z, BlockType lower_type, HorizontalDirection facing)
+bool World::place_pair(int x, int y, int z, BlockType item_type, HorizontalDirection facing)
 {
-    if (!get_block_properties(get_block(x, y - 1, z)).solid) return false;
-    if (!place_block(x, y, z, lower_type)) return false;
-
-    BlockType upper_type = lower_type == BlockType::IronDoorLower ? BlockType::IronDoorUpper : BlockType::OakDoorUpper;
-    if (!place_block(x, y + 1, z, upper_type)) {
+    const BlockProperties& item = get_block_properties(item_type);
+    if (item.partner == BlockType::Air || !is_pair_kind(item.shape_kind)) return false;
+    // Half 0 at the clicked cell, half 1 where pair_partner_offset() says.
+    const BlockType first = item.pair_half == 0 ? item_type : item.partner;
+    const BlockType second = item.pair_half == 0 ? item.partner : item_type;
+    const FaceOffset step = pair_partner_offset(item.shape_kind, 0, facing);
+    // A door stands on something solid.
+    if (item.shape_kind == BlockShapeKind::Door && !get_block_properties(get_block(x, y - 1, z)).solid) return false;
+    if (!place_block(x, y, z, first)) return false;
+    if (!place_block(x + step.dx, y + step.dy, z + step.dz, second)) {
         break_block(x, y, z);
         return false;
     }
     set_block_orientation(x, y, z, facing);
-    set_block_orientation(x, y + 1, z, facing);
+    set_block_orientation(x + step.dx, y + step.dy, z + step.dz, facing);
     return true;
 }
 
-bool World::place_bed(int x, int y, int z, HorizontalDirection facing)
+std::optional<FaceOffset> World::pair_partner_step(int x, int y, int z) const
 {
-    DirectionOffset step = horizontal_direction_offset(facing);
-    int head_x = x + step.dx;
-    int head_z = z + step.dz;
-    if (!place_block(x, y, z, BlockType::BedFoot)) return false;
-    if (!place_block(head_x, y, head_z, BlockType::BedHead)) {
-        break_block(x, y, z);
-        return false;
-    }
-    set_block_orientation(x, y, z, facing);
-    set_block_orientation(head_x, y, head_z, facing);
-    return true;
+    const BlockProperties& properties = get_block_properties(get_block(x, y, z));
+    if (properties.partner == BlockType::Air || !is_pair_kind(properties.shape_kind)) return std::nullopt;
+    const FaceOffset step = pair_partner_offset(properties.shape_kind, properties.pair_half, get_block_orientation(x, y, z));
+    if (get_block(x + step.dx, y + step.dy, z + step.dz) != properties.partner) return std::nullopt;
+    return step;
 }
 
-bool World::place_chest(int x, int y, int z, HorizontalDirection facing)
+bool World::place_joining(int x, int y, int z, BlockType type, HorizontalDirection facing)
 {
-    if (!place_block(x, y, z, BlockType::Chest)) return false;
+    if (!place_block(x, y, z, type)) return false;
     set_block_orientation(x, y, z, facing);
 
     // A double chest only ever pairs side by side - perpendicular to its
@@ -1259,7 +1245,7 @@ bool World::place_chest(int x, int y, int z, HorizontalDirection facing)
     for (int sign : {1, -1}) {
         int nx = x + right_step.dx * sign;
         int nz = z + right_step.dz * sign;
-        if (get_block(nx, y, nz) != BlockType::Chest) continue;
+        if (get_block(nx, y, nz) != type) continue;
         if (get_block_orientation(nx, y, nz) != facing) continue;
         if (chest_part_at(*this, nx, y, nz) != ChestPart::Single) continue;
 
@@ -1272,7 +1258,7 @@ bool World::place_chest(int x, int y, int z, HorizontalDirection facing)
         for (int facing_sign : {1, -1}) {
             int diagonal_x = nx + facing_step.dx * facing_sign;
             int diagonal_z = nz + facing_step.dz * facing_sign;
-            if (get_block(diagonal_x, y, diagonal_z) == BlockType::Chest &&
+            if (get_block(diagonal_x, y, diagonal_z) == type &&
                 chest_part_at(*this, diagonal_x, y, diagonal_z) != ChestPart::Single) {
                 conflict = true;
                 break;

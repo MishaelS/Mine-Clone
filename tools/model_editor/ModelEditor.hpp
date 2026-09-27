@@ -76,6 +76,7 @@ private:
     Vector2 uv_drag_from = {0, 0};
     int block_state_view = 0;  // which of its states (a torch: floor, wall) is shown and edited
     bool show_hitbox = true;   // its hitbox drawn over the preview and "in the game"
+    bool block_large_view = false; // a block that joins sideways (a chest) shown joined to a second one
     RenderTexture2D block_view_texture{};
     RenderTexture2D block_game_texture{};
     int game_ui_scale = 2; // the game's settings.json ui_scale - its inventory's size

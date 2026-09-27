@@ -250,11 +250,10 @@ namespace {
         struct Cell { int x, y, z; };
         Cell cells[2] = {{x, y, z}, {x, y, z}};
         int count = 1;
-        if (block == BlockType::OakDoorLower || block == BlockType::IronDoorLower) {
-            cells[count++] = {x, y + 1, z};
-        } else if (block == BlockType::BedHead) {
-            DirectionOffset step = horizontal_direction_offset(facing);
-            cells[count++] = {x + step.dx, y, z + step.dz};
+        const BlockProperties& properties = get_block_properties(block);
+        if (properties.partner != BlockType::Air && is_pair_kind(properties.shape_kind)) {
+            const FaceOffset step = pair_partner_offset(properties.shape_kind, 0, facing);
+            cells[count++] = {x + step.dx, y + step.dy, z + step.dz};
         }
         for (int i = 0; i < count; ++i) {
             if (player.intersects_block(cells[i].x, cells[i].y, cells[i].z)) return true;
@@ -1122,10 +1121,12 @@ void GameEngine::spill_furnace_if_any(int x, int y, int z)
     }
 }
 
-void GameEngine::check_grass_support_above(int x, int y, int z)
+void GameEngine::check_plant_support_above(int x, int y, int z)
 {
     if (!world) return;
-    if (world->get_block(x, y + 1, z) != BlockType::ShortGrass) return;
+    // A plant whose soil (BlockProperties::placed_on) is gone pops off.
+    const BlockType above = world->get_block(x, y + 1, z);
+    if (get_block_properties(above).placed_on.empty() || block_can_stay_on(above, world->get_block(x, y, z))) return;
 
     if (std::optional<BlockType> broken = world->break_block(x, y + 1, z)) {
         Vector3 center = {x + 0.5f, y + 1.5f, z + 0.5f};
@@ -1324,7 +1325,7 @@ void GameEngine::start_sleeping(const World::RaycastHit& bed_hit)
     int head_z = bed_hit.z;
     HorizontalDirection bed_facing = world->get_block_orientation(bed_hit.x, bed_hit.y, bed_hit.z);
     DirectionOffset head_step = horizontal_direction_offset(bed_facing);
-    if (world->get_block(bed_hit.x, bed_hit.y, bed_hit.z) == BlockType::BedFoot) {
+    if (get_block_properties(world->get_block(bed_hit.x, bed_hit.y, bed_hit.z)).pair_half == 0) { // the foot
         head_x += head_step.dx;
         head_z += head_step.dz;
     }
@@ -2123,7 +2124,7 @@ void GameEngine::update(float delta_time)
                 particles.spawn_destroy(*broken, center);
                 audio.play_break(*broken, center, camera.position);
                 if (is_log_block(*broken)) check_leaf_decay_near(hit->x, hit->y, hit->z);
-                check_grass_support_above(hit->x, hit->y, hit->z);
+                check_plant_support_above(hit->x, hit->y, hit->z);
                 check_attachment_support_near(hit->x, hit->y, hit->z);
                 if (*broken == BlockType::Chest) spill_chest_if_any(hit->x, hit->y, hit->z);
                 if (*broken == BlockType::Furnace || *broken == BlockType::LitFurnace) spill_furnace_if_any(hit->x, hit->y, hit->z);
@@ -2160,10 +2161,12 @@ void GameEngine::update(float delta_time)
             hand.swing(); // keeps swinging while digging
 
             if (breaking_progress >= 1.0f) {
+                // A block recolored by its biome keeps that color as it drops.
                 std::optional<Color> dropped_block_tint;
-                if (target_type == BlockType::Foliage) {
+                const BiomeTint target_biome = get_block_properties(target_type).biome_tints[static_cast<int>(BlockFace::North)];
+                if (target_biome == BiomeTint::Foliage) {
                     dropped_block_tint = world->get_foliage_tint(breaking_x, breaking_z);
-                } else if (target_type == BlockType::ShortGrass) {
+                } else if (target_biome == BiomeTint::Grass) {
                     dropped_block_tint = world->get_grass_tint(breaking_x, breaking_z);
                 }
                 if (std::optional<BlockType> broken = world->break_block(breaking_x, breaking_y, breaking_z)) {
@@ -2200,7 +2203,7 @@ void GameEngine::update(float delta_time)
                         selected.clear();
                     }
                     if (is_log_block(*broken)) check_leaf_decay_near(breaking_x, breaking_y, breaking_z);
-                    check_grass_support_above(breaking_x, breaking_y, breaking_z);
+                    check_plant_support_above(breaking_x, breaking_y, breaking_z);
                     check_attachment_support_near(breaking_x, breaking_y, breaking_z);
                     if (*broken == BlockType::Chest) spill_chest_if_any(breaking_x, breaking_y, breaking_z);
                     if (*broken == BlockType::Furnace || *broken == BlockType::LitFurnace) {
@@ -2231,10 +2234,9 @@ void GameEngine::update(float delta_time)
         BlockType targeted_type = targeted_block
             ? world->get_block(targeted_block->x, targeted_block->y, targeted_block->z)
             : BlockType::Air;
-        bool targeted_is_door = targeted_type == BlockType::OakDoorLower || targeted_type == BlockType::OakDoorUpper ||
-                                 targeted_type == BlockType::IronDoorLower || targeted_type == BlockType::IronDoorUpper;
-        bool targeted_is_bed = targeted_type == BlockType::BedHead || targeted_type == BlockType::BedFoot;
         const BlockShapeKind targeted_kind = get_block_properties(targeted_type).shape_kind;
+        bool targeted_is_door = targeted_kind == BlockShapeKind::Door;
+        bool targeted_is_bed = targeted_kind == BlockShapeKind::Bed;
 
         if (container_kind && !chest_blocked_above) {
             inventory_hud.open_container(*container_kind, targeted_block->x, targeted_block->y, targeted_block->z);
@@ -2253,11 +2255,12 @@ void GameEngine::update(float delta_time)
             uint16_t packed = world->get_block_state(x, y, z) ^ BlockStateBits::OPEN;
             world->set_block_state(x, y, z, packed);
             if (targeted_is_door) {
-                bool is_lower = targeted_type == BlockType::OakDoorLower || targeted_type == BlockType::IronDoorLower;
-                int partner_y = is_lower ? y + 1 : y - 1;
-                uint16_t partner_packed = world->get_block_state(x, partner_y, z);
-                partner_packed = static_cast<uint16_t>((partner_packed & ~BlockStateBits::OPEN) | (packed & BlockStateBits::OPEN));
-                world->set_block_state(x, partner_y, z, partner_packed);
+                if (const std::optional<FaceOffset> step = world->pair_partner_step(x, y, z)) {
+                    const int px = x + step->dx, py = y + step->dy, pz = z + step->dz;
+                    uint16_t partner_packed = world->get_block_state(px, py, pz);
+                    partner_packed = static_cast<uint16_t>((partner_packed & ~BlockStateBits::OPEN) | (packed & BlockStateBits::OPEN));
+                    world->set_block_state(px, py, pz, partner_packed);
+                }
             }
             hand.swing();
         } else if (!container_kind && targeted_block && targeted_kind == BlockShapeKind::Cake &&
@@ -2333,20 +2336,20 @@ void GameEngine::update(float delta_time)
                     int place_y = targeted_block->y + (replace_target ? 0 : static_cast<int>(targeted_block->normal.y));
                     int place_z = targeted_block->z + (replace_target ? 0 : static_cast<int>(targeted_block->normal.z));
                     if (!placement_hits_entity(player, mobs, selected.block, place_x, place_y, place_z, facing)) {
-                        // Door/bed are placed as one atomic pair (World::
-                        // place_door()/place_bed()) rather than through the
-                        // generic single-cell path below - see their own
-                        // comments for why (support check, rollback on a
-                        // blocked second half).
-                        if (selected.block == BlockType::OakDoorLower || selected.block == BlockType::IronDoorLower) {
-                            placed = world->place_door(place_x, place_y, place_z, selected.block, facing);
-                        } else if (selected.block == BlockType::BedHead) {
-                            placed = world->place_bed(place_x, place_y, place_z, facing);
-                        } else if (selected.block == BlockType::Chest) {
-                            // Merges into a large/double chest with a matching
-                            // neighbor when possible - see World::place_chest()'s
-                            // own comment for the diagonal-conflict rule.
-                            placed = world->place_chest(place_x, place_y, place_z, facing);
+                        // A two-cell block (a door, a bed) is placed as one
+                        // atomic pair (World::place_pair()) rather than
+                        // through the generic single-cell path below - see
+                        // its own comment for why (support check, rollback
+                        // on a blocked second half).
+                        const BlockProperties& selected_properties = get_block_properties(selected.block);
+                        if (selected_properties.partner != BlockType::Air && is_pair_kind(selected_kind)) {
+                            placed = world->place_pair(place_x, place_y, place_z, selected.block, facing);
+                        } else if (selected_properties.joins_sideways) {
+                            // Merges into a wide block (a large chest) with a
+                            // matching neighbor when possible - see World::
+                            // place_joining()'s own comment for the
+                            // diagonal-conflict rule.
+                            placed = world->place_joining(place_x, place_y, place_z, selected.block, facing);
                         } else if (block_is_attachable(selected.block)) {
                             // Mounts onto whatever face was clicked - wall,
                             // floor or ceiling, per its own block definition

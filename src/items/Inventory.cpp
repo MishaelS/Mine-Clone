@@ -14,13 +14,10 @@ std::vector<BlockType> all_placeable_blocks()
 {
     std::vector<BlockType> result;
     for (BlockType type : all_block_types()) {
-        // OakDoorUpper/IronDoorUpper/BedFoot only ever come into existence
-        // as the automatic second half of a paired placement (World::
-        // place_door()/place_bed()) - never directly selectable.
-        if (type == BlockType::Water || type == BlockType::OakDoorUpper ||
-            type == BlockType::IronDoorUpper || type == BlockType::BedFoot) {
-            continue;
-        }
+        // A two-cell block's other half (a door's upper half, a bed's foot)
+        // only ever comes into existence as the automatic second half of a
+        // paired placement (World::place_pair()) - never directly selectable.
+        if (type == BlockType::Water || !get_block_properties(type).is_item) continue;
         result.push_back(type);
     }
     return result;

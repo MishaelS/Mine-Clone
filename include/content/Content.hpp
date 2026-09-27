@@ -71,6 +71,10 @@ public:
     BlockDef& item_sprite(Tile tile);      // a flat sprites/items.png icon instead of a 3D one
     BlockDef& state_model(int state, const BlockStateModel& model); // its hitbox/model placement in that state
     BlockDef& elements(std::vector<BlockElement> parts);             // its own model from parts (BlockElement)
+    BlockDef& pair(int half, BlockType partner, bool is_item);       // one half of a two-cell block (a door, a bed)
+    BlockDef& joins_sideways(const std::array<Tile, 4>& tiles);      // joins a neighbor into a wide block (a large chest)
+    BlockDef& biome_tint(int face, BiomeTint tint);                  // that face recolored by its biome
+    BlockDef& placed_on(std::vector<BlockType> soil);                // placed only on (and stays only on) these
 
     BlockDef& attach_floor();
     BlockDef& attach_wall();

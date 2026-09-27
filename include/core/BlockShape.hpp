@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 // Per-shape collision/render geometry for a block whose footprint isn't
@@ -103,9 +104,9 @@ BlockShapeBoxes get_block_shape(BlockType type, const BlockInstanceState& state)
 // ray hits (World::raycast()), what the black target outline and the
 // breaking cracks are drawn around. Separate from collision, same as
 // vanilla: a torch or a sapling has none of the latter but still has a
-// small box to aim at. In order: the plants' fixed box; the hitbox its
-// file gives it in this state (BlockStateModel - a torch on the floor or
-// on a wall, a cactus); else, for a custom_shape block, its
+// small box to aim at. In order: the hitbox its file gives it in this
+// state (BlockStateModel - a torch on the floor or on a wall, a plant, a
+// cactus); else, for a custom_shape block, its
 // collision shape (get_block_shape() - it depends on facing/open/half/
 // bites); else one full cube. Local 0..1 cell space.
 BlockShapeBoxes get_outline_shape(BlockType type, const BlockInstanceState& state);
@@ -170,7 +171,7 @@ struct ShapedFaceTexture {
     // model ("shade": false), so a torch reads evenly lit from every side.
     bool flat_shade = false;
 };
-ShapedFaceTexture shaped_face_texture(BlockType type, const BlockInstanceState& state,
+ShapedFaceTexture shaped_face_texture(const BlockInstanceState& state,
                                       const BlockProperties& properties, BlockFace face, const BoundingBox& box);
 
 // --- Pure geometry (core/BlockShapeKinds.cpp) - no block registry, so the
@@ -187,12 +188,18 @@ BlockShapeBoxes item_shape_of_kind(BlockShapeKind kind);
 // faces - everything else hidden; never direction-shaded (vanilla's torch
 // model).
 ShapedFaceTexture torch_face_texture(Rectangle tile, BlockFace face, const BoundingBox& box);
+// shaped_face_texture() without the registry: the face of a block of `kind`
+// (its pair half - a bed's head is 1, its foot 0), its own `tile` for
+// that face, and its optional cut (a cake's) and end (a bed's) tiles.
+ShapedFaceTexture shaped_kind_face_texture(BlockShapeKind kind, int pair_half, const BlockInstanceState& state, BlockFace face,
+                                           const BoundingBox& box, Rectangle tile, std::optional<Rectangle> cut,
+                                           std::optional<Rectangle> end);
 
 // The states a block of `kind` has its own look and hitbox in
 // (BlockProperties::state_models): a torch 2 - 0 on the floor, 1 on a
 // wall; every other kind just 0.
 int shape_state_count(BlockShapeKind kind);
-// Which of them `state` is.
+// Which of them `state` is (a door: 0 closed, 1 open).
 int shape_state_index(BlockShapeKind kind, const BlockInstanceState& state);
 // A state that is `index` - as the editor shows it: facing north, a wall
 // torch on the north wall (the layout BlockStateModel is written for).
@@ -206,3 +213,11 @@ Vector3 place_model_point(const BlockStateModel& model, BlockFace attachment, Ve
 Vector3 place_model_normal(const BlockStateModel& model, BlockFace attachment, Vector3 normal);
 // `model`'s hitbox turned to the wall `attachment` names.
 BoundingBox place_hitbox(const BlockStateModel& model, BlockFace attachment);
+
+// Whether a block of `kind` is one half of a two-cell block (a door, a bed
+// - BlockProperties::partner/pair_half).
+bool is_pair_kind(BlockShapeKind kind);
+// Where the other half of such a block is from half `half` of it: a door's
+// upper half one up from the lower, a bed's head one along its facing from
+// the foot - and back.
+FaceOffset pair_partner_offset(BlockShapeKind kind, int half, HorizontalDirection facing);

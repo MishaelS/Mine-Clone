@@ -8,6 +8,19 @@
 // with exactly the game's shapes (it links this file alone).
 
 namespace {
+    // Block.cpp's horizontal_direction_offset(), kept here so this file
+    // needs nothing else.
+    DirectionOffset direction_step(HorizontalDirection direction)
+    {
+        switch (direction) {
+            case HorizontalDirection::North: return {0, -1};
+            case HorizontalDirection::South: return {0, 1};
+            case HorizontalDirection::East:  return {1, 0};
+            case HorizontalDirection::West:  return {-1, 0};
+        }
+        return {0, 1};
+    }
+
     // Real door/trapdoor panel thickness (3/16 of a block, same as vanilla).
     constexpr float PANEL_THICKNESS = 0.1875f;
 
@@ -192,12 +205,13 @@ BlockShapeBoxes shape_of_kind(BlockShapeKind kind, const BlockInstanceState& sta
 
 int shape_state_count(BlockShapeKind kind)
 {
-    return kind == BlockShapeKind::Torch ? 2 : 1;
+    return kind == BlockShapeKind::Torch || kind == BlockShapeKind::Door ? 2 : 1;
 }
 
 int shape_state_index(BlockShapeKind kind, const BlockInstanceState& state)
 {
     if (kind == BlockShapeKind::Torch && state.attachment != BlockFace::Bottom && state.attachment != BlockFace::Top) return 1;
+    if (kind == BlockShapeKind::Door && state.open) return 1;
     return 0;
 }
 
@@ -206,7 +220,26 @@ BlockInstanceState shape_state_example(BlockShapeKind kind, int index)
     BlockInstanceState state;
     state.facing = HorizontalDirection::North;
     if (kind == BlockShapeKind::Torch && index == 1) state.attachment = BlockFace::North;
+    if (kind == BlockShapeKind::Door && index == 1) state.open = true;
     return state;
+}
+
+bool is_pair_kind(BlockShapeKind kind)
+{
+    return kind == BlockShapeKind::Door || kind == BlockShapeKind::Bed;
+}
+
+FaceOffset pair_partner_offset(BlockShapeKind kind, int half, HorizontalDirection facing)
+{
+    const int sign = half == 0 ? 1 : -1;
+    if (kind == BlockShapeKind::Door) return {0, sign, 0};
+    switch (facing) {
+        case HorizontalDirection::North: return {0, 0, -sign};
+        case HorizontalDirection::South: return {0, 0, sign};
+        case HorizontalDirection::East:  return {sign, 0, 0};
+        case HorizontalDirection::West:  return {-sign, 0, 0};
+    }
+    return {0, 0, 0};
 }
 
 bool state_model_moves(const BlockStateModel& model)
@@ -260,6 +293,117 @@ ShapedFaceTexture torch_face_texture(Rectangle tile, BlockFace face, const Bound
     else if (x_planes && (face == BlockFace::West || face == BlockFace::East)) result.uv = tile;
     else if (z_planes && (face == BlockFace::North || face == BlockFace::South)) result.uv = tile;
     else result.hidden = true;
+    return result;
+}
+
+namespace {
+    // The (x, z) cell corner a door pivots around - the corner its closed
+    // and open panels (door_shape()) share.
+    Vector2 door_hinge_corner(const BlockInstanceState& state)
+    {
+        const bool right = state.hinge_right;
+        switch (state.facing) {
+            case HorizontalDirection::West:  return right ? Vector2{0.0f, 1.0f} : Vector2{0.0f, 0.0f};
+            case HorizontalDirection::North: return right ? Vector2{0.0f, 0.0f} : Vector2{1.0f, 0.0f};
+            case HorizontalDirection::East:  return right ? Vector2{1.0f, 0.0f} : Vector2{1.0f, 1.0f};
+            case HorizontalDirection::South: return right ? Vector2{1.0f, 1.0f} : Vector2{0.0f, 1.0f};
+        }
+        return {0.0f, 0.0f};
+    }
+
+    // Where a side face's texture-left column lands along that face's own
+    // horizontal axis, following crop_tile_to_box()'s mapping (North: x=0,
+    // South: x=1, East: z=0, West: z=1).
+    float texture_left_along(BlockFace face)
+    {
+        return (face == BlockFace::North || face == BlockFace::East) ? 0.0f : 1.0f;
+    }
+
+    void mirror_u(Rectangle& uv)
+    {
+        uv.x += uv.width;
+        uv.width = -uv.width;
+    }
+
+    BlockFace side_face_toward(HorizontalDirection direction)
+    {
+        return static_cast<BlockFace>(static_cast<int>(BlockFace::North) + static_cast<int>(direction));
+    }
+
+    // North<->South, East<->West - HorizontalDirection's own order pairs them.
+    HorizontalDirection opposite(HorizontalDirection direction)
+    {
+        return static_cast<HorizontalDirection>(static_cast<int>(direction) ^ 1);
+    }
+}
+
+ShapedFaceTexture shaped_kind_face_texture(BlockShapeKind kind, int pair_half, const BlockInstanceState& state, BlockFace face,
+                                           const BoundingBox& box, Rectangle tile, std::optional<Rectangle> cut,
+                                           std::optional<Rectangle> end)
+{
+    const bool side_face = face != BlockFace::Top && face != BlockFace::Bottom;
+    const BlockFace facing_face = side_face_toward(state.facing);
+    const BlockFace back_face = side_face_toward(opposite(state.facing));
+    const bool bed = kind == BlockShapeKind::Bed;
+    const bool head = pair_half == 1; // a bed's head half - the foot is 0
+
+    // A partly eaten cake shows its cross-section on the bitten side.
+    if (cut && state.bite_count > 0 && face == facing_face) {
+        tile = *cut;
+    }
+    // A bed half's outer end: the head's headboard faces `facing` (the head
+    // cell sits that way from the foot - see World::place_bed()), the
+    // foot's end faces the other way.
+    if (bed && end && face == (head ? facing_face : back_face)) {
+        tile = *end;
+    }
+
+    ShapedFaceTexture result;
+    if (kind == BlockShapeKind::Torch) return torch_face_texture(tile, face, box);
+
+    result.uv = crop_tile_to_box(tile, face, box);
+
+    if (kind == BlockShapeKind::Door && side_face) {
+        // Only the panel's two broad faces carry the hinge/handle art - its
+        // thin edges don't. The art's hinges run down its left column;
+        // mirror the face if that column doesn't land on the hinge edge, so
+        // hinges sit on the hinge side and the handle on the free side from
+        // both sides of the door, open or closed.
+        const bool long_axis_x = (box.max.x - box.min.x) > (box.max.z - box.min.z);
+        const bool face_spans_x = face == BlockFace::North || face == BlockFace::South;
+        if (long_axis_x == face_spans_x) {
+            const Vector2 hinge = door_hinge_corner(state);
+            const float hinge_along = long_axis_x ? hinge.x : hinge.y;
+            if (hinge_along != texture_left_along(face)) mirror_u(result.uv);
+        }
+    } else if (bed) {
+        // The two halves' faces toward each other are internal - skip them.
+        if (face == (head ? back_face : facing_face)) {
+            result.hidden = true;
+            return result;
+        }
+        // Planks underside at the top of the frame (5px up), above the legs.
+        if (face == BlockFace::Bottom) result.inset = 5.0f / 16.0f;
+        if (face == BlockFace::Top) {
+            // The head top's pillow is drawn toward its texture's right
+            // (+u). Unrotated, +u runs toward +z (South); each quarter turn
+            // of the face's corners (see ShapedFaceTexture) turns it
+            // clockwise from above: East, North, West.
+            switch (state.facing) {
+                case HorizontalDirection::South: result.quarter_turns = 0; break;
+                case HorizontalDirection::East:  result.quarter_turns = 1; break;
+                case HorizontalDirection::North: result.quarter_turns = 2; break;
+                case HorizontalDirection::West:  result.quarter_turns = 3; break;
+            }
+        } else if (side_face && face != facing_face && face != back_face) {
+            // A long side. Foot side + head side read as one strip, foot
+            // end on the left, headboard on the right - so each face's
+            // texture-left column belongs on the foot side of its cell.
+            const DirectionOffset toward_head = direction_step(state.facing);
+            const float foot_along = (toward_head.dx + toward_head.dz) > 0 ? 0.0f : 1.0f;
+            if (texture_left_along(face) != foot_along) mirror_u(result.uv);
+        }
+    }
     return result;
 }
 

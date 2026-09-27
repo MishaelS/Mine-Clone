@@ -7,7 +7,6 @@ namespace content {
 
 namespace {
     using I = ItemType;
-    using B = BlockType;
     using T = ToolKind;
 
     // Vanilla Beta's own tool stats: durability ("uses" before breaking)
@@ -84,12 +83,6 @@ void register_items()
     food(I::Cookie        , "cookie"         ,  2, {12,  5});
     food(I::Egg           , "egg"            ,  2, {12,  0});
     food(I::MilkBucket    , "milk_bucket"    ,  6, {13,  4});
-
-    // Blocks drawn as a flat item sprite instead of a 3D cube.
-    block_item_sprite(B::OakSapling      , {14,  2});
-    block_item_sprite(B::OakDoorLower    , {11,  2});
-    block_item_sprite(B::IronDoorLower   , {12,  2});
-    block_item_sprite(B::BedHead         , {13,  2});
 }
 
 } // namespace content

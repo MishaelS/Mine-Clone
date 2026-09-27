@@ -1,0 +1,27 @@
+{
+  "id": 72,
+  "name": "short_grass",
+  "sound": "grass",
+  "hardness": 0.1,
+  "tool": "shovel",
+  "density": 0.1,
+  "luminance": 0,
+  "shape": "cross",
+  "item_sprite": [14, 6],
+  "solid": false,
+  "replaceable": true,
+  "transparent": true,
+  "cutout": true,
+  "placed_on": ["grass"],
+  "states": {
+    "default": { "hitbox": [2, 0, 2, 14, 13, 14] }
+  },
+  "faces": {
+    "top": { "tile": [7, 2], "tint": [124, 189, 107, 255], "biome": "grass" },
+    "bottom": { "tile": [7, 2], "tint": [124, 189, 107, 255], "biome": "grass" },
+    "north": { "tile": [7, 2], "tint": [124, 189, 107, 255], "biome": "grass" },
+    "south": { "tile": [7, 2], "tint": [124, 189, 107, 255], "biome": "grass" },
+    "east": { "tile": [7, 2], "tint": [124, 189, 107, 255], "biome": "grass" },
+    "west": { "tile": [7, 2], "tint": [124, 189, 107, 255], "biome": "grass" }
+  }
+}

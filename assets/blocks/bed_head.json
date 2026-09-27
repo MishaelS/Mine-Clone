@@ -1,0 +1,24 @@
+{
+  "id": 83,
+  "name": "bed_head",
+  "sound": "wood",
+  "hardness": 0.2,
+  "tool": "axe",
+  "density": 0.6,
+  "luminance": 0,
+  "shape": "bed",
+  "item_sprite": [13, 2],
+  "solid": false,
+  "transparent": true,
+  "cutout": true,
+  "pair": { "half": "head", "partner": "bed_foot" },
+  "end": [8, 9],
+  "faces": {
+    "top": { "tile": [7, 8] },
+    "bottom": { "tile": [4, 0] },
+    "north": { "tile": [7, 9] },
+    "south": { "tile": [7, 9] },
+    "east": { "tile": [7, 9] },
+    "west": { "tile": [7, 9] }
+  }
+}

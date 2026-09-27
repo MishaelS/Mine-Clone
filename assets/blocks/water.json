@@ -1,0 +1,23 @@
+{
+  "id": 17,
+  "name": "water",
+  "sound": "none",
+  "hardness": 0.3,
+  "tool": "none",
+  "density": 1,
+  "luminance": 0,
+  "shape": "fluid",
+  "solid": false,
+  "selectable": false,
+  "replaceable": true,
+  "transparent": true,
+  "translucent": true,
+  "faces": {
+    "top": { "tile": [13, 12], "tint": [255, 255, 255, 200] },
+    "bottom": { "tile": [13, 12], "tint": [255, 255, 255, 200] },
+    "north": { "tile": [13, 12], "tint": [255, 255, 255, 200] },
+    "south": { "tile": [13, 12], "tint": [255, 255, 255, 200] },
+    "east": { "tile": [13, 12], "tint": [255, 255, 255, 200] },
+    "west": { "tile": [13, 12], "tint": [255, 255, 255, 200] }
+  }
+}

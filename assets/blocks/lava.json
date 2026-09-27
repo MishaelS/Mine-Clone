@@ -1,0 +1,21 @@
+{
+  "id": 71,
+  "name": "lava",
+  "sound": "none",
+  "hardness": 0.3,
+  "tool": "none",
+  "density": 1,
+  "luminance": 15,
+  "shape": "fluid",
+  "solid": false,
+  "selectable": false,
+  "replaceable": true,
+  "faces": {
+    "top": { "tile": [13, 14] },
+    "bottom": { "tile": [13, 14] },
+    "north": { "tile": [13, 14] },
+    "south": { "tile": [13, 14] },
+    "east": { "tile": [13, 14] },
+    "west": { "tile": [13, 14] }
+  }
+}

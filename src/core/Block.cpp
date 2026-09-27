@@ -122,6 +122,11 @@ namespace content {
         properties.double_block = BlockType::Air;
         properties.item_sprite_x = -1;
         properties.item_sprite_y = -1;
+        properties.partner = BlockType::Air;
+        properties.pair_half = 0;
+        properties.is_item = true;
+        properties.joins_sideways = false;
+        properties.biome_tints.fill(BiomeTint::None);
         for (int face = 0; face < 6; ++face) {
             properties.texture_uvs[face] = tile_uv(0, 0);
             properties.texture_tints[face] = WHITE;
@@ -229,6 +234,31 @@ namespace content {
         return *this;
     }
 
+    BlockDef& BlockDef::pair(int half, BlockType partner, bool is_item) {
+        BlockProperties& properties = block_table[static_cast<size_t>(type_)];
+        properties.pair_half = static_cast<uint8_t>(half);
+        properties.partner = partner;
+        properties.is_item = is_item;
+        return *this;
+    }
+
+    BlockDef& BlockDef::joins_sideways(const std::array<Tile, 4>& tiles) {
+        BlockProperties& properties = block_table[static_cast<size_t>(type_)];
+        properties.joins_sideways = true;
+        for (size_t i = 0; i < tiles.size(); ++i) properties.joined_uvs[i] = checked_tile_uv(type_, tiles[i]);
+        return *this;
+    }
+
+    BlockDef& BlockDef::biome_tint(int face, BiomeTint tint) {
+        block_table[static_cast<size_t>(type_)].biome_tints[static_cast<size_t>(face)] = tint;
+        return *this;
+    }
+
+    BlockDef& BlockDef::placed_on(std::vector<BlockType> soil) {
+        block_table[static_cast<size_t>(type_)].placed_on = std::move(soil);
+        return *this;
+    }
+
     BlockDef& BlockDef::directional() {
         block_table[static_cast<size_t>(type_)].directional = true;
         return *this;
@@ -333,6 +363,8 @@ void Load_block_definitions()
         air.density         = 0.0f; // never dropped/simulated - air has no falling/buoyancy meaning
         air.item_sprite_x   = -1;
         air.item_sprite_y   = -1;
+        air.partner         = BlockType::Air;
+        air.is_item         = false;
     }
     block_names[static_cast<uint8_t>(BlockType::Air)] = "air";
 
@@ -378,6 +410,12 @@ bool block_needs_facing(BlockType type)
 {
     const BlockShapeKind kind = get_block_properties(type).shape_kind;
     return block_is_directional(type) || kind == BlockShapeKind::Stairs || kind == BlockShapeKind::Trapdoor;
+}
+
+bool block_can_stay_on(BlockType type, BlockType below)
+{
+    const std::vector<BlockType>& soil = get_block_properties(type).placed_on;
+    return soil.empty() || std::find(soil.begin(), soil.end(), below) != soil.end();
 }
 
 FaceOffset block_face_offset(BlockFace face)

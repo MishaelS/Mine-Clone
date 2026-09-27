@@ -10,11 +10,11 @@
   "cutout": true,
   "keep_same_faces": true,
   "faces": {
-    "top": { "tile": [4, 3], "tint": [82, 180, 82, 255] },
-    "bottom": { "tile": [4, 3], "tint": [82, 180, 82, 255] },
-    "north": { "tile": [4, 3], "tint": [82, 180, 82, 255] },
-    "south": { "tile": [4, 3], "tint": [82, 180, 82, 255] },
-    "east": { "tile": [4, 3], "tint": [82, 180, 82, 255] },
-    "west": { "tile": [4, 3], "tint": [82, 180, 82, 255] }
+    "top": { "tile": [4, 3], "tint": [82, 180, 82, 255], "biome": "foliage" },
+    "bottom": { "tile": [4, 3], "tint": [82, 180, 82, 255], "biome": "foliage" },
+    "north": { "tile": [4, 3], "tint": [82, 180, 82, 255], "biome": "foliage" },
+    "south": { "tile": [4, 3], "tint": [82, 180, 82, 255], "biome": "foliage" },
+    "east": { "tile": [4, 3], "tint": [82, 180, 82, 255], "biome": "foliage" },
+    "west": { "tile": [4, 3], "tint": [82, 180, 82, 255], "biome": "foliage" }
   }
 }
