@@ -14,6 +14,7 @@
 namespace {
     constexpr const char* PLAYER_MODEL_PATH = ASSETS_PATH "models/player.json";
     constexpr const char* SWING_ANIMATION = "swing"; // the model's Manual hit/use animation
+    constexpr const char* SLEEP_ANIMATION = "sleep"; // the model's Manual pose/breathing while asleep in bed
 
     // The model is 32 pixels tall; scaling those to the controller's
     // 1.8-block standing height keeps the visible body and the gameplay
@@ -93,4 +94,46 @@ void PlayerRenderer::draw_flat(Vector3 feet_position, float yaw_degrees, float p
     static EntityAnimator preview_animator;
     preview_animator.update(GetFrameTime(), 0.0f);
     draw_model(feet_position, body, yaw_degrees, pitch_degrees, tint, preview_animator);
+}
+
+float PlayerRenderer::model_height()
+{
+    return 32.0f * MODEL_PIXEL;
+}
+
+float PlayerRenderer::back_depth()
+{
+    return 2.0f * MODEL_PIXEL; // the body is 4 pixels deep
+}
+
+void PlayerRenderer::draw_sleeping(Vector3 stand_feet, Vector3 bed_feet, Vector3 head_direction, float lie_down,
+                                   float seconds, const World& world) const
+{
+    const EntityModel& model = player_model();
+    lie_down = std::clamp(lie_down, 0.0f, 1.0f);
+
+    // Breathing and the rest of the "sleep" pose - no walking, no look.
+    static EntityAnimator sleeping_animator;
+    sleeping_animator.update(GetFrameTime(), 0.0f);
+    sleeping_animator.set_manual(SLEEP_ANIMATION, seconds);
+    ModelPose pose = sleeping_animator.pose(model);
+    for (size_t i = 0; i < pose.size(); ++i) {
+        // Fades in as it lies down.
+        pose[i].rotation = Vector3Scale(pose[i].rotation, lie_down);
+        pose[i].offset = Vector3Scale(pose[i].offset, lie_down);
+    }
+
+    // Standing with its back to the pillow, then falling back onto the bed
+    // about its feet: a quarter turn backward, head toward the bed's head.
+    const Vector3 feet = Vector3Lerp(stand_feet, bed_feet, lie_down);
+    const float yaw = std::atan2(-head_direction.x, -head_direction.z) * RAD2DEG;
+    const Color tint = entity_environment_tint(world, Vector3Add(bed_feet, Vector3Scale(head_direction, model_height() * 0.5f)));
+    const Texture2D& skin = model.skin.empty() ? Texture2D{} : TextureManager::get(model.skin);
+
+    rlPushMatrix();
+    rlTranslatef(feet.x, feet.y, feet.z);
+    rlRotatef(yaw, 0.0f, 1.0f, 0.0f);
+    rlRotatef(-90.0f * lie_down, 1.0f, 0.0f, 0.0f);
+    draw_entity_model(model, skin, pose, MODEL_PIXEL, tint);
+    rlPopMatrix();
 }

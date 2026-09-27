@@ -33,6 +33,17 @@ public:
     // - the head follows it, the body only past the head's own limit.
     void draw_flat(Vector3 feet_position, float yaw_degrees, float pitch_degrees, Color tint) const;
 
+    // Asleep in a bed: lying on its back, head toward `head_direction`
+    // (horizontal unit vector, the bed's head end), the feet at
+    // `bed_feet` - lying down from standing at `stand_feet` as `lie_down`
+    // goes 0 -> 1. Plays the model's "sleep" animation, `seconds` in.
+    void draw_sleeping(Vector3 stand_feet, Vector3 bed_feet, Vector3 head_direction, float lie_down, float seconds,
+                       const World& world) const;
+    // Model pixels from the feet to the top of the head, and from the
+    // middle of the body to its back - for placing it on a bed.
+    static float model_height();
+    static float back_depth();
+
 private:
     // Visual-only turning state, remembered from the last draw() call.
     mutable float body_yaw = 0.0f;

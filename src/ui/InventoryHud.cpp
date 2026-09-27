@@ -59,6 +59,11 @@ namespace {
     constexpr float HOTBAR_SCALE    = 2.0f;
     constexpr float INVENTORY_SCALE = 2.0f;
 
+    // Container titles ("Chest", "Inventory"...): Minecraft's GUI text -
+    // 0x404040, no shadow, about one 8-pixel line of the GUI texture.
+    constexpr float GUI_TEXT_SIZE = 8.0f;
+    constexpr Color GUI_TEXT_COLOR = {64, 64, 64, 255};
+
     constexpr float ITEM_SIZE_PX             = 16.0f;
     constexpr float CONTAINER_SLOT_STRIDE_PX = 18.0f;
 
@@ -438,6 +443,41 @@ std::optional<ItemStack> InventoryHud::update_grid(Inventory& inventory, GameMod
 
     Rectangle full_source = {0.0f, 0.0f, static_cast<float>(texture.width), static_cast<float>(texture.height)};
     DrawTexturePro(texture, full_source, {panel_x, panel_y, panel_w, panel_h}, {0.0f, 0.0f}, 0.0f, WHITE);
+
+    // What's open, and where the player's own inventory starts - labeled
+    // the way Minecraft labels them: dark grey, no shadow, at its own spots
+    // on the GUI texture (texture pixels).
+    {
+        const Font& font = FontManager::get();
+        const float size = GUI_TEXT_SIZE * inventory_scale;
+        auto gui_text = [&](const std::string& text, float x, float y, bool centered) {
+            const Vector2 measured = MeasureTextEx(font, text.c_str(), size, 1.0f);
+            const float left = centered ? panel_x + (panel_w - measured.x) * 0.5f : panel_x + x * inventory_scale;
+            DrawTextEx(font, text.c_str(), {std::round(left), std::round(panel_y + y * inventory_scale)}, size, 1.0f, GUI_TEXT_COLOR);
+        };
+        const float inventory_label_y = static_cast<float>(texture.height) - 94.0f;
+        switch (kind) {
+            case ContainerKind::Inventory:
+                gui_text(ui::tr("container.crafting"), 97.0f, 8.0f, false);
+                break;
+            case ContainerKind::Workbench:
+                gui_text(ui::tr("container.crafting"), 29.0f, 6.0f, false);
+                gui_text(ui::tr("container.inventory"), 8.0f, inventory_label_y, false);
+                break;
+            case ContainerKind::Furnace:
+                gui_text(ui::tr("block.furnace"), 0.0f, 6.0f, true);
+                gui_text(ui::tr("container.inventory"), 8.0f, inventory_label_y, false);
+                break;
+            case ContainerKind::Chest:
+                gui_text(ui::tr("block.chest"), 8.0f, 6.0f, false);
+                gui_text(ui::tr("container.inventory"), 8.0f, inventory_label_y, false);
+                break;
+            case ContainerKind::LargeChest:
+                gui_text(ui::tr("container.large_chest"), 8.0f, 6.0f, false);
+                gui_text(ui::tr("container.inventory"), 8.0f, inventory_label_y, false);
+                break;
+        }
+    }
 
     // Null whenever kind isn't Chest/LargeChest (or, defensively, if world
     // somehow isn't loaded) - every chest-specific block below checks this

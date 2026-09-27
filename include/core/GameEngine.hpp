@@ -84,6 +84,12 @@ public:
     // True once after the player asked for the pause menu (Esc, or the
     // sleep screen's menu button).
     bool take_pause_request();
+    // True once after the player asked to leave for the main menu (the
+    // death screen's button) - Application saves and closes the world.
+    bool take_main_menu_request();
+    // The index-th button of an in-game menu (sleep, death screen), placed
+    // like the pause menu's.
+    Rectangle menu_button_rect(int index) const;
 
     // The blurred world frame captured the frame a pause was requested
     // (an invalid texture if none was) - ownership passes to the caller.
@@ -327,6 +333,7 @@ private:
     // take_pause_request(). pause_snapshot is captured in draw() that same
     // frame, before the HUD goes on top.
     bool pause_requested = false;
+    bool main_menu_requested = false;
     Texture2D pause_snapshot{};
 
     // Which saves/<folder>/ the current `world` was loaded from - empty
@@ -363,10 +370,8 @@ private:
 
     float suffocation_damage_timer = 0.0f;
 
-    // Death/respawn: set the instant player.health().is_dead() first becomes
-    // true (see was_dead_last_frame), counts down in update_player_damage()
-    // to the automatic respawn_player() call.
-    float death_respawn_timer = 0.0f;
+    // Catches the frame the player dies (update_player_damage() frees the
+    // mouse for the death screen's buttons then).
     bool was_dead_last_frame = false;
 
     // Brief red screen flash whenever apply_damage() actually lands a hit -
@@ -387,6 +392,11 @@ private:
     Vector3 sleep_pose_position   = {0.0f, 0.0f,  0.0f};
     Vector3 sleep_pose_forward    = {0.0f, 0.0f, -1.0f};
     Vector3 sleep_pose_up         = {0.0f, 1.0f,  0.0f};
+    // Where the player model lies (third person): its feet on the bed, its
+    // head toward the bed's head - see PlayerRenderer::draw_sleeping().
+    Vector3 sleep_bed_feet        = {0.0f, 0.0f,  0.0f};
+    Vector3 sleep_head_direction  = {0.0f, 0.0f,  1.0f};
+    Vector3 sleep_stand_feet      = {0.0f, 0.0f,  0.0f};
 
 
     enum class CameraView : uint8_t { FirstPerson, ThirdPersonBack, ThirdPersonFront };

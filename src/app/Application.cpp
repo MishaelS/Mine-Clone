@@ -101,6 +101,10 @@ void Application::update_and_draw_game(float delta_time)
     game->draw();
     EndDrawing();
 
+    if (game->take_main_menu_request()) {
+        return_to_main_menu(); // saves and closes the world, like the pause menu's "Save and quit"
+        return;
+    }
     if (game->take_pause_request()) {
         release_pause_snapshot();
         pause_snapshot = game->take_pause_snapshot();

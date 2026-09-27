@@ -64,7 +64,6 @@ namespace {
     constexpr float SLEEP_MAX_TICKS_PER_SECOND = 1800.0f;
     constexpr int SLEEP_MAX_TICKS_PER_FRAME = 260;
     constexpr unsigned char SLEEP_OVERLAY_ALPHA = 170;
-    constexpr unsigned char SLEEP_PANEL_ALPHA   = 175;
 
     // How much darker shadow gets at the brightness slider's own minimum
     // (settings.brightness == 10) - see set_chunk_brightness()'s own
@@ -136,7 +135,6 @@ namespace {
     constexpr float VOID_DAMAGE_Y = static_cast<float>(MIN_WORLD_Y - 4);
     constexpr int VOID_DAMAGE = 4; // same per-tick rate as lava - falling forever shouldn't take long to end
 
-    constexpr float DEATH_RESPAWN_SECONDS = 2.0f; // real Minecraft's own death-screen delay, just without the screen/button
     constexpr float HURT_FLASH_SECONDS    = 0.3f;
 
     // Breaking with the wrong tool (or bare hands) still works, just much
@@ -1268,19 +1266,16 @@ void GameEngine::update_player_damage(float delta_time)
     player.health().update(delta_time);
     hurt_flash_seconds = std::max(0.0f, hurt_flash_seconds - delta_time);
 
-    // Death/respawn: death_respawn_timer is armed exactly once, the frame
-    // health first reaches 0 (was_dead_last_frame catches that edge so a
-    // second frame of already being dead doesn't keep resetting the
-    // countdown back to full).
+    // Dying frees the mouse for the death screen's buttons (Respawn / Main
+    // menu - see draw()); respawn_player() takes it back.
     bool dead_now = player.health().is_dead();
     if (dead_now && !was_dead_last_frame) {
-        death_respawn_timer = DEATH_RESPAWN_SECONDS;
+        close_inventory_screen();
+        chat_hud.close();
     }
+    // Kept free the whole time - coming back from the pause menu recaptures it.
+    if (dead_now && IsCursorHidden()) EnableCursor();
     was_dead_last_frame = dead_now;
-    if (dead_now) {
-        death_respawn_timer -= delta_time;
-        if (death_respawn_timer <= 0.0f) respawn_player();
-    }
 }
 
 void GameEngine::respawn_player()
@@ -1301,6 +1296,7 @@ void GameEngine::respawn_player()
     player.health().reset();
     reset_life_timers();
     spawn_settle_frames = 3; // same rotation-jump guard set_world() itself uses right after a teleport
+    DisableCursor();
 }
 
 void GameEngine::start_sleeping(const World::RaycastHit& bed_hit)
@@ -1353,6 +1349,17 @@ void GameEngine::start_sleeping(const World::RaycastHit& bed_hit)
         Vector3Scale(head_forward, 0.24f)));
     sleep_pose_up = Vector3Normalize(Vector3Scale(head_forward, -1.0f));
 
+    // The player model on the bed: head a little in from the head end, on
+    // its back on the mattress (the bed is 9 pixels tall).
+    constexpr float BED_TOP = 9.0f / 16.0f;
+    constexpr float PILLOW_INSET = 0.08f;
+    sleep_head_direction = {static_cast<float>(head_step.dx), 0.0f, static_cast<float>(head_step.dz)};
+    const Vector3 head_top = {static_cast<float>(head_x) + 0.5f + sleep_head_direction.x * (0.5f - PILLOW_INSET),
+                              static_cast<float>(head_y) + BED_TOP + PlayerRenderer::back_depth(),
+                              static_cast<float>(head_z) + 0.5f + sleep_head_direction.z * (0.5f - PILLOW_INSET)};
+    sleep_bed_feet = Vector3Subtract(head_top, Vector3Scale(sleep_head_direction, PlayerRenderer::model_height()));
+    sleep_stand_feet = player.feet_position();
+
     is_breaking = false;
     breaking_progress = 0.0f;
     targeted_block = std::nullopt;
@@ -1376,10 +1383,13 @@ void GameEngine::update_sleep_fast_forward(float delta_time)
     }
 
     sleep_elapsed_seconds += delta_time;
-    float pose_t = smoothstep01(sleep_elapsed_seconds / SLEEP_RAMP_SECONDS);
-    camera.position = Vector3Lerp(sleep_return_position, sleep_pose_position, pose_t);
-    camera.target = Vector3Add(camera.position, Vector3Normalize(Vector3Lerp(sleep_start_forward, sleep_pose_forward, pose_t)));
-    camera.up = Vector3Normalize(Vector3Lerp(sleep_return_up, sleep_pose_up, pose_t));
+    // The sleep screen's buttons keep the mouse, even after a trip to the
+    // pause menu (coming back recaptures it).
+    if (IsCursorHidden()) EnableCursor();
+    // In bed at once - the camera straight on the pillow.
+    camera.position = sleep_pose_position;
+    camera.target = Vector3Add(camera.position, sleep_pose_forward);
+    camera.up = sleep_pose_up;
 
     uint64_t remaining_ticks = sleep_target_tick - game_tick;
     float ramp_in = smoothstep01(sleep_elapsed_seconds / SLEEP_RAMP_SECONDS);
@@ -1431,7 +1441,6 @@ void GameEngine::reset_life_timers()
     drown_damage_timer = 0.0f;
     suffocation_damage_timer = 0.0f;
     hurt_flash_seconds = 0.0f;
-    death_respawn_timer = 0.0f;
     was_dead_last_frame = false;
     sleeping = false;
     sleep_target_tick = 0;
@@ -1755,10 +1764,16 @@ Camera3D GameEngine::make_render_camera() const
 
 void GameEngine::draw_player_model() const
 {
-    if (camera_view == CameraView::FirstPerson) return;
+    if (camera_view == CameraView::FirstPerson || !world) return;
+    if (sleeping) {
+        // Lying in the bed at once, like Minecraft.
+        player_renderer.draw_sleeping(sleep_stand_feet, sleep_bed_feet, sleep_head_direction, 1.0f,
+                                      sleep_elapsed_seconds, *world);
+        return;
+    }
     Vector3 feet = player.feet_position();
     Vector3 look = Vector3Subtract(camera.target, camera.position);
-    if (world) player_renderer.draw(feet, look, player.is_sneaking(), *world, hand.swing_seconds());
+    player_renderer.draw(feet, look, player.is_sneaking(), *world, hand.swing_seconds());
 }
 
 void GameEngine::draw_hitboxes() const
@@ -1932,7 +1947,7 @@ void GameEngine::update(float delta_time)
     // way tick()'s own world-simulation clock never gated on this at all.
     // Only look (camera rotation) and interaction (raycasting needs the
     // crosshair, which a UI screen doesn't move) actually need suppressing.
-    bool ui_captured = inventory_hud.is_open() || chat_open || sleeping;
+    bool ui_captured = inventory_hud.is_open() || chat_open || sleeping || player.health().is_dead(); // dead: the death screen's buttons have the mouse
 
     // Free-look camera: rebindable keys (Settings) to move, mouse to look.
     // Today's defaults are still W/A/S/D + Space to jump - see
@@ -1954,11 +1969,10 @@ void GameEngine::update(float delta_time)
     Vector3 previous_camera_position = camera.position;
     const bool was_grounded = player.is_grounded();
     UpdateCameraPro(&camera, {0.0f, 0.0f, 0.0f}, rotation, 0.0f);
-    // Dead: same "no longer takes input" freeze real Minecraft's own death
-    // screen imposes, just without the screen itself - see
-    // update_player_damage()'s automatic respawn_player() a couple seconds
-    // later. Physics (gravity, whatever residual velocity was left) still
-    // runs so the body doesn't hang frozen mid-air.
+    // Dead: the same "no longer takes input" freeze Minecraft's own death
+    // screen imposes, until its Respawn button (see draw()). Physics
+    // (gravity, whatever residual velocity was left) still runs so the body
+    // doesn't hang frozen mid-air.
     bool alive = !player.health().is_dead();
     // Movement input specifically also stops while a UI screen is open -
     // WASD types into chat instead of walking, same as vanilla - but
@@ -2574,34 +2588,42 @@ void GameEngine::draw()
         DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Color{0, 0, 0, alpha});
 
         if (sleeping) {
-            const float width = ui::scaled(420.0f);
-            const float height = ui::scaled(ui::BUTTON_HEIGHT);
-            const float gap = ui::scaled(ui::BUTTON_GAP);
-            const float half = (width - gap) * 0.5f;
-            const float x = (GetScreenWidth() - width) * 0.5f;
-            const float y = GetScreenHeight() - ui::scaled(92.0f);
-            ui::panel({x - ui::scaled(10.0f), y - ui::scaled(10.0f),
-                       width + ui::scaled(20.0f), height + ui::scaled(20.0f)},
-                      Color{0, 0, 0, static_cast<unsigned char>(SLEEP_PANEL_ALPHA * fade)});
-            if (ui::button({x, y, half, height}, ui::tr("sleep.leave_bed"))) {
-                leave_bed();
-            }
-            if (ui::button({x + half + gap, y, half, height}, ui::tr("sleep.open_menu"))) {
-                pause_requested = true;
-            }
+            // One click, one button: leaving the bed recaptures the mouse,
+            // which drops the cursor in the middle of the screen - right on
+            // the other button, while the click's release still counts this
+            // frame. So once one fires, the other isn't asked this frame.
+            if (ui::button(menu_button_rect(0), ui::tr("sleep.leave_bed"))) leave_bed();
+            else if (ui::button(menu_button_rect(1), ui::tr("sleep.open_menu"))) pause_requested = true;
         }
     }
 
-    // Death screen: no click-to-respawn button here (see respawn_player()'s
-    // own comment) - just the same dark-red overlay/title real Minecraft
-    // shows while its own timer runs out, drawn over everything else
-    // (hotbar included) the way its death screen does too.
+    // Death screen: Minecraft's dark-red overlay and title, over everything
+    // (hotbar included), with its two buttons laid out like the pause menu.
     if (show_death_screen) {
         ui::panel({0.0f, 0.0f, static_cast<float>(GetScreenWidth()), static_cast<float>(GetScreenHeight())},
                   Color{110, 0, 0, 140});
-        ui::label({0.0f, GetScreenHeight() * 0.35f, static_cast<float>(GetScreenWidth()), ui::scaled(60.0f)},
+        ui::label({0.0f, GetScreenHeight() * 0.2f, static_cast<float>(GetScreenWidth()), ui::scaled(60.0f)},
                   ui::tr("death.title"), WHITE);
+        // One click, one button - see the sleep screen's buttons above.
+        if (ui::button(menu_button_rect(0), ui::tr("death.respawn"))) respawn_player();
+        else if (ui::button(menu_button_rect(1), ui::tr("death.main_menu"))) main_menu_requested = true;
     }
+}
+
+namespace {
+    // Buttons laid out like the pause menu (PauseMenuScreen): one under the
+    // other in the middle of the screen, the same size and spacing.
+    constexpr float MENU_BUTTON_WIDTH = 400.0f;
+}
+
+Rectangle GameEngine::menu_button_rect(int index) const
+{
+    const float width = ui::scaled(MENU_BUTTON_WIDTH);
+    const float height = ui::scaled(ui::BUTTON_HEIGHT);
+    const float gap = ui::scaled(ui::BUTTON_GAP);
+    const float x = (GetScreenWidth() - width) * 0.5f;
+    const float y = GetScreenHeight() * 0.42f + static_cast<float>(index) * (height + gap);
+    return {x, y, width, height};
 }
 
 void GameEngine::update_frame(float delta_time)
@@ -2836,6 +2858,13 @@ bool GameEngine::take_pause_request()
 {
     bool requested = pause_requested;
     pause_requested = false;
+    return requested;
+}
+
+bool GameEngine::take_main_menu_request()
+{
+    bool requested = main_menu_requested;
+    main_menu_requested = false;
     return requested;
 }
 
