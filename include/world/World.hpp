@@ -543,6 +543,10 @@ public:
     // "return a snapshot instead of exposing the map itself" shape as
     // all_chest_inventories() above.
     std::vector<std::pair<int, int>> loaded_chunk_coordinates() const;
+    // The loaded chunk at chunk coordinates (chunk_x, chunk_z), or null -
+    // for reading many cells of one chunk (Chunk::get_block, chunk-local
+    // coordinates, y counted from MIN_WORLD_Y) without a lookup per cell.
+    const Chunk* find_chunk(int chunk_x, int chunk_z) const { return chunk_at(chunk_x, chunk_z); }
 
 private:
     struct ChestPosKey {

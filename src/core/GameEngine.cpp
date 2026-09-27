@@ -968,6 +968,7 @@ namespace {
     // minutes before the dispatcher happens to land on it.
     constexpr int RANDOM_TICK_SPEED = 3;
     constexpr int RANDOM_TICK_SECTION_HEIGHT = 16;
+    constexpr int RANDOM_TICK_RADIUS = 8; // chunks around the player - Minecraft's simulation distance
 
     // Grass spreading (GameEngine::update_grass()), Minecraft's rules: a
     // grass block needs this much light above it to spread, tries this
@@ -988,29 +989,50 @@ void GameEngine::update_random_ticks()
 {
     if (!world) return;
 
-    constexpr int SECTIONS = CHUNK_HEIGHT / RANDOM_TICK_SECTION_HEIGHT;
-    for (const auto& [chunk_x, chunk_z] : world->loaded_chunk_coordinates()) {
-        for (int i = 0; i < RANDOM_TICK_SPEED * SECTIONS; ++i) {
-            int local_x = GetRandomValue(0, CHUNK_SIZE - 1);
-            int local_y = (i % SECTIONS) * RANDOM_TICK_SECTION_HEIGHT + GetRandomValue(0, RANDOM_TICK_SECTION_HEIGHT - 1);
-            int local_z = GetRandomValue(0, CHUNK_SIZE - 1);
-            int world_x = chunk_x * CHUNK_SIZE + local_x;
-            int world_y = MIN_WORLD_Y + local_y;
-            int world_z = chunk_z * CHUNK_SIZE + local_z;
+    // Only chunks within RANDOM_TICK_RADIUS of the player - Minecraft's
+    // simulation distance - get random ticks, however far the world is
+    // drawn: at a 16-chunk render distance ticking every loaded chunk was
+    // ~85 000 samples a tick. Each chunk is looked up once, its cells read
+    // straight from it, with a cheap xorshift for the random positions.
+    const Vector3 feet = player.feet_position();
+    const int center_x = static_cast<int>(std::floor(feet.x / CHUNK_SIZE));
+    const int center_z = static_cast<int>(std::floor(feet.z / CHUNK_SIZE));
+    static uint32_t random = 0x9E3779B9u;
+    auto next_random = [] {
+        random ^= random << 13;
+        random ^= random >> 17;
+        random ^= random << 5;
+        return random;
+    };
 
-            // Dispatch on whatever block actually happens to be at this
-            // random position right now - a future random-tick block
-            // (a crop, grass spread, ...) would add its own case here the
-            // same way, rather than each growing its own separate scan.
-            switch (world->get_block(world_x, world_y, world_z)) {
-                case BlockType::OakSapling:
-                    update_sapling_growth(world_x, world_y, world_z);
-                    break;
-                case BlockType::Grass:
-                    update_grass(world_x, world_y, world_z);
-                    break;
-                default:
-                    break;
+    constexpr int SECTIONS = CHUNK_HEIGHT / RANDOM_TICK_SECTION_HEIGHT;
+    for (int chunk_z = center_z - RANDOM_TICK_RADIUS; chunk_z <= center_z + RANDOM_TICK_RADIUS; ++chunk_z) {
+        for (int chunk_x = center_x - RANDOM_TICK_RADIUS; chunk_x <= center_x + RANDOM_TICK_RADIUS; ++chunk_x) {
+            const Chunk* chunk = world->find_chunk(chunk_x, chunk_z);
+            if (!chunk) continue;
+            for (int section = 0; section < SECTIONS; ++section) {
+                for (int i = 0; i < RANDOM_TICK_SPEED; ++i) {
+                    const uint32_t r = next_random();
+                    const int local_x = static_cast<int>(r & 15u);
+                    const int local_z = static_cast<int>((r >> 4) & 15u);
+                    const int local_y = section * RANDOM_TICK_SECTION_HEIGHT + static_cast<int>((r >> 8) & 15u);
+                    const int world_x = chunk_x * CHUNK_SIZE + local_x;
+                    const int world_y = MIN_WORLD_Y + local_y;
+                    const int world_z = chunk_z * CHUNK_SIZE + local_z;
+
+                    // Dispatch on whatever block happens to be there - each
+                    // random-tick block adds its own case.
+                    switch (chunk->get_block(local_x, local_y, local_z)) {
+                        case BlockType::OakSapling:
+                            update_sapling_growth(world_x, world_y, world_z);
+                            break;
+                        case BlockType::Grass:
+                            update_grass(world_x, world_y, world_z);
+                            break;
+                        default:
+                            break;
+                    }
+                }
             }
         }
     }
@@ -1373,7 +1395,12 @@ void GameEngine::update_sleep_fast_forward(float delta_time)
     if (ticks_to_run <= 0) return;
 
     sleep_tick_budget -= static_cast<float>(ticks_to_run);
-    for (int i = 0; i < ticks_to_run; ++i) tick();
+    // Only the clock races ahead - the sky sweeps through the night - while
+    // the world itself keeps simulating at its normal 20 ticks a second (see
+    // run()): the night is skipped, like Minecraft's, rather than simulated
+    // tick by tick. Running hundreds of full ticks (mob AI, pathfinding,
+    // fluids, random ticks) every frame here made sleeping lag badly.
+    game_tick += static_cast<uint64_t>(ticks_to_run);
     if (game_tick >= sleep_target_tick) finish_sleeping();
 }
 
