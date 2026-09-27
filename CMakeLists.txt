@@ -75,6 +75,7 @@ add_executable(${PROJECT_NAME}
     # Game content: every block, item, drop, recipe and smelting rule
     # (see include/content/Content.hpp)
     src/content/Blocks.cpp
+    src/content/BlockFile.cpp
     src/content/Items.cpp
     src/content/Drops.cpp
     src/content/Recipes.cpp
@@ -89,6 +90,7 @@ add_executable(${PROJECT_NAME}
     src/rendering/PlayerRenderer.cpp
     src/rendering/FirstPersonHand.cpp
     src/rendering/HeldItem.cpp
+    src/rendering/BlockIcon.cpp
     src/model/EntityModel.cpp
     src/model/EntityModelRenderer.cpp
     src/model/ModelLibrary.cpp
@@ -145,6 +147,9 @@ add_executable(MineTooModelEditor
     tools/model_editor/ModelEditor.cpp
     tools/model_editor/EditorText.cpp
     tools/model_editor/RayGuiImpl.cpp
+    tools/model_editor/BlockTab.cpp
+    src/rendering/BlockIcon.cpp
+    src/content/BlockFile.cpp
     src/model/EntityModel.cpp
     src/model/EntityModelRenderer.cpp
     src/core/Json.cpp

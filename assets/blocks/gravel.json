@@ -1,0 +1,17 @@
+{
+  "id": 7,
+  "name": "gravel",
+  "sound": "gravel",
+  "hardness": 0.5,
+  "tool": "shovel",
+  "density": 1.8,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [3, 1] },
+    "bottom": { "tile": [3, 1] },
+    "north": { "tile": [3, 1] },
+    "south": { "tile": [3, 1] },
+    "east": { "tile": [3, 1] },
+    "west": { "tile": [3, 1] }
+  }
+}

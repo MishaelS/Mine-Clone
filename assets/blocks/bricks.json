@@ -1,0 +1,17 @@
+{
+  "id": 22,
+  "name": "bricks",
+  "sound": "stone",
+  "hardness": 1.5,
+  "tool": "pickaxe",
+  "density": 2.7,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [7, 0] },
+    "bottom": { "tile": [7, 0] },
+    "north": { "tile": [7, 0] },
+    "south": { "tile": [7, 0] },
+    "east": { "tile": [7, 0] },
+    "west": { "tile": [7, 0] }
+  }
+}

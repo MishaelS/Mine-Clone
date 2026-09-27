@@ -1,0 +1,17 @@
+{
+  "id": 15,
+  "name": "redstone_ore",
+  "sound": "stone",
+  "hardness": 3,
+  "tool": "pickaxe",
+  "density": 2.7,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [3, 3] },
+    "bottom": { "tile": [3, 3] },
+    "north": { "tile": [3, 3] },
+    "south": { "tile": [3, 3] },
+    "east": { "tile": [3, 3] },
+    "west": { "tile": [3, 3] }
+  }
+}

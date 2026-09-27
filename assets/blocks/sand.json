@@ -1,0 +1,17 @@
+{
+  "id": 6,
+  "name": "sand",
+  "sound": "sand",
+  "hardness": 0.5,
+  "tool": "shovel",
+  "density": 1.5,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [2, 1] },
+    "bottom": { "tile": [2, 1] },
+    "north": { "tile": [2, 1] },
+    "south": { "tile": [2, 1] },
+    "east": { "tile": [2, 1] },
+    "west": { "tile": [2, 1] }
+  }
+}

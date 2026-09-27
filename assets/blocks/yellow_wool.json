@@ -1,0 +1,17 @@
+{
+  "id": 63,
+  "name": "yellow_wool",
+  "sound": "cloth",
+  "hardness": 0.3,
+  "tool": "none",
+  "density": 0.4,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [2, 10] },
+    "bottom": { "tile": [2, 10] },
+    "north": { "tile": [2, 10] },
+    "south": { "tile": [2, 10] },
+    "east": { "tile": [2, 10] },
+    "west": { "tile": [2, 10] }
+  }
+}

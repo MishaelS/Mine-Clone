@@ -1,0 +1,17 @@
+{
+  "id": 25,
+  "name": "gold_block",
+  "sound": "metal",
+  "hardness": 3,
+  "tool": "pickaxe",
+  "density": 5,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [7, 1] },
+    "bottom": { "tile": [7, 1] },
+    "north": { "tile": [7, 1] },
+    "south": { "tile": [7, 1] },
+    "east": { "tile": [7, 1] },
+    "west": { "tile": [7, 1] }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "id": 20,
+  "name": "ice",
+  "sound": "glass",
+  "hardness": 0.3,
+  "tool": "none",
+  "density": 2.4,
+  "luminance": 0,
+  "transparent": true,
+  "translucent": true,
+  "faces": {
+    "top": { "tile": [3, 4], "tint": [255, 255, 255, 210] },
+    "bottom": { "tile": [3, 4], "tint": [255, 255, 255, 210] },
+    "north": { "tile": [3, 4], "tint": [255, 255, 255, 210] },
+    "south": { "tile": [3, 4], "tint": [255, 255, 255, 210] },
+    "east": { "tile": [3, 4], "tint": [255, 255, 255, 210] },
+    "west": { "tile": [3, 4], "tint": [255, 255, 255, 210] }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "id": 53,
+  "name": "lapis_block",
+  "sound": "metal",
+  "hardness": 3,
+  "tool": "pickaxe",
+  "density": 5,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [0, 9] },
+    "bottom": { "tile": [0, 9] },
+    "north": { "tile": [0, 9] },
+    "south": { "tile": [0, 9] },
+    "east": { "tile": [0, 9] },
+    "west": { "tile": [0, 9] }
+  }
+}

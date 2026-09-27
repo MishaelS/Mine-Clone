@@ -1,0 +1,17 @@
+{
+  "id": 26,
+  "name": "diamond_block",
+  "sound": "metal",
+  "hardness": 3,
+  "tool": "pickaxe",
+  "density": 5,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [8, 1] },
+    "bottom": { "tile": [8, 1] },
+    "north": { "tile": [8, 1] },
+    "south": { "tile": [8, 1] },
+    "east": { "tile": [8, 1] },
+    "west": { "tile": [8, 1] }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "id": 36,
+  "name": "cactus",
+  "sound": "cloth",
+  "hardness": 0.3,
+  "tool": "none",
+  "density": 0.4,
+  "luminance": 0,
+  "transparent": true,
+  "cutout": true,
+  "damages_on_touch": true,
+  "side_inset": 1,
+  "faces": {
+    "top": { "tile": [5, 4] },
+    "bottom": { "tile": [7, 4] },
+    "north": { "tile": [6, 4] },
+    "south": { "tile": [6, 4] },
+    "east": { "tile": [6, 4] },
+    "west": { "tile": [6, 4] }
+  }
+}

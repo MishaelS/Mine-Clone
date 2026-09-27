@@ -11,8 +11,7 @@ namespace {
 
     // Lower-cases ASCII and Russian letters in UTF-8 text, for matching a
     // typed block name against its translation regardless of case.
-    std::string lower_utf8(const std::string& text)
-    {
+    std::string lower_utf8(const std::string& text) {
         std::string out;
         out.reserve(text.size());
         for (size_t i = 0; i < text.size(); ++i) {
@@ -46,8 +45,7 @@ namespace {
         const CustomFeatureInfo* feature = nullptr;
     };
 
-    std::vector<Row> build_rows()
-    {
+    std::vector<Row> build_rows() {
         std::vector<Row> rows;
         for (CustomFeatureGroup group : {CustomFeatureGroup::Structures, CustomFeatureGroup::Biomes}) {
             rows.push_back({true, group, nullptr});
@@ -58,8 +56,7 @@ namespace {
         return rows;
     }
 
-    const char* group_key(CustomFeatureGroup group)
-    {
+    const char* group_key(CustomFeatureGroup group) {
         return group == CustomFeatureGroup::Biomes ? "custom.group.biomes" : "custom.group.structures";
     }
 }
@@ -74,8 +71,7 @@ void CustomWorldScreen::enter(const CustomWorld& current)
     first_row = 0;
 
     translated_names.clear();
-    for (int i = 1; i < static_cast<int>(BlockType::Count); ++i) {
-        BlockType type = static_cast<BlockType>(i);
+    for (BlockType type : all_block_types()) {
         translated_names.emplace(lower_utf8(ui::block_display_name(type)), type);
     }
     parsed_text.clear();

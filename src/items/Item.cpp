@@ -8,7 +8,7 @@
 namespace {
     std::array<ItemProperties, static_cast<size_t>(ItemType::Count)> item_table;
     std::array<std::string, static_cast<size_t>(ItemType::Count)> item_names;
-    std::array<std::optional<Rectangle>, static_cast<size_t>(BlockType::Count)> block_item_sprites;
+    std::array<std::optional<Rectangle>, MAX_BLOCK_TYPES> block_item_sprites;
 
     constexpr const char* ITEM_ATLAS_PATH = "sprites/items.png";
     constexpr int TILE_PIXELS = 16;

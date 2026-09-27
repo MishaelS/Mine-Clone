@@ -1,0 +1,18 @@
+{
+  "id": 19,
+  "name": "glass",
+  "sound": "glass",
+  "hardness": 0.3,
+  "tool": "none",
+  "density": 2.4,
+  "luminance": 0,
+  "transparent": true,
+  "faces": {
+    "top": { "tile": [1, 3] },
+    "bottom": { "tile": [1, 3] },
+    "north": { "tile": [1, 3] },
+    "south": { "tile": [1, 3] },
+    "east": { "tile": [1, 3] },
+    "west": { "tile": [1, 3] }
+  }
+}

@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <vector>
 #include <string>
 
 // The id a Chunk stores per voxel cell. Kept tiny (1 byte) since a single
@@ -288,6 +289,11 @@ struct BlockProperties {
     // into by name alone.
     bool damages_on_touch;
 
+    // Has a front (its south face's texture) that turns to face the player
+    // who placed it, the other sides all showing its east face's texture -
+    // furnaces, chests, workbenches, pumpkins. See block_is_directional().
+    bool directional;
+
     // UV rectangle (0..1) within get_block_atlas_texture(), indexed by
     // BlockFace - every block's faces share one atlas texture, so a whole
     // chunk mesh draws with a single bound texture.
@@ -320,9 +326,17 @@ struct BlockProperties {
 // BlockProperties::texture_tints). Throws if any BlockType is left
 // undefined. Call once after the window exists (texture loads need a GL
 // context).
+// Room for every block id a uint8_t BlockType can hold: the named ones
+// above plus any assets/blocks/*.json adds beyond them.
+constexpr int MAX_BLOCK_TYPES = 256;
+
 void Load_block_definitions();
 
 const BlockProperties& get_block_properties(BlockType type);
+
+// Every defined block but Air, by id - the named BlockTypes and any the
+// block files add. Use this instead of counting up to BlockType::Count.
+const std::vector<BlockType>& all_block_types();
 
 // True for a block whose definition gives it a distinct .south()
 // front-face texture (Chest/Furnace/LitFurnace/Workbench/Dispenser/Pumpkin/

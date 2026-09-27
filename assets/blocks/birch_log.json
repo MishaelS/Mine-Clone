@@ -1,0 +1,17 @@
+{
+  "id": 48,
+  "name": "birch_log",
+  "sound": "wood",
+  "hardness": 2,
+  "tool": "axe",
+  "density": 0.6,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [5, 1] },
+    "bottom": { "tile": [5, 1] },
+    "north": { "tile": [5, 7] },
+    "south": { "tile": [5, 7] },
+    "east": { "tile": [5, 7] },
+    "west": { "tile": [5, 7] }
+  }
+}

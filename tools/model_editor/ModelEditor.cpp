@@ -1,5 +1,6 @@
 #include "ModelEditor.hpp"
 #include "EditorText.hpp"
+#include "EditorStyle.hpp"
 #include "model/EntityModelRenderer.hpp"
 #include "core/Json.hpp"
 
@@ -17,22 +18,18 @@
 void editor_load_dark_style(); // RayGuiImpl.cpp
 
 namespace {
+
     using editor_text::tr;
     using editor_text::tr_format;
+    using namespace editor_style;
 
     constexpr float MODEL_SCALE       = 1.0f / 16.0f; // 16 model pixels = one block = one grid cell
-    constexpr float TOP_BAR_HEIGHT    = 40.0f;
     constexpr float RIGHT_PANEL_WIDTH = 360.0f;
     constexpr float LEFT_PANEL_WIDTH  = 340.0f;
     constexpr float FOLDED_PANEL      = 26.0f;  // a folded side panel's strip
     constexpr float FOLDED_TIMELINE   = 34.0f;
-    constexpr float PANEL_HEADER      = 28.0f;
     constexpr float TIMELINE_MIN      = 120.0f;
-    constexpr float ROW               = 26.0f;     // one control row
-    constexpr float GAP               = 6.0f;
-    constexpr float PAD               = 10.0f;
 
-    constexpr Color VIEWPORT_BACKGROUND = {  8,  48,  52, 255};
     constexpr Color PLAYER_VIEW_SKY     = {120, 165, 220, 255};
     constexpr float PLAYER_VIEW_FOV     = 70.0f; // FirstPersonHand's own
     constexpr Color SLOT_BOX            = {120, 220, 255, 255};
@@ -52,7 +49,6 @@ namespace {
     constexpr Color GRID_SUBLINE        = { 56,  56,  61, 255};
     constexpr Color AXIS_X              = {200,  70,  70, 255};
     constexpr Color AXIS_Z              = {110, 170,  60, 255};
-    constexpr Color SELECTION           = {255, 160,  20, 255};
     constexpr Color PIVOT               = { 90, 170, 255, 255};
     constexpr Color KEY_SELECTED        = {255, 200,  60, 255};
     constexpr Color KEY_OTHER           = {120, 120, 130, 255};
@@ -115,6 +111,7 @@ ModelEditor::ModelEditor()
             const Json settings = Json::parse(text.str());
             const double w = settings["window_width"].as_number(1280.0), h = settings["window_height"].as_number(720.0);
             if (w > 0.0 && h > 0.0) game_aspect = static_cast<float>(w / h);
+            game_ui_scale = std::clamp(static_cast<int>(settings["ui_scale"].as_number(2.0)), 1, 4);
         } catch (const std::exception&) {
         }
     }
@@ -144,6 +141,8 @@ ModelEditor::~ModelEditor()
     if (skin.id != 0) UnloadTexture(skin);
     if (preview_items_atlas.id != 0) UnloadTexture(preview_items_atlas);
     if (preview_blocks_atlas.id != 0) UnloadTexture(preview_blocks_atlas);
+    if (block_view_texture.id != 0) UnloadRenderTexture(block_view_texture);
+    if (block_game_texture.id != 0) UnloadRenderTexture(block_game_texture);
     unload_layer_previews();
     if (viewport_texture.id != 0) UnloadRenderTexture(viewport_texture);
     editor_text::unload();
@@ -154,6 +153,10 @@ void ModelEditor::run()
 {
     while (!WindowShouldClose()) {
         widget_counter = 0;
+        if (tab == Tab::Blocks) {
+            run_blocks_frame(); // BlockTab.cpp
+            continue;
+        }
         const Rectangle viewport = viewport_rect();
 
         if (!typing()) {
@@ -221,6 +224,7 @@ void ModelEditor::run()
         draw_floating_window(top_window == UV_WINDOW ? GRAPH_WINDOW : UV_WINDOW);
         draw_floating_window(top_window);
         draw_top_bar(top_bar_rect());
+        draw_tabs();
         EndDrawing();
         commit_history();
     }
@@ -230,7 +234,7 @@ void ModelEditor::run()
 
 Rectangle ModelEditor::top_bar_rect() const
 {
-    return {0, 0, static_cast<float>(GetScreenWidth()), TOP_BAR_HEIGHT};
+    return {0, TABS_HEIGHT, static_cast<float>(GetScreenWidth()), TOP_BAR_HEIGHT};
 }
 
 float ModelEditor::left_width() const { return left_panel_open ? LEFT_PANEL_WIDTH : FOLDED_PANEL; }
@@ -239,18 +243,18 @@ float ModelEditor::right_width() const { return right_panel_open ? RIGHT_PANEL_W
 float ModelEditor::timeline_visible_height() const
 {
     if (!timeline_open) return FOLDED_TIMELINE;
-    const float most = std::max(TIMELINE_MIN, static_cast<float>(GetScreenHeight()) - TOP_BAR_HEIGHT - 160.0f);
+    const float most = std::max(TIMELINE_MIN, static_cast<float>(GetScreenHeight()) - HEADER_HEIGHT - 160.0f);
     return std::clamp(timeline_height, TIMELINE_MIN, most);
 }
 
 Rectangle ModelEditor::right_panel_rect() const
 {
-    return {GetScreenWidth() - right_width(), TOP_BAR_HEIGHT, right_width(), GetScreenHeight() - TOP_BAR_HEIGHT};
+    return {GetScreenWidth() - right_width(), HEADER_HEIGHT, right_width(), GetScreenHeight() - HEADER_HEIGHT};
 }
 
 Rectangle ModelEditor::left_panel_rect() const
 {
-    return {0, TOP_BAR_HEIGHT, left_width(), GetScreenHeight() - TOP_BAR_HEIGHT};
+    return {0, HEADER_HEIGHT, left_width(), GetScreenHeight() - HEADER_HEIGHT};
 }
 
 Rectangle ModelEditor::timeline_rect() const
@@ -261,8 +265,8 @@ Rectangle ModelEditor::timeline_rect() const
 
 Rectangle ModelEditor::viewport_rect() const
 {
-    return {left_width(), TOP_BAR_HEIGHT, GetScreenWidth() - right_width() - left_width(),
-            GetScreenHeight() - TOP_BAR_HEIGHT - timeline_visible_height()};
+    return {left_width(), HEADER_HEIGHT, GetScreenWidth() - right_width() - left_width(),
+            GetScreenHeight() - HEADER_HEIGHT - timeline_visible_height()};
 }
 
 Rectangle ModelEditor::panel_header(Rectangle bounds, const std::string& title, bool& open, bool button_on_right)
@@ -478,10 +482,9 @@ void ModelEditor::draw_item_slots(const ModelPose& pose)
     const char* preview_slot = preview_item == 1 ? "block" : preview_item == 2 ? "tool" : preview_item == 3 ? "item" : "";
     if (preview_item != 0 && preview_items_atlas.id == 0) {
         preview_items_atlas = LoadTexture(ASSETS_PATH "sprites/items.png");
-        preview_blocks_atlas = LoadTexture(ASSETS_PATH "sprites/terrain.png");
         SetTextureFilter(preview_items_atlas, TEXTURE_FILTER_POINT);
-        SetTextureFilter(preview_blocks_atlas, TEXTURE_FILTER_POINT);
     }
+    if (preview_item != 0) terrain_atlas(); // loaded once, shared with the blocks tab
     for (const ModelPart& part : model.parts) {
         if (part.item_slot.empty() || part.cubes.empty()) continue;
         if (!push_item_slot(model, pose, part.item_slot, MODEL_SCALE)) continue;
@@ -726,6 +729,32 @@ bool ModelEditor::float_as_int_field(Rectangle bounds, float& value, int min_val
 }
 
 // ---------------------------------------------------------------- Top bar --
+
+void ModelEditor::draw_tabs()
+{
+    // A strip of tabs along the top left, the open one lit.
+    const Rectangle strip = {0, 0, static_cast<float>(GetScreenWidth()), TABS_HEIGHT};
+    DrawRectangleRec(strip, gui_color(DEFAULT, BACKGROUND_COLOR));
+    DrawLineEx({0, TABS_HEIGHT - 1}, {strip.width, TABS_HEIGHT - 1}, 1.0f, gui_color(DEFAULT, LINE_COLOR));
+    float x = PAD;
+    auto tab_button = [&](Tab which, const std::string& text) {
+        constexpr float WIDTH = 140.0f;
+        bool active = tab == which;
+        GuiToggle({x, 4, WIDTH, TABS_HEIGHT - 6}, text.c_str(), &active);
+        if (active && tab != which) {
+            // Leaving a tab closes its step of undo history and any field
+            // still being typed in.
+            editing_widget = -1;
+            if (tab == Tab::Entities) commit_history(true);
+            else commit_block_history(true);
+            tab = which;
+            if (tab == Tab::Blocks && !blocks_loaded) load_blocks();
+        }
+        x += WIDTH + 4;
+    };
+    tab_button(Tab::Entities, tr("editor.tab_entities"));
+    tab_button(Tab::Blocks, tr("editor.tab_blocks"));
+}
 
 void ModelEditor::draw_top_bar(Rectangle bounds)
 {

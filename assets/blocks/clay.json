@@ -1,0 +1,17 @@
+{
+  "id": 8,
+  "name": "clay",
+  "sound": "gravel",
+  "hardness": 0.5,
+  "tool": "shovel",
+  "density": 1.8,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [8, 4] },
+    "bottom": { "tile": [8, 4] },
+    "north": { "tile": [8, 4] },
+    "south": { "tile": [8, 4] },
+    "east": { "tile": [8, 4] },
+    "west": { "tile": [8, 4] }
+  }
+}

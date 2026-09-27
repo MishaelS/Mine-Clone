@@ -1,0 +1,17 @@
+{
+  "id": 66,
+  "name": "purple_wool",
+  "sound": "cloth",
+  "hardness": 0.3,
+  "tool": "none",
+  "density": 0.4,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [1, 12] },
+    "bottom": { "tile": [1, 12] },
+    "north": { "tile": [1, 12] },
+    "south": { "tile": [1, 12] },
+    "east": { "tile": [1, 12] },
+    "west": { "tile": [1, 12] }
+  }
+}

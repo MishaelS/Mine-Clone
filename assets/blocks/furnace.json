@@ -1,0 +1,18 @@
+{
+  "id": 39,
+  "name": "furnace",
+  "sound": "stone",
+  "hardness": 1.5,
+  "tool": "pickaxe",
+  "density": 2.7,
+  "luminance": 0,
+  "directional": true,
+  "faces": {
+    "top": { "tile": [14, 3] },
+    "bottom": { "tile": [14, 3] },
+    "north": { "tile": [13, 2] },
+    "south": { "tile": [12, 2] },
+    "east": { "tile": [13, 2] },
+    "west": { "tile": [13, 2] }
+  }
+}

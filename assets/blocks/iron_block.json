@@ -1,0 +1,17 @@
+{
+  "id": 24,
+  "name": "iron_block",
+  "sound": "metal",
+  "hardness": 3,
+  "tool": "pickaxe",
+  "density": 5,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [6, 1] },
+    "bottom": { "tile": [6, 1] },
+    "north": { "tile": [6, 1] },
+    "south": { "tile": [6, 1] },
+    "east": { "tile": [6, 1] },
+    "west": { "tile": [6, 1] }
+  }
+}

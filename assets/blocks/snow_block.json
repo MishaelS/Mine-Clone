@@ -1,0 +1,17 @@
+{
+  "id": 34,
+  "name": "snow_block",
+  "sound": "snow",
+  "hardness": 0.5,
+  "tool": "shovel",
+  "density": 0.3,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [2, 4] },
+    "bottom": { "tile": [2, 4] },
+    "north": { "tile": [2, 4] },
+    "south": { "tile": [2, 4] },
+    "east": { "tile": [2, 4] },
+    "west": { "tile": [2, 4] }
+  }
+}

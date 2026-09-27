@@ -2,6 +2,7 @@
 #include "ui/FontManager.hpp"
 #include "core/TextureManager.hpp"
 #include "rendering/BlockMesh.hpp"
+#include "rendering/BlockIcon.hpp"
 #include "core/BlockShape.hpp"
 
 #include "raymath.h"
@@ -672,74 +673,14 @@ namespace ui {
             return;
         }
 
-        // Orthographic isometric cube fitted inside the requested icon bounds.
-        // The proportions mirror Minecraft's inventory block-item rendering:
-        // a shallow diamond top and two taller visible side faces.
-        float center_x   = bounds.x + bounds.width  * 0.5f;
-        float top_y      = bounds.y + bounds.height * 0.04f;
-        float shoulder_y = bounds.y + bounds.height * 0.25f;
-        float middle_y   = bounds.y + bounds.height * 0.45f;
-        float lower_y    = bounds.y + bounds.height * 0.75f;
-        float bottom_y   = bounds.y + bounds.height * 0.96f;
-        float left_x     = bounds.x + bounds.width  * 0.07f;
-        float right_x    = bounds.x + bounds.width  * 0.93f;
-
-        Vector2 top_face[4] = {
-            {center_x,      top_y},
-            { right_x, shoulder_y},
-            {center_x,   middle_y},
-            {  left_x, shoulder_y},
-        };
-        Vector2 left_face[4] = {
-            {  left_x, shoulder_y},
-            {center_x,  middle_y},
-            {center_x,  bottom_y},
-            {  left_x,   lower_y},
-        };
-        Vector2 right_face[4] = {
-            {center_x,   middle_y},
-            { right_x, shoulder_y},
-            { right_x,    lower_y},
-            {center_x,   bottom_y},
-        };
-
-        constexpr float LEFT_BRIGHTNESS  = 0.72f;
-        constexpr float RIGHT_BRIGHTNESS = 0.86f;
-
-        int top   = static_cast<int>(BlockFace::Top);
-        int left  = static_cast<int>(BlockFace::South);
-        int right = static_cast<int>(BlockFace::East);
-
-        // A side-inset block (cactus) has a transparent rim its in-world
-        // model hides by pulling the sides inward; a flat isometric icon
-        // can't do that, so it crops the rim out of the texture instead
-        // (top on all four edges, sides left/right) - no see-through seams.
-        Rectangle top_uv = properties.texture_uvs[top];
-        Rectangle left_uv = properties.texture_uvs[left];
-        Rectangle right_uv = properties.texture_uvs[right];
-        if (properties.side_inset > 0.0f) {
-            auto crop = [&](Rectangle uv, bool vertical) {
-                float dx = uv.width * properties.side_inset;
-                float dy = vertical ? uv.height * properties.side_inset : 0.0f;
-                return Rectangle{uv.x + dx, uv.y + dy, uv.width - dx * 2.0f, uv.height - dy * 2.0f};
-            };
-            top_uv = crop(top_uv, true);
-            left_uv = crop(left_uv, false);
-            right_uv = crop(right_uv, false);
-        }
-
-        rlSetTexture(atlas.id);
-        rlBegin(RL_QUADS);
-            // Sides first, then the top, so the upper face owns their shared
-            // seam even for translucent block textures.
-            draw_atlas_quad(left_uv, left_face,
-                            shade(properties.texture_tints[left], LEFT_BRIGHTNESS));
-            draw_atlas_quad(right_uv, right_face,
-                            shade(properties.texture_tints[right], RIGHT_BRIGHTNESS));
-            draw_atlas_quad(top_uv, top_face,
-                            properties.texture_tints[top]);
-        rlEnd();
-        rlSetTexture(0);
+        // A plain cube: the inventory's isometric block icon (shared with the
+        // model editor - see rendering/BlockIcon.hpp).
+        const int top = static_cast<int>(BlockFace::Top);
+        const int left = static_cast<int>(BlockFace::South);
+        const int right = static_cast<int>(BlockFace::East);
+        draw_cube_icon(bounds, atlas, {properties.texture_uvs[top], properties.texture_tints[top]},
+                       {properties.texture_uvs[left], properties.texture_tints[left]},
+                       {properties.texture_uvs[right], properties.texture_tints[right]}, properties.side_inset);
     }
 
     bool block_button(Rectangle bounds, BlockType type, bool selected) {

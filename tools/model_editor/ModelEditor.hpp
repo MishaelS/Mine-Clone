@@ -1,5 +1,6 @@
 #pragma once
 
+#include "content/BlockFile.hpp"
 #include "model/EntityModel.hpp"
 
 #include "raylib.h"
@@ -28,6 +29,55 @@ public:
     void run();
 
 private:
+    // Tabs, top left: entity models (everything below up to "Blocks tab"),
+    // and blocks (BlockTab.cpp).
+    enum class Tab { Entities, Blocks };
+    Tab tab = Tab::Entities;
+    void draw_tabs();
+
+    // --- Blocks tab (BlockTab.cpp): every full-cube block's file,
+    // assets/blocks/<name>.json - see content/BlockFile.hpp. ---
+    void run_blocks_frame();
+    void load_blocks();
+    void select_block(int index);
+    void save_block(int index);
+    void save_all_blocks();
+    void draw_blocks_top_bar(Rectangle bounds);
+    void draw_block_list(Rectangle bounds);
+    void draw_block_properties(Rectangle bounds);
+    void update_block_camera(Rectangle view);
+    void draw_block_preview(Rectangle view);
+    // Two small panels over the block view: the block as the game draws it
+    // in the world (a little scene), and its inventory icon.
+    void draw_block_game_view(Rectangle bounds);
+    void draw_block_inventory_icon(Rectangle bounds);
+    const Texture2D& terrain_atlas();
+    void mark_block_dirty();
+    void commit_block_history(bool force = false);
+    void block_undo();
+    void block_redo();
+
+    std::vector<block_file::BlockFile> blocks;
+    std::vector<bool> block_dirty; // edited since last saved
+    bool blocks_loaded = false;
+    int selected_block = -1;
+    int selected_face = 0;         // BlockFace order - the face the atlas and tint edit
+    std::string block_search;
+    Vector2 block_list_scroll = {0, 0};
+    Vector2 block_panel_scroll = {0, 0};
+    RenderTexture2D block_view_texture{};
+    RenderTexture2D block_game_texture{};
+    int game_ui_scale = 2; // the game's settings.json ui_scale - its inventory's size
+    float block_yaw = 0.8f, block_pitch = 0.45f, block_distance = 2.6f;
+    bool block_view_dragging = false;
+    Vector2 block_press_position = {0, 0};
+    // Undo for the blocks tab: (block index, its state before) steps.
+    std::vector<std::pair<int, block_file::BlockFile>> block_undo_stack;
+    std::vector<std::pair<int, block_file::BlockFile>> block_redo_stack;
+    block_file::BlockFile block_committed;
+    int block_committed_index = -1;
+    bool block_uncommitted = false;
+
     // Layout
     Rectangle top_bar_rect() const;
     Rectangle right_panel_rect() const;

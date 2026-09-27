@@ -9,8 +9,10 @@
 #include <unordered_map>
 
 namespace {
-    std::array<BlockProperties, static_cast<size_t>(BlockType::Count)> block_table;
-    std::array<std::string, static_cast<size_t>(BlockType::Count)> block_names;
+
+    std::array<BlockProperties, MAX_BLOCK_TYPES> block_table;
+    std::array<std::string, MAX_BLOCK_TYPES> block_names;
+    std::vector<BlockType> defined_blocks; // all_block_types()
     std::unordered_map<std::string, BlockType> name_to_type;
 
     constexpr const char* TERRAIN_TEXTURE_PATH = "sprites/terrain.png";
@@ -82,220 +84,200 @@ namespace {
 
 namespace content {
 
-BlockDef block(BlockType type, const char* name)
-{
-    size_t index = static_cast<size_t>(type);
-    if (type == BlockType::Air || type == BlockType::Count) {
-        throw std::runtime_error(std::string("block '") + name + "': not a definable BlockType");
+    BlockDef block(BlockType type, const char* name) {
+        size_t index = static_cast<size_t>(type);
+        if (type == BlockType::Air) {
+            throw std::runtime_error(std::string("block '") + name + "': not a definable BlockType");
+        }
+        if (!block_names[index].empty()) {
+            throw std::runtime_error("BlockType defined twice: '" + block_names[index] + "' and '" + name + "'");
+        }
+        if (!name_to_type.emplace(name, type).second) {
+            throw std::runtime_error(std::string("duplicate block name '") + name + "'");
+        }
+        block_names[index] = name;
+
+        // An ordinary opaque, solid, stone-sounding full cube - BlockDef's
+        // setters change only what differs from this.
+        BlockProperties& properties = block_table[index];
+        properties = BlockProperties{};
+        properties.solid            = true;
+        properties.transparent      = false;
+        properties.selectable       = true;
+        properties.replaceable      = false;
+        properties.luminance        = 0;
+        properties.render_shape     = BlockRenderShape::Cube;
+        properties.translucent      = false;
+        properties.cutout           = false;
+        properties.cull_same_faces  = true;
+        properties.has_custom_shape = false;
+        properties.side_inset       = 0.0f;
+        properties.attach_floor     = false;
+        properties.attach_wall      = false;
+        properties.attach_ceiling   = false;
+        properties.damages_on_touch = false;
+        properties.directional = false;
+        for (int face = 0; face < 6; ++face) {
+            properties.texture_uvs[face] = tile_uv(0, 0);
+            properties.texture_tints[face] = WHITE;
+        }
+
+        BlockDef def(type);
+        def.sound(BlockSoundGroup::Stone);
+        return def;
     }
-    if (!block_names[index].empty()) {
-        throw std::runtime_error("BlockType defined twice: '" + block_names[index] + "' and '" + name + "'");
-    }
-    if (!name_to_type.emplace(name, type).second) {
-        throw std::runtime_error(std::string("duplicate block name '") + name + "'");
-    }
-    block_names[index] = name;
 
-    // An ordinary opaque, solid, stone-sounding full cube - BlockDef's
-    // setters change only what differs from this.
-    BlockProperties& properties = block_table[index];
-    properties = BlockProperties{};
-    properties.solid           = true;
-    properties.transparent     = false;
-    properties.selectable      = true;
-    properties.replaceable     = false;
-    properties.luminance       = 0;
-    properties.render_shape    = BlockRenderShape::Cube;
-    properties.translucent     = false;
-    properties.cutout          = false;
-    properties.cull_same_faces = true;
-    properties.has_custom_shape = false;
-    properties.side_inset      = 0.0f;
-    properties.attach_floor    = false;
-    properties.attach_wall     = false;
-    properties.attach_ceiling  = false;
-    properties.damages_on_touch = false;
-    for (int face = 0; face < 6; ++face) {
-        properties.texture_uvs[face] = tile_uv(0, 0);
-        properties.texture_tints[face] = WHITE;
+    BlockDef& BlockDef::sound(BlockSoundGroup group) {
+        BlockProperties& properties = block_table[static_cast<size_t>(type_)];
+        properties.sound_group = group;
+        PhysicalDefaults defaults = physical_defaults_for(group);
+        if (!hardness_set_) properties.hardness = defaults.hardness;
+        if (!tool_set_) properties.effective_tool = defaults.tool;
+        if (!density_set_) properties.density = defaults.density;
+        return *this;
     }
 
-    BlockDef def(type);
-    def.sound(BlockSoundGroup::Stone);
-    return def;
-}
+    BlockDef& BlockDef::hardness(float seconds) {
+        block_table[static_cast<size_t>(type_)].hardness = seconds;
+        hardness_set_ = true;
+        return *this;
+    }
 
-BlockDef& BlockDef::sound(BlockSoundGroup group)
-{
-    BlockProperties& properties = block_table[static_cast<size_t>(type_)];
-    properties.sound_group = group;
-    PhysicalDefaults defaults = physical_defaults_for(group);
-    if (!hardness_set_) properties.hardness = defaults.hardness;
-    if (!tool_set_) properties.effective_tool = defaults.tool;
-    if (!density_set_) properties.density = defaults.density;
-    return *this;
-}
+    BlockDef& BlockDef::tool(ToolKind kind) {
+        block_table[static_cast<size_t>(type_)].effective_tool = kind;
+        tool_set_ = true;
+        return *this;
+    }
 
-BlockDef& BlockDef::hardness(float seconds)
-{
-    block_table[static_cast<size_t>(type_)].hardness = seconds;
-    hardness_set_ = true;
-    return *this;
-}
+    BlockDef& BlockDef::density(float relative_to_water) {
+        block_table[static_cast<size_t>(type_)].density = relative_to_water;
+        density_set_ = true;
+        return *this;
+    }
 
-BlockDef& BlockDef::tool(ToolKind kind)
-{
-    block_table[static_cast<size_t>(type_)].effective_tool = kind;
-    tool_set_ = true;
-    return *this;
-}
+    BlockDef& BlockDef::luminance(int level) {
+        block_table[static_cast<size_t>(type_)].luminance = std::clamp(level, 0, 15);
+        return *this;
+    }
 
-BlockDef& BlockDef::density(float relative_to_water)
-{
-    block_table[static_cast<size_t>(type_)].density = relative_to_water;
-    density_set_ = true;
-    return *this;
-}
+    BlockDef& BlockDef::non_solid() {
+        BlockProperties& properties = block_table[static_cast<size_t>(type_)];
+        properties.solid = false;
+        if (!replaceable_set_) properties.replaceable = true;
+        return *this;
+    }
 
-BlockDef& BlockDef::luminance(int level)
-{
-    block_table[static_cast<size_t>(type_)].luminance = std::clamp(level, 0, 15);
-    return *this;
-}
+    BlockDef& BlockDef::not_selectable() {
+        block_table[static_cast<size_t>(type_)].selectable = false;
+        return *this;
+    }
 
-BlockDef& BlockDef::non_solid()
-{
-    BlockProperties& properties = block_table[static_cast<size_t>(type_)];
-    properties.solid = false;
-    if (!replaceable_set_) properties.replaceable = true;
-    return *this;
-}
+    BlockDef& BlockDef::replaceable(bool value) {
+        block_table[static_cast<size_t>(type_)].replaceable = value;
+        replaceable_set_ = true;
+        return *this;
+    }
 
-BlockDef& BlockDef::not_selectable()
-{
-    block_table[static_cast<size_t>(type_)].selectable = false;
-    return *this;
-}
+    BlockDef& BlockDef::transparent() {
+        block_table[static_cast<size_t>(type_)].transparent = true;
+        return *this;
+    }
 
-BlockDef& BlockDef::replaceable(bool value)
-{
-    block_table[static_cast<size_t>(type_)].replaceable = value;
-    replaceable_set_ = true;
-    return *this;
-}
+    BlockDef& BlockDef::translucent() {
+        block_table[static_cast<size_t>(type_)].translucent = true;
+        return *this;
+    }
 
-BlockDef& BlockDef::transparent()
-{
-    block_table[static_cast<size_t>(type_)].transparent = true;
-    return *this;
-}
+    BlockDef& BlockDef::cutout() {
+        block_table[static_cast<size_t>(type_)].cutout = true;
+        return *this;
+    }
 
-BlockDef& BlockDef::translucent()
-{
-    block_table[static_cast<size_t>(type_)].translucent = true;
-    return *this;
-}
+    BlockDef& BlockDef::keep_same_faces() {
+        block_table[static_cast<size_t>(type_)].cull_same_faces = false;
+        return *this;
+    }
 
-BlockDef& BlockDef::cutout()
-{
-    block_table[static_cast<size_t>(type_)].cutout = true;
-    return *this;
-}
+    BlockDef& BlockDef::directional() {
+        block_table[static_cast<size_t>(type_)].directional = true;
+        return *this;
+    }
 
-BlockDef& BlockDef::keep_same_faces()
-{
-    block_table[static_cast<size_t>(type_)].cull_same_faces = false;
-    return *this;
-}
+    BlockDef& BlockDef::damages_on_touch() {
+        block_table[static_cast<size_t>(type_)].damages_on_touch = true;
+        return *this;
+    }
 
-BlockDef& BlockDef::damages_on_touch()
-{
-    block_table[static_cast<size_t>(type_)].damages_on_touch = true;
-    return *this;
-}
+    BlockDef& BlockDef::side_inset(int pixels) {
+        block_table[static_cast<size_t>(type_)].side_inset = static_cast<float>(pixels) / static_cast<float>(TILE_PIXELS);
+        return *this;
+    }
 
-BlockDef& BlockDef::side_inset(int pixels)
-{
-    block_table[static_cast<size_t>(type_)].side_inset = static_cast<float>(pixels) / static_cast<float>(TILE_PIXELS);
-    return *this;
-}
+    BlockDef& BlockDef::cross() {
+        block_table[static_cast<size_t>(type_)].render_shape = BlockRenderShape::Cross;
+        return *this;
+    }
 
-BlockDef& BlockDef::cross()
-{
-    block_table[static_cast<size_t>(type_)].render_shape = BlockRenderShape::Cross;
-    return *this;
-}
+    BlockDef& BlockDef::shaped() {
+        block_table[static_cast<size_t>(type_)].render_shape = BlockRenderShape::Shaped;
+        return *this;
+    }
 
-BlockDef& BlockDef::shaped()
-{
-    block_table[static_cast<size_t>(type_)].render_shape = BlockRenderShape::Shaped;
-    return *this;
-}
+    BlockDef& BlockDef::custom_shape() {
+        block_table[static_cast<size_t>(type_)].has_custom_shape = true;
+        return *this;
+    }
 
-BlockDef& BlockDef::custom_shape()
-{
-    block_table[static_cast<size_t>(type_)].has_custom_shape = true;
-    return *this;
-}
+    BlockDef& BlockDef::attach_floor() {
+        block_table[static_cast<size_t>(type_)].attach_floor = true;
+        return *this;
+    }
 
-BlockDef& BlockDef::attach_floor()
-{
-    block_table[static_cast<size_t>(type_)].attach_floor = true;
-    return *this;
-}
+    BlockDef& BlockDef::attach_wall() {
+        block_table[static_cast<size_t>(type_)].attach_wall = true;
+        return *this;
+    }
 
-BlockDef& BlockDef::attach_wall()
-{
-    block_table[static_cast<size_t>(type_)].attach_wall = true;
-    return *this;
-}
+    BlockDef& BlockDef::attach_ceiling() {
+        block_table[static_cast<size_t>(type_)].attach_ceiling = true;
+        return *this;
+    }
 
-BlockDef& BlockDef::attach_ceiling()
-{
-    block_table[static_cast<size_t>(type_)].attach_ceiling = true;
-    return *this;
-}
+    void BlockDef::set_face(int face, Tile tile, Color tint, FacePriority priority) {
+        if (priority < face_priority_[face]) return;
+        face_priority_[face] = priority;
+        BlockProperties& properties = block_table[static_cast<size_t>(type_)];
+        properties.texture_uvs[face] = checked_tile_uv(type_, tile);
+        properties.texture_tints[face] = tint;
+    }
 
-void BlockDef::set_face(int face, Tile tile, Color tint, FacePriority priority)
-{
-    if (priority < face_priority_[face]) return;
-    face_priority_[face] = priority;
-    BlockProperties& properties = block_table[static_cast<size_t>(type_)];
-    properties.texture_uvs[face] = checked_tile_uv(type_, tile);
-    properties.texture_tints[face] = tint;
-}
+    // Face indices follow BlockFace: Top, Bottom, North, South, East, West.
+    BlockDef& BlockDef::all(Tile tile, Color tint) {
+        for (int face = 0; face < 6; ++face) set_face(face, tile, tint, All);
+        return *this;
+    }
 
-// Face indices follow BlockFace: Top, Bottom, North, South, East, West.
-BlockDef& BlockDef::all(Tile tile, Color tint)
-{
-    for (int face = 0; face < 6; ++face) set_face(face, tile, tint, All);
-    return *this;
-}
+    BlockDef& BlockDef::side(Tile tile, Color tint) {
+        for (int face = 2; face < 6; ++face) set_face(face, tile, tint, Side);
+        return *this;
+    }
 
-BlockDef& BlockDef::side(Tile tile, Color tint)
-{
-    for (int face = 2; face < 6; ++face) set_face(face, tile, tint, Side);
-    return *this;
-}
+    BlockDef& BlockDef::top(Tile tile, Color tint)    { set_face(0, tile, tint, Exact); return *this; }
+    BlockDef& BlockDef::bottom(Tile tile, Color tint) { set_face(1, tile, tint, Exact); return *this; }
+    BlockDef& BlockDef::north(Tile tile, Color tint)  { set_face(2, tile, tint, Exact); return *this; }
+    BlockDef& BlockDef::south(Tile tile, Color tint)  { set_face(3, tile, tint, Exact); return *this; }
+    BlockDef& BlockDef::east(Tile tile, Color tint)   { set_face(4, tile, tint, Exact); return *this; }
+    BlockDef& BlockDef::west(Tile tile, Color tint)   { set_face(5, tile, tint, Exact); return *this; }
 
-BlockDef& BlockDef::top(Tile tile, Color tint)    { set_face(0, tile, tint, Exact); return *this; }
-BlockDef& BlockDef::bottom(Tile tile, Color tint) { set_face(1, tile, tint, Exact); return *this; }
-BlockDef& BlockDef::north(Tile tile, Color tint)  { set_face(2, tile, tint, Exact); return *this; }
-BlockDef& BlockDef::south(Tile tile, Color tint)  { set_face(3, tile, tint, Exact); return *this; }
-BlockDef& BlockDef::east(Tile tile, Color tint)   { set_face(4, tile, tint, Exact); return *this; }
-BlockDef& BlockDef::west(Tile tile, Color tint)   { set_face(5, tile, tint, Exact); return *this; }
+    BlockDef& BlockDef::cut(Tile tile) {
+        block_table[static_cast<size_t>(type_)].cut_texture_uv = checked_tile_uv(type_, tile);
+        return *this;
+    }
 
-BlockDef& BlockDef::cut(Tile tile)
-{
-    block_table[static_cast<size_t>(type_)].cut_texture_uv = checked_tile_uv(type_, tile);
-    return *this;
-}
-
-BlockDef& BlockDef::end(Tile tile)
-{
-    block_table[static_cast<size_t>(type_)].end_texture_uv = checked_tile_uv(type_, tile);
-    return *this;
-}
+    BlockDef& BlockDef::end(Tile tile) {
+        block_table[static_cast<size_t>(type_)].end_texture_uv = checked_tile_uv(type_, tile);
+        return *this;
+    }
 
 } // namespace content
 
@@ -331,11 +313,22 @@ void Load_block_definitions()
 
     content::register_blocks();
 
-    for (size_t i = 1; i < block_names.size(); ++i) {
+    // Every named BlockType must be defined - in code or by a block file.
+    for (size_t i = 1; i < static_cast<size_t>(BlockType::Count); ++i) {
         if (block_names[i].empty()) {
-            throw std::runtime_error("src/content/Blocks.cpp: definition missing for BlockType id " + std::to_string(i));
+            throw std::runtime_error("no definition for BlockType id " + std::to_string(i) +
+                                     " - neither in src/content/Blocks.cpp nor in assets/blocks/");
         }
     }
+    defined_blocks.clear();
+    for (size_t i = 1; i < block_names.size(); ++i) {
+        if (!block_names[i].empty()) defined_blocks.push_back(static_cast<BlockType>(i));
+    }
+}
+
+const std::vector<BlockType>& all_block_types()
+{
+    return defined_blocks;
 }
 
 const BlockProperties& get_block_properties(BlockType type)
@@ -345,9 +338,7 @@ const BlockProperties& get_block_properties(BlockType type)
 
 bool block_is_directional(BlockType type)
 {
-    return type == BlockType::Chest     || type == BlockType::Furnace || type == BlockType::LitFurnace ||
-           type == BlockType::Workbench || type == BlockType::Dispenser ||
-           type == BlockType::Pumpkin || type == BlockType::JackOLantern;
+    return get_block_properties(type).directional;
 }
 
 bool block_needs_facing(BlockType type)
@@ -358,12 +349,12 @@ bool block_needs_facing(BlockType type)
 FaceOffset block_face_offset(BlockFace face)
 {
     switch (face) {
-        case BlockFace::Top:    return {0, 1, 0};
-        case BlockFace::Bottom: return {0, -1, 0};
-        case BlockFace::North:  return {0, 0, -1};
-        case BlockFace::South:  return {0, 0, 1};
-        case BlockFace::East:   return {1, 0, 0};
-        case BlockFace::West:   return {-1, 0, 0};
+        case BlockFace::Top:    return { 0,  1,  0};
+        case BlockFace::Bottom: return { 0, -1,  0};
+        case BlockFace::North:  return { 0,  0, -1};
+        case BlockFace::South:  return { 0,  0,  1};
+        case BlockFace::East:   return { 1,  0,  0};
+        case BlockFace::West:   return {-1,  0,  0};
     }
     return {0, -1, 0};
 }
@@ -377,10 +368,10 @@ bool block_is_attachable(BlockType type)
 DirectionOffset horizontal_direction_offset(HorizontalDirection direction)
 {
     switch (direction) {
-        case HorizontalDirection::North: return {0, -1};
-        case HorizontalDirection::South: return {0, 1};
-        case HorizontalDirection::East:  return {1, 0};
-        case HorizontalDirection::West:  return {-1, 0};
+        case HorizontalDirection::North: return { 0, -1};
+        case HorizontalDirection::South: return { 0,  1};
+        case HorizontalDirection::East:  return { 1,  0};
+        case HorizontalDirection::West:  return {-1,  0};
     }
     return {0, 1};
 }

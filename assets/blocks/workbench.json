@@ -1,0 +1,18 @@
+{
+  "id": 18,
+  "name": "workbench",
+  "sound": "wood",
+  "hardness": 1,
+  "tool": "axe",
+  "density": 0.6,
+  "luminance": 0,
+  "directional": true,
+  "faces": {
+    "top": { "tile": [11, 2] },
+    "bottom": { "tile": [4, 0] },
+    "north": { "tile": [11, 3] },
+    "south": { "tile": [11, 3] },
+    "east": { "tile": [12, 3] },
+    "west": { "tile": [12, 3] }
+  }
+}

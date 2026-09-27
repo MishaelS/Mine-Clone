@@ -1,0 +1,17 @@
+{
+  "id": 29,
+  "name": "mossy_cobblestone",
+  "sound": "stone",
+  "hardness": 1.5,
+  "tool": "pickaxe",
+  "density": 2.7,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [4, 2] },
+    "bottom": { "tile": [4, 2] },
+    "north": { "tile": [4, 2] },
+    "south": { "tile": [4, 2] },
+    "east": { "tile": [4, 2] },
+    "west": { "tile": [4, 2] }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "id": 54,
+  "name": "lapis_ore",
+  "sound": "stone",
+  "hardness": 3,
+  "tool": "pickaxe",
+  "density": 2.7,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [0, 10] },
+    "bottom": { "tile": [0, 10] },
+    "north": { "tile": [0, 10] },
+    "south": { "tile": [0, 10] },
+    "east": { "tile": [0, 10] },
+    "west": { "tile": [0, 10] }
+  }
+}

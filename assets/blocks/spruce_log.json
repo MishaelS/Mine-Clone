@@ -1,0 +1,17 @@
+{
+  "id": 47,
+  "name": "spruce_log",
+  "sound": "wood",
+  "hardness": 2,
+  "tool": "axe",
+  "density": 0.6,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [5, 1] },
+    "bottom": { "tile": [5, 1] },
+    "north": { "tile": [4, 7] },
+    "south": { "tile": [4, 7] },
+    "east": { "tile": [4, 7] },
+    "west": { "tile": [4, 7] }
+  }
+}

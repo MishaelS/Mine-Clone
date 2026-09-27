@@ -1,0 +1,18 @@
+{
+  "id": 49,
+  "name": "pumpkin",
+  "sound": "wood",
+  "hardness": 1,
+  "tool": "axe",
+  "density": 0.6,
+  "luminance": 0,
+  "directional": true,
+  "faces": {
+    "top": { "tile": [6, 6] },
+    "bottom": { "tile": [6, 6] },
+    "north": { "tile": [6, 7] },
+    "south": { "tile": [7, 7] },
+    "east": { "tile": [6, 7] },
+    "west": { "tile": [6, 7] }
+  }
+}

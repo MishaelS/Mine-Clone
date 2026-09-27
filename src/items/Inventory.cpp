@@ -13,8 +13,7 @@ Inventory default_inventory()
 std::vector<BlockType> all_placeable_blocks()
 {
     std::vector<BlockType> result;
-    for (uint8_t id = 1; id < static_cast<uint8_t>(BlockType::Count); ++id) {
-        BlockType type = static_cast<BlockType>(id);
+    for (BlockType type : all_block_types()) {
         // OakDoorUpper/IronDoorUpper/BedFoot only ever come into existence
         // as the automatic second half of a paired placement (World::
         // place_door()/place_bed()) - never directly selectable.

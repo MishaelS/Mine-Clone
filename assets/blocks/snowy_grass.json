@@ -1,0 +1,17 @@
+{
+  "id": 35,
+  "name": "snowy_grass",
+  "sound": "snow",
+  "hardness": 0.5,
+  "tool": "shovel",
+  "density": 0.3,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [2, 4] },
+    "bottom": { "tile": [2, 0] },
+    "north": { "tile": [4, 4] },
+    "south": { "tile": [4, 4] },
+    "east": { "tile": [4, 4] },
+    "west": { "tile": [4, 4] }
+  }
+}

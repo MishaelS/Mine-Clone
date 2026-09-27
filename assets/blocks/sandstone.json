@@ -1,0 +1,17 @@
+{
+  "id": 55,
+  "name": "sandstone",
+  "sound": "stone",
+  "hardness": 1.5,
+  "tool": "pickaxe",
+  "density": 2.7,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [0, 11] },
+    "bottom": { "tile": [0, 13] },
+    "north": { "tile": [0, 12] },
+    "south": { "tile": [0, 12] },
+    "east": { "tile": [0, 12] },
+    "west": { "tile": [0, 12] }
+  }
+}

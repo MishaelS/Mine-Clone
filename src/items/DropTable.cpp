@@ -23,7 +23,7 @@ namespace {
         std::vector<DropEntry> drops;
     };
 
-    std::array<std::optional<BlockDropRule>, static_cast<size_t>(BlockType::Count)> drop_table;
+    std::array<std::optional<BlockDropRule>, MAX_BLOCK_TYPES> drop_table;
 
     BlockDropRule& rule_for(BlockType block) {
         return *drop_table[static_cast<size_t>(block)];

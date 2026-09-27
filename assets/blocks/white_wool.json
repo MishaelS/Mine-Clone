@@ -1,0 +1,17 @@
+{
+  "id": 32,
+  "name": "white_wool",
+  "sound": "cloth",
+  "hardness": 0.3,
+  "tool": "none",
+  "density": 0.4,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [0, 4] },
+    "bottom": { "tile": [0, 4] },
+    "north": { "tile": [0, 4] },
+    "south": { "tile": [0, 4] },
+    "east": { "tile": [0, 4] },
+    "west": { "tile": [0, 4] }
+  }
+}

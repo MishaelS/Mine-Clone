@@ -1,0 +1,17 @@
+{
+  "id": 12,
+  "name": "iron_ore",
+  "sound": "stone",
+  "hardness": 3,
+  "tool": "pickaxe",
+  "density": 2.7,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [1, 2] },
+    "bottom": { "tile": [1, 2] },
+    "north": { "tile": [1, 2] },
+    "south": { "tile": [1, 2] },
+    "east": { "tile": [1, 2] },
+    "west": { "tile": [1, 2] }
+  }
+}

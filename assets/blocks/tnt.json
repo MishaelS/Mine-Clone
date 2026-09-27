@@ -1,0 +1,17 @@
+{
+  "id": 23,
+  "name": "tnt",
+  "sound": "grass",
+  "hardness": 0.5,
+  "tool": "shovel",
+  "density": 1.4,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [9, 0] },
+    "bottom": { "tile": [10, 0] },
+    "north": { "tile": [8, 0] },
+    "south": { "tile": [8, 0] },
+    "east": { "tile": [8, 0] },
+    "west": { "tile": [8, 0] }
+  }
+}

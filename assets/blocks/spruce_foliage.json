@@ -1,0 +1,20 @@
+{
+  "id": 51,
+  "name": "spruce_foliage",
+  "sound": "foliage",
+  "hardness": 0.3,
+  "tool": "none",
+  "density": 0.3,
+  "luminance": 0,
+  "transparent": true,
+  "cutout": true,
+  "keep_same_faces": true,
+  "faces": {
+    "top": { "tile": [4, 8], "tint": [97, 153, 97, 255] },
+    "bottom": { "tile": [4, 8], "tint": [97, 153, 97, 255] },
+    "north": { "tile": [4, 8], "tint": [97, 153, 97, 255] },
+    "south": { "tile": [4, 8], "tint": [97, 153, 97, 255] },
+    "east": { "tile": [4, 8], "tint": [97, 153, 97, 255] },
+    "west": { "tile": [4, 8], "tint": [97, 153, 97, 255] }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "id": 1,
+  "name": "grass",
+  "sound": "grass",
+  "hardness": 0.5,
+  "tool": "shovel",
+  "density": 1.4,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [0, 0], "tint": [124, 189, 107, 255] },
+    "bottom": { "tile": [2, 0] },
+    "north": { "tile": [3, 0] },
+    "south": { "tile": [3, 0] },
+    "east": { "tile": [3, 0] },
+    "west": { "tile": [3, 0] }
+  }
+}

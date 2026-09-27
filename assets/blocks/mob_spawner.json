@@ -1,0 +1,19 @@
+{
+  "id": 33,
+  "name": "mob_spawner",
+  "sound": "metal",
+  "hardness": 3,
+  "tool": "pickaxe",
+  "density": 5,
+  "luminance": 0,
+  "transparent": true,
+  "cutout": true,
+  "faces": {
+    "top": { "tile": [1, 4] },
+    "bottom": { "tile": [1, 4] },
+    "north": { "tile": [1, 4] },
+    "south": { "tile": [1, 4] },
+    "east": { "tile": [1, 4] },
+    "west": { "tile": [1, 4] }
+  }
+}

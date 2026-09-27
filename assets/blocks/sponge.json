@@ -1,0 +1,17 @@
+{
+  "id": 31,
+  "name": "sponge",
+  "sound": "grass",
+  "hardness": 0.5,
+  "tool": "shovel",
+  "density": 1.4,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [0, 3] },
+    "bottom": { "tile": [0, 3] },
+    "north": { "tile": [0, 3] },
+    "south": { "tile": [0, 3] },
+    "east": { "tile": [0, 3] },
+    "west": { "tile": [0, 3] }
+  }
+}

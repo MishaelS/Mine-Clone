@@ -1,0 +1,17 @@
+{
+  "id": 60,
+  "name": "green_wool",
+  "sound": "cloth",
+  "hardness": 0.3,
+  "tool": "none",
+  "density": 0.4,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [1, 9] },
+    "bottom": { "tile": [1, 9] },
+    "north": { "tile": [1, 9] },
+    "south": { "tile": [1, 9] },
+    "east": { "tile": [1, 9] },
+    "west": { "tile": [1, 9] }
+  }
+}

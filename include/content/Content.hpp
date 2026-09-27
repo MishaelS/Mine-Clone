@@ -60,6 +60,7 @@ public:
     BlockDef& cutout();             // alpha-tested texture
     BlockDef& keep_same_faces();    // don't cull faces between two of this block (leaves)
     BlockDef& damages_on_touch();
+    BlockDef& directional();        // has a front that faces the player who placed it
     BlockDef& side_inset(int pixels); // cactus-style inset side faces, in texture pixels
 
     BlockDef& cross();              // BlockRenderShape::Cross (plants)

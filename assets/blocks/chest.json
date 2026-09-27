@@ -1,0 +1,18 @@
+{
+  "id": 27,
+  "name": "chest",
+  "sound": "wood",
+  "hardness": 1,
+  "tool": "axe",
+  "density": 0.6,
+  "luminance": 0,
+  "directional": true,
+  "faces": {
+    "top": { "tile": [9, 1] },
+    "bottom": { "tile": [9, 1] },
+    "north": { "tile": [10, 1] },
+    "south": { "tile": [11, 1] },
+    "east": { "tile": [10, 1] },
+    "west": { "tile": [10, 1] }
+  }
+}

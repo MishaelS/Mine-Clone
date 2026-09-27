@@ -1,0 +1,17 @@
+{
+  "id": 44,
+  "name": "glowstone",
+  "sound": "glass",
+  "hardness": 0.3,
+  "tool": "none",
+  "density": 2.4,
+  "luminance": 15,
+  "faces": {
+    "top": { "tile": [9, 6] },
+    "bottom": { "tile": [9, 6] },
+    "north": { "tile": [9, 6] },
+    "south": { "tile": [9, 6] },
+    "east": { "tile": [9, 6] },
+    "west": { "tile": [9, 6] }
+  }
+}

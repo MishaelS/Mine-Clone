@@ -1,0 +1,17 @@
+{
+  "id": 2,
+  "name": "dirt",
+  "sound": "dirt",
+  "hardness": 0.5,
+  "tool": "shovel",
+  "density": 1.4,
+  "luminance": 0,
+  "faces": {
+    "top": { "tile": [2, 0] },
+    "bottom": { "tile": [2, 0] },
+    "north": { "tile": [2, 0] },
+    "south": { "tile": [2, 0] },
+    "east": { "tile": [2, 0] },
+    "west": { "tile": [2, 0] }
+  }
+}
