@@ -48,7 +48,7 @@ uniform bool isDynamicEntityPass;
 
 // Matches Chunk.hpp's own MIN_LIGHT_FRACTION - duplicated here since a
 // shader can't include a C++ header; if one changes, so must the other.
-const float MIN_LIGHT_FRACTION = 0.2;
+const float MIN_LIGHT_FRACTION = 0.02;
 
 uniform sampler2D texture0;
 uniform vec4 colDiffuse;

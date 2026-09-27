@@ -49,8 +49,10 @@ namespace DayNightCycle {
     // get_sky_light() - passes through unchanged), MIN_NIGHT_SKY_LIGHT_FACTOR
     // at full night (real Minecraft's own "internal sky light" floor: a
     // fully sky-exposed cell reads as roughly 4 out of 15, not 0 - night
-    // outdoors is dim, not pitch black), following a cosine celestial
-    // curve in between so dawn/dusk fade gradually instead of snapping.
+    // outdoors is dim, not pitch black). Full daylight holds steady from
+    // DAY_START_TICK to DUSK_START_TICK, fades smoothly to night by
+    // NIGHT_START_TICK, stays at night until DAWN_START_TICK, then fades
+    // back to full day by DAY_START_TICK (wrapping past tick 0 = sunrise).
     // Block light (torches, lava) is never
     // touched by this at all - matches real Minecraft's own "only sky
     // light dims at night" rule. Multiply this into a cell's raw sky light
@@ -60,5 +62,16 @@ namespace DayNightCycle {
     // that, fed this same value once per frame, so terrain/entities/debug
     // readouts all agree.
     constexpr float MIN_NIGHT_SKY_LIGHT_FACTOR = 4.0f / 15.0f;
+    constexpr uint64_t DAY_START_TICK   = 600;   // dawn is over - full daylight
+    constexpr uint64_t DUSK_START_TICK  = 11500; // sunset begins - light starts fading
+    constexpr uint64_t NIGHT_START_TICK = 13500; // fully night
+    constexpr uint64_t DAWN_START_TICK  = 22500; // light starts returning
     float sky_light_factor(uint64_t game_tick);
+
+    // How much it's day right now, 0 (night) .. 1 (full day), on the
+    // DAY_START/DUSK_START/NIGHT_START/DAWN_START schedule above - the one
+    // curve everything that changes between day and night follows: world
+    // light (sky_light_factor()), sky and horizon colors (and so fog),
+    // stars, clouds and the sunset glow.
+    float daylight(uint64_t game_tick);
 }

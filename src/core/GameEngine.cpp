@@ -41,14 +41,6 @@ namespace {
     constexpr float SURVIVAL_REACH = 4.5f;
     constexpr float CREATIVE_REACH = 5.0f;
 
-    // The hold-to-break progress bar, drawn just under the crosshair - see
-    // GameEngine::draw() and the is_breaking/breaking_progress fields.
-    constexpr float BREAK_BAR_WIDTH    = 60.0f;
-    constexpr float BREAK_BAR_HEIGHT   = 6.0f;
-    constexpr float BREAK_BAR_OFFSET_Y = 28.0f; // below screen center
-    constexpr Color BREAK_BAR_BACKGROUND = {0, 0, 0, 150};
-    constexpr Color BREAK_BAR_FILL       = {255, 255, 255, 220};
-
     // Subtle atmospheric haze over the whole scene - a constant, very low
     // blend toward the sky's own horizon color, independent of the chunk
     // shader's distance fog (which only ramps in near the render-distance
@@ -1891,18 +1883,18 @@ void GameEngine::draw()
         // `world` guard since drawing the sun/moon quads at all before a
         // world exists would be pointless.
         Vector3 sun_dir = DayNightCycle::sun_direction(game_tick);
-        float celestial_angle = DayNightCycle::celestial_angle(game_tick);
+        float daylight = DayNightCycle::daylight(game_tick);
 
         Camera3D render_camera = make_render_camera();
         BeginMode3D(render_camera);
-        draw_skybox(render_camera.position, celestial_angle);
+        draw_skybox(render_camera.position, daylight);
         if (world) {
-            draw_seeded_stars(render_camera.position, world->seed(), celestial_angle);
+            draw_seeded_stars(render_camera.position, world->seed(), daylight);
 
             // Sun/moon - drawn right after the sky's own gradient, still
             // well before any real terrain.
             draw_celestial_bodies(render_camera.position, sun_dir);
-            draw_seeded_clouds(render_camera.position, world->seed(), game_tick, celestial_angle,
+            draw_seeded_clouds(render_camera.position, world->seed(), game_tick, daylight,
                                settings.render_distance_chunks * CHUNK_SIZE, settings.cloud_volume);
 
             // Day/night sky-light dimming - one shared value (block light
@@ -1962,10 +1954,19 @@ void GameEngine::draw()
         if (targeted_block) {
             BlockShapeBoxes target_shape = world->outline_boxes_at(
                 targeted_block->x, targeted_block->y, targeted_block->z);
-            ui::block_outline(target_shape);
+            ui::block_outline(target_shape, render_camera.position);
             if (is_breaking && targeted_block->x == breaking_x && targeted_block->y == breaking_y &&
                 targeted_block->z == breaking_z) {
-                ui::block_breaking_overlay(target_shape, breaking_progress);
+                // Each side lit by the cell in front of it, shaded like the
+                // block's own face on that side.
+                float face_light[6];
+                for (int face = 0; face < 6; ++face) {
+                    FaceOffset out = block_face_offset(static_cast<BlockFace>(face));
+                    Vector3 in_front = {targeted_block->x + out.dx + 0.5f, targeted_block->y + out.dy + 0.5f,
+                                        targeted_block->z + out.dz + 0.5f};
+                    face_light[face] = sample_light_smooth(*world, in_front) * FACE_DIRECTION_SHADE[face];
+                }
+                ui::block_breaking_overlay(target_shape, breaking_progress, face_light);
             }
         }
         EndMode3D();
@@ -1998,18 +1999,6 @@ void GameEngine::draw()
 
     bool show_death_screen = world && player.health().is_dead();
     if (!show_death_screen && !inventory_hud.is_open() && sleep_overlay <= 0.0f) ui::crosshair();
-
-    if (is_breaking) {
-        const float bar_width = ui::scaled(BREAK_BAR_WIDTH);
-        const float bar_height = ui::scaled(BREAK_BAR_HEIGHT);
-        float bar_x = GetScreenWidth() / 2.0f - bar_width / 2.0f;
-        float bar_y = GetScreenHeight() / 2.0f + ui::scaled(BREAK_BAR_OFFSET_Y);
-        float fill_width = bar_width * std::clamp(breaking_progress, 0.0f, 1.0f);
-        DrawRectangle(static_cast<int>(bar_x), static_cast<int>(bar_y),
-                      static_cast<int>(bar_width), static_cast<int>(bar_height), BREAK_BAR_BACKGROUND);
-        DrawRectangle(static_cast<int>(bar_x), static_cast<int>(bar_y),
-                      static_cast<int>(fill_width), static_cast<int>(bar_height), BREAK_BAR_FILL);
-    }
 
     if (world) {
         inventory_hud.draw_hotbar(inventory);

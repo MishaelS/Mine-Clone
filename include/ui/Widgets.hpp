@@ -76,15 +76,22 @@ namespace ui {
     // Minecraft-style inverted crosshair, centered in the current window.
     void crosshair();
 
-    // World-space selection chrome for the currently targeted voxel.
-    void block_outline(const BlockShapeBoxes& shape);
+    // World-space selection chrome for the currently targeted voxel. Every
+    // point is pulled OUTLINE_LIFT toward `viewer` (the render camera) so
+    // the lines always win the depth test against the block's own faces
+    // instead of flickering in and out of them - along the view ray, so the
+    // outline's size on screen doesn't change.
+    void block_outline(const BlockShapeBoxes& shape, Vector3 viewer);
 
     // Alpha-blended crack overlay on the block currently being broken -
     // terrain.png's own "block breaking" strip (row 15, 10 stages), picked
     // by `progress` (0..1, GameEngine's own breaking_progress) the same
     // way real Minecraft steps through its crack stages as a hold-to-break
     // approaches completion.
-    void block_breaking_overlay(const BlockShapeBoxes& shape, float progress);
+    // `face_light` (indexed by BlockFace) is each side's brightness - the
+    // light in front of that face times its direction shade - so the
+    // cracks are lit like the block they're drawn on.
+    void block_breaking_overlay(const BlockShapeBoxes& shape, float progress, const float face_light[6]);
 
     // Centered text within `bounds` - doesn't draw a background of its own.
     // One font size for all chrome. Long labels are elided, never shrunk.

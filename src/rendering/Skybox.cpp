@@ -58,8 +58,8 @@ namespace {
     constexpr float CELESTIAL_DISTANCE = 400.0f;
     // 1.5x the original 60/46 - visual size only, doesn't touch
     // CELESTIAL_DISTANCE or DayNightCycle's own orbit/position math at all.
-    constexpr float SUN_SIZE = 90.0f;
-    constexpr float MOON_SIZE = 69.0f; // vanilla's own moon reads a bit smaller/dimmer than its sun
+    constexpr float SUN_SIZE  = 90.0f * 2.f;
+    constexpr float MOON_SIZE = 69.0f * 2.f; // vanilla's own moon reads a bit smaller/dimmer than its sun
 
     constexpr uint32_t STAR_SALT = 0x53544152u;  // "STAR"
     constexpr uint32_t CLOUD_SALT = 0x434C4453u; // "CLDS"
@@ -137,17 +137,11 @@ namespace {
         return total > 0.0f ? sum / total : 0.0f;
     }
 
-    float night_visibility(float celestial_angle)
+    // Stars only come out once it's mostly dark, and fade before dawn is
+    // far along.
+    float night_visibility(float daylight)
     {
-        float sun_height = std::cos(celestial_angle * 2.0f * PI);
-        float t = std::clamp((-sun_height - 0.05f) / 0.45f, 0.0f, 1.0f);
-        return t * t * (3.0f - 2.0f * t);
-    }
-
-    float day_visibility(float celestial_angle)
-    {
-        float sun_height = std::cos(celestial_angle * 2.0f * PI);
-        float t = std::clamp((sun_height + 0.1f) / 0.65f, 0.0f, 1.0f);
+        float t = std::clamp((0.5f - daylight) / 0.5f, 0.0f, 1.0f);
         return t * t * (3.0f - 2.0f * t);
     }
 
@@ -231,24 +225,21 @@ namespace {
     }
 }
 
-void draw_skybox(Vector3 camera_position, float celestial_angle)
+void draw_skybox(Vector3 camera_position, float daylight)
 {
-    // Minecraft-style celestial curve: with DayNightCycle::celestial_angle()
-    // 0 is noon and 0.5 is midnight, so cos(angle * 2PI) gives sun height
-    // directly. Mapping that through a smooth threshold keeps true night
-    // dark, instead of blending halfway toward day exactly at the horizon.
-    float sun_height = std::cos(celestial_angle * 2.0f * PI);
-    float brightness = std::clamp(sun_height * 0.5f + 0.5f, 0.0f, 1.0f);
-    float day_factor = std::clamp((brightness - 0.35f) / 0.60f, 0.0f, 1.0f);
-    day_factor = day_factor * day_factor * (3.0f - 2.0f * day_factor); // smoothstep
+    // Same day/night curve as world light (DayNightCycle::daylight()), so
+    // the sky stays fully bright all day and darkens exactly while the
+    // terrain does.
+    float day_factor = std::clamp(daylight, 0.0f, 1.0f);
     Color sky = ColorLerp(NIGHT_SKY_COLOR, DAY_SKY_COLOR, day_factor);
     Color horizon = ColorLerp(NIGHT_HORIZON_COLOR, DAY_HORIZON_COLOR, day_factor);
 
-    // Sunrise/sunset glow: strongest exactly when the cosine-derived sun
-    // height crosses the horizon and gone shortly after. It paints mostly
-    // the horizon, with a much weaker purple lift overhead so the sky has
-    // an actual sunset gradient rather than one flat orange strip.
-    float glow = std::clamp(1.0f - std::fabs(sun_height) * 4.8f, 0.0f, 1.0f);
+    // Sunrise/sunset glow: only during the transition itself, strongest
+    // halfway through it and gone at both full day and full night. It
+    // paints mostly the horizon, with a much weaker purple lift overhead so
+    // the sky has an actual sunset gradient rather than one flat orange
+    // strip.
+    float glow = 4.0f * day_factor * (1.0f - day_factor);
     glow = glow * glow * (3.0f - 2.0f * glow);
     horizon = ColorLerp(horizon, SUNSET_HORIZON_COLOR, glow * SUNSET_HORIZON_STRENGTH);
     sky = ColorLerp(sky, SUNSET_SKY_COLOR, glow * SUNSET_SKY_STRENGTH);
@@ -327,9 +318,9 @@ void draw_celestial_bodies(Vector3 camera_position, Vector3 sun_direction)
     rlEnableBackfaceCulling();
 }
 
-void draw_seeded_stars(Vector3 camera_position, uint32_t world_seed, float celestial_angle)
+void draw_seeded_stars(Vector3 camera_position, uint32_t world_seed, float daylight)
 {
-    float visibility = night_visibility(celestial_angle);
+    float visibility = night_visibility(daylight);
     if (visibility <= 0.01f) return;
 
     rebuild_stars(world_seed);
@@ -349,10 +340,10 @@ void draw_seeded_stars(Vector3 camera_position, uint32_t world_seed, float celes
     rlEnableBackfaceCulling();
 }
 
-void draw_seeded_clouds(Vector3 camera_position, uint32_t world_seed, uint64_t game_tick, float celestial_angle,
+void draw_seeded_clouds(Vector3 camera_position, uint32_t world_seed, uint64_t game_tick, float daylight,
                         int render_distance_blocks, int cloud_volume)
 {
-    float day = day_visibility(celestial_angle);
+    float day = std::clamp(daylight, 0.0f, 1.0f);
     float tick_offset = static_cast<float>(game_tick) * CLOUD_SPEED_BLOCKS_PER_TICK;
     float cloud_range = std::max(CLOUD_MIN_RANGE, static_cast<float>(render_distance_blocks) + CLOUD_EXTRA_RANGE);
     int layers = std::clamp(cloud_volume, 1, 5);

@@ -392,8 +392,8 @@ private:
     // Hold-to-break progress (see break_seconds_required() in the .cpp):
     // accumulates while BreakBlock is held down and the aimed-at block
     // hasn't changed since the hold started, resets to 0 whenever it does
-    // (or the button is released) - draw() reads it to show a small
-    // progress indicator. is_breaking is separate from
+    // (or the button is released) - draw() reads it to pick the crack
+    // stage drawn over the block. is_breaking is separate from
     // breaking_progress > 0 so "just started this frame, 0 progress so
     // far" still counts as actively breaking rather than reading as idle.
     bool is_breaking = false;

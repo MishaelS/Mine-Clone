@@ -8,12 +8,12 @@
 // colored (blue up top, lighter near the horizon, by day - see the .cpp's
 // own DAY_/NIGHT_/SUNSET_ colors) and depth-tested off so it always reads
 // as infinitely far away. No texture/cubemap - just vertex-colored
-// geometry. `celestial_angle` (see core/DayNightCycle.hpp) drives the same
-// cosine day/night curve Minecraft uses for sky/fog color, plus a warm
-// horizon glow while the sun is near the horizon. skybox_horizon_color()/
+// geometry. `daylight` (DayNightCycle::daylight(), 0 night .. 1 day) blends
+// the night and day colors - the same curve world light follows, so sky and
+// terrain darken together - plus a warm horizon glow mid-sunset/sunrise. skybox_horizon_color()/
 // skybox_sky_color() below report back whatever this call actually drew,
 // for anything else (fog) that needs to match.
-void draw_skybox(Vector3 camera_position, float celestial_angle);
+void draw_skybox(Vector3 camera_position, float daylight);
 
 // Sun/moon billboards - two textured quads (assets/sprites/sky/sun.png,
 // moon.png) positioned along `sun_direction` and its exact opposite (see
@@ -27,12 +27,12 @@ void draw_celestial_bodies(Vector3 camera_position, Vector3 sun_direction);
 
 // Seed-bound sky details. Stars and clouds both sample the same small
 // deterministic sky-noise stream so a world's seed owns its whole sky
-// pattern the same way it already owns terrain. `celestial_angle` fades
-// stars in at night; `game_tick` scrolls the cloud sheet. Cloud visibility
+// pattern the same way it already owns terrain. `daylight` fades stars in
+// at night and dims the clouds; `game_tick` scrolls the cloud sheet. Cloud visibility
 // tracks render distance with a small extra margin, while `cloud_volume`
 // controls how many soft layers make up the sheet.
-void draw_seeded_stars(Vector3 camera_position, uint32_t world_seed, float celestial_angle);
-void draw_seeded_clouds(Vector3 camera_position, uint32_t world_seed, uint64_t game_tick, float celestial_angle,
+void draw_seeded_stars(Vector3 camera_position, uint32_t world_seed, float daylight);
+void draw_seeded_clouds(Vector3 camera_position, uint32_t world_seed, uint64_t game_tick, float daylight,
                         int render_distance_blocks, int cloud_volume);
 
 // The color the skybox itself is *currently* fading to at the horizon -

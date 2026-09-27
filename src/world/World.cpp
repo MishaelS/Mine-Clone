@@ -134,42 +134,43 @@ namespace {
     constexpr Color UNDERWATER_FOG_COLOR_DEEP = {5, 15, 35, 255};
     constexpr int UNDERWATER_FOG_MAX_DEPTH = 24; // matches Ocean's own depth range, see Chunk.cpp's biome_terrain
 
-    // Chunks within this many blocks of the camera are always drawn - the
-    // view-cone test below approximates visibility by angle alone, which
-    // breaks down at very close range (a chunk right next to the camera can
-    // legitimately be visible well outside a "reasonable" cone), so it
-    // doesn't get applied there at all.
-    constexpr float ALWAYS_VISIBLE_BLOCKS = 3.0f * CHUNK_SIZE;
+    // The camera's 6 view-frustum planes (left, right, bottom, top, near,
+    // far) as (a, b, c, d) with a*x + b*y + c*z + d >= 0 on the inside,
+    // extracted from the same view and projection matrices BeginMode3D()
+    // sets up (Gribb/Hartmann). raylib's Matrix stores rows as
+    // (m0, m4, m8, m12), (m1, m5, m9, m13), ... and MatrixMultiply(view,
+    // projection) is the matrix that takes a world position to clip space.
+    struct Frustum {
+        Vector4 planes[6];
+    };
 
-    // cos(70 degrees). An approximate view-cone test, not exact frustum
-    // culling: exact culling needs frustum planes extracted from the
-    // camera's view-projection matrix, which depends on getting raylib's
-    // exact matrix convention (row- vs column-vector) right - a mismatch
-    // there fails silently as chunks incorrectly popping out of view, which
-    // is a much worse bug than under-culling. 70 degrees is a deliberately
-    // generous margin over the actual worst case at the default 1280x720
-    // window (fovy 60 => ~46 degree half-FOV horizontally, ~50 degrees to
-    // the frustum's own corner) - it still culls whatever's clearly behind
-    // or well to the side of the camera, just not as tightly as the exact
-    // frustum would.
-    constexpr float VIEW_CONE_COS = 0.342f;
+    Frustum camera_frustum(const Camera3D& camera, float aspect) {
+        Matrix view = GetCameraMatrix(camera);
+        Matrix projection = MatrixPerspective(camera.fovy * DEG2RAD, aspect,
+                                              rlGetCullDistanceNear(), rlGetCullDistanceFar());
+        Matrix m = MatrixMultiply(view, projection);
+        Vector4 row0 = {m.m0, m.m4, m.m8, m.m12};
+        Vector4 row1 = {m.m1, m.m5, m.m9, m.m13};
+        Vector4 row2 = {m.m2, m.m6, m.m10, m.m14};
+        Vector4 row3 = {m.m3, m.m7, m.m11, m.m15};
+        auto add = [](Vector4 a, Vector4 b) { return Vector4{a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w}; };
+        auto sub = [](Vector4 a, Vector4 b) { return Vector4{a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w}; };
+        return {{add(row3, row0), sub(row3, row0), add(row3, row1), sub(row3, row1), add(row3, row2), sub(row3, row2)}};
+    }
 
-    // Approximates whether a chunk (by its column footprint in the X/Z
-    // plane - chunks span the whole world height, so Y never narrows this)
-    // is worth drawing from the camera's position/facing. Never a false
-    // negative by a wide margin (see VIEW_CONE_COS) - the goal is skipping
-    // what's clearly not on screen, not a tight match to it.
-    bool chunk_in_view(Vector3 chunk_min_corner, Vector3 camera_position, Vector3 camera_forward) {
-        float to_chunk_x = (chunk_min_corner.x + CHUNK_SIZE / 2.0f) - camera_position.x;
-        float to_chunk_z = (chunk_min_corner.z + CHUNK_SIZE / 2.0f) - camera_position.z;
-        float distance = std::sqrt(to_chunk_x * to_chunk_x + to_chunk_z * to_chunk_z);
-        if (distance <= ALWAYS_VISIBLE_BLOCKS) return true;
-
-        float forward_length = std::sqrt(camera_forward.x * camera_forward.x + camera_forward.z * camera_forward.z);
-        if (forward_length < 1e-4f) return true; // looking straight up/down: no horizontal facing to cull against
-
-        float cos_angle = (to_chunk_x * camera_forward.x + to_chunk_z * camera_forward.z) / (distance * forward_length);
-        return cos_angle >= VIEW_CONE_COS;
+    // Standard conservative box test: the box is culled only if it lies
+    // entirely outside at least one plane - checked with its corner
+    // furthest along that plane's normal (if even that corner is outside,
+    // all 8 are). A box straddling the frustum, or containing the camera,
+    // always passes.
+    bool box_in_frustum(const Frustum& frustum, Vector3 min, Vector3 max) {
+        for (const Vector4& plane : frustum.planes) {
+            Vector3 corner = {plane.x >= 0.0f ? max.x : min.x,
+                              plane.y >= 0.0f ? max.y : min.y,
+                              plane.z >= 0.0f ? max.z : min.z};
+            if (plane.x * corner.x + plane.y * corner.y + plane.z * corner.z + plane.w < 0.0f) return false;
+        }
+        return true;
     }
 
     // The world has no fixed size - any chunk within this many blocks of
@@ -665,10 +666,23 @@ void World::relight_chunks_around(const std::vector<std::pair<int, int>>& center
 
 std::vector<const Chunk*> World::compute_visible_chunks(const Camera3D& camera) const
 {
-    Vector3 forward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
     std::vector<const Chunk*> visible;
+    visible.reserve(chunks.size());
+    const int screen_height = GetScreenHeight();
+    const bool can_cull = camera.projection == CAMERA_PERSPECTIVE && screen_height > 0;
+    const Frustum frustum = camera_frustum(camera, can_cull ? GetScreenWidth() / static_cast<float>(screen_height) : 1.0f);
+
     for (const auto& [key, chunk] : chunks) {
-        if (chunk_in_view(chunk->get_position(), camera.position, forward)) {
+        // The chunk's real box: its whole column footprint, from the world
+        // floor up to the top of its highest block (not the empty sky above
+        // it) - so looking down at the ground keeps it, looking up at the
+        // sky doesn't.
+        Vector3 min = chunk->get_position();
+        Vector3 max = {min.x + CHUNK_SIZE, min.y + chunk->highest_lit_y() + 2.0f, min.z + CHUNK_SIZE};
+        bool camera_inside = camera.position.x >= min.x && camera.position.x <= max.x &&
+                             camera.position.y >= min.y && camera.position.y <= max.y &&
+                             camera.position.z >= min.z && camera.position.z <= max.z;
+        if (!can_cull || camera_inside || box_in_frustum(frustum, min, max)) {
             visible.push_back(chunk.get());
         }
     }

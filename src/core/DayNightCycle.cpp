@@ -32,10 +32,32 @@ namespace DayNightCycle {
     }
 
     float sky_light_factor(uint64_t game_tick) {
-        float sky_curve = std::cos(celestial_angle(game_tick) * 2.0f * PI) * 0.5f + 0.5f;
-        float daylight = std::clamp((sky_curve - 0.28f) / 0.72f, 0.0f, 1.0f);
-        daylight = daylight * daylight * (3.0f - 2.0f * daylight);
-        return MIN_NIGHT_SKY_LIGHT_FACTOR + (1.0f - MIN_NIGHT_SKY_LIGHT_FACTOR) * daylight;
+        return MIN_NIGHT_SKY_LIGHT_FACTOR + (1.0f - MIN_NIGHT_SKY_LIGHT_FACTOR) * daylight(game_tick);
+    }
+
+    float daylight(uint64_t game_tick) {
+        const uint64_t tick = game_tick % DAY_LENGTH_TICKS;
+        // 0..1 progress through a transition, eased so it starts and ends gently.
+        auto ease = [](uint64_t elapsed, uint64_t length) {
+            float t = std::clamp(static_cast<float>(elapsed) / static_cast<float>(length), 0.0f, 1.0f);
+            return t * t * (3.0f - 2.0f * t);
+        };
+
+        float value;
+        if (tick >= DAY_START_TICK && tick < DUSK_START_TICK) {
+            value = 1.0f;
+        } else if (tick >= DUSK_START_TICK && tick < NIGHT_START_TICK) {
+            value = 1.0f - ease(tick - DUSK_START_TICK, NIGHT_START_TICK - DUSK_START_TICK);
+        } else if (tick >= NIGHT_START_TICK && tick < DAWN_START_TICK) {
+            value = 0.0f;
+        } else {
+            // Dawn runs from DAWN_START_TICK across midnight's wrap (tick
+            // 24000 == 0) up to DAY_START_TICK.
+            const uint64_t since_dawn = tick >= DAWN_START_TICK ? tick - DAWN_START_TICK
+                                                                 : tick + DAY_LENGTH_TICKS - DAWN_START_TICK;
+            value = ease(since_dawn, DAY_LENGTH_TICKS - DAWN_START_TICK + DAY_START_TICK);
+        }
+        return value;
     }
 
 }

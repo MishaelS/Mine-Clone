@@ -82,8 +82,8 @@ public:
     uint32_t seed() const { return config.seed; }
 
     // Opaque terrain only: every loaded chunk that's actually in view
-    // (skips anything the camera clearly isn't looking toward - an
-    // approximate cone test, not exact frustum culling, see the .cpp),
+    // (chunks whose box lies outside the camera's view frustum are
+    // skipped - see compute_visible_chunks() in the .cpp),
     // and sets up fog for the frame (fades chunks near the configured
     // render distance's own edge into the sky - World's own distance fog,
     // see set_chunk_fog in Chunk.hpp - instead of drawing right up to a

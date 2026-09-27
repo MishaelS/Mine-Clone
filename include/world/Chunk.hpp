@@ -39,7 +39,7 @@ constexpr int MAX_LIGHT = 15;
 // via entity_environment_tint) agreeing on the same darkest brightness -
 // without that, whichever path floored higher would read as visibly
 // brighter than its own genuinely-dark surroundings.
-constexpr float MIN_LIGHT_FRACTION = 0.2f;
+constexpr float MIN_LIGHT_FRACTION = 0.02f;
 
 // A chunk's simulation/render tier, based on distance from an observer (see
 // World::update_chunk_states). There's no Chunk object for an Unloaded

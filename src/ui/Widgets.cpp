@@ -50,6 +50,7 @@ namespace {
     constexpr float CROSSHAIR_THICKNESS  = 2.0f;
     constexpr unsigned char CROSSHAIR_INTENSITY = 235;
     constexpr float TARGET_OUTLINE_SIZE = 1.002f;
+    constexpr float OUTLINE_LIFT = 2.0f * (0.5f / 16.0f); // two half-pixels of a block's 16px texture
     constexpr Color TARGET_OUTLINE_COLOR = {0, 0, 0, 200};
 
     struct OverlayFace {
@@ -413,14 +414,20 @@ namespace ui {
         EndBlendMode();
     }
 
-    void block_outline(const BlockShapeBoxes& shape) {
+    void block_outline(const BlockShapeBoxes& shape, Vector3 viewer) {
+        auto lift = [viewer](Vector3 point) {
+            Vector3 to_viewer = Vector3Subtract(viewer, point);
+            float distance = Vector3Length(to_viewer);
+            if (distance < 0.0001f) return point;
+            return Vector3Add(point, Vector3Scale(to_viewer, std::min(OUTLINE_LIFT, distance * 0.5f) / distance));
+        };
         for (const OutlineEdge& edge : outline_edges(shape)) {
-            DrawLine3D(edge.from, edge.to, TARGET_OUTLINE_COLOR);
+            DrawLine3D(lift(edge.from), lift(edge.to), TARGET_OUTLINE_COLOR);
         }
     }
 
     void draw_breaking_box_overlay(const BoundingBox& box, Vector3 block_origin,
-                                   Rectangle full_block_uv, Color tint) {
+                                   Rectangle full_block_uv, Color tint, const float face_light[6]) {
         BoundingBox local_box{
             Vector3Subtract(box.min, block_origin),
             Vector3Subtract(box.max, block_origin),
@@ -430,8 +437,10 @@ namespace ui {
 
         rlSetTexture(get_block_atlas_texture().id);
         rlBegin(RL_QUADS);
-        rlColor4ub(tint.r, tint.g, tint.b, tint.a);
         for (const OverlayFace& face : OVERLAY_FACES) {
+            const float light = std::clamp(face_light[static_cast<int>(face.face)], 0.0f, 1.0f);
+            rlColor4ub(static_cast<unsigned char>(tint.r * light), static_cast<unsigned char>(tint.g * light),
+                       static_cast<unsigned char>(tint.b * light), tint.a);
             Rectangle uv = get_sample_safe_block_uv(crop_tile_to_box(full_block_uv, face.face, local_box));
             float u[] = {uv.x, uv.x + uv.width, uv.x + uv.width, uv.x};
             float v[] = {uv.y, uv.y, uv.y + uv.height, uv.y + uv.height};
@@ -448,7 +457,7 @@ namespace ui {
         rlSetTexture(0);
     }
 
-    void block_breaking_overlay(const BlockShapeBoxes& shape, float progress) {
+    void block_breaking_overlay(const BlockShapeBoxes& shape, float progress, const float face_light[6]) {
         constexpr int STAGE_COUNT = 10; // terrain.png row 15, columns 0-9
         constexpr int STAGE_ROW = 15;
         // Half-transparent: alpha-blended over the block already drawn beneath
@@ -466,7 +475,7 @@ namespace ui {
         };
 
         for (int i = 0; i < shape.count; ++i) {
-            draw_breaking_box_overlay(shape.boxes[i], block_origin, uv, {255, 255, 255, OVERLAY_ALPHA});
+            draw_breaking_box_overlay(shape.boxes[i], block_origin, uv, {255, 255, 255, OVERLAY_ALPHA}, face_light);
         }
     }
 
