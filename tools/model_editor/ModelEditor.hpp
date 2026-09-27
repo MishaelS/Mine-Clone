@@ -31,6 +31,7 @@ private:
     // Layout
     Rectangle top_bar_rect() const;
     Rectangle right_panel_rect() const;
+    Rectangle left_panel_rect() const;
     Rectangle timeline_rect() const;
     Rectangle viewport_rect() const;
 
@@ -45,12 +46,17 @@ private:
     // Panels
     void draw_top_bar(Rectangle bounds);
     void draw_right_panel(Rectangle bounds);
+    // The entity's description (EntityModel::entity): health, where it
+    // lives, drops, interactions, natural spawning - what the game runs.
+    void draw_left_panel(Rectangle bounds);
     float draw_part_properties(float x, float y, float width);
     void draw_timeline(Rectangle bounds);
 
     // Widgets - raygui needs to know which box is being typed into; these
     // track that by call order within the frame.
     bool text_field(Rectangle bounds, char* buffer, int size); // true when editing just finished
+    // A text field editing `value` itself - true once an edit changed it.
+    bool string_field(Rectangle bounds, std::string& value);
     bool int_field(Rectangle bounds, int& value, int min_value, int max_value);
     bool float_as_int_field(Rectangle bounds, float& value, int min_value, int max_value);
     void label(Rectangle bounds, const std::string& text) const;
@@ -150,6 +156,8 @@ private:
     int selected_cube = 0;
     int part_list_scroll = 0;
     Vector2 panel_scroll = {0.0f, 0.0f};
+    Vector2 entity_panel_scroll = {0.0f, 0.0f};
+    char string_edit_buffer[256] = ""; // what string_field() is editing
 
     int animation_index = -1; // into model.animations, -1 = none (rest pose)
     float time = 0.0f;

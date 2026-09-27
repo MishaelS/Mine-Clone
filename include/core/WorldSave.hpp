@@ -72,6 +72,7 @@ struct MobSaveState {
     Vector3 position = {0.0f, 0.0f, 0.0f}; // feet
     float yaw = 0.0f;                      // degrees
     std::vector<std::string> states;       // Mob::states() - "sheared"...
+    int health = -1;                       // hit points left, -1 = full
 };
 
 // A Chest's own 27-slot storage at a specific block position - see

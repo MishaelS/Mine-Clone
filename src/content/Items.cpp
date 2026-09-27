@@ -68,6 +68,7 @@ void register_items()
     material(I::Bucket      , "bucket"       , {10,  4});
     material(I::WaterBucket , "water_bucket" , {11,  4});
     material(I::LavaBucket  , "lava_bucket"  , {12,  4});
+    material(I::Leather     , "leather"      , { 7,  6});
 
     // Food - heal amount in half-hearts (2 per heart): roughly vanilla's
     // hunger-point values, applied straight to health since there's no

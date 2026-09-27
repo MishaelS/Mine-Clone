@@ -2,6 +2,18 @@
   "name": "cow",
   "skin": "sprites/entities/cow/Cow.png",
   "skin_size": [64, 64],
+  "entity": {
+    "description": "Мирное сухопутное животное. Бродит стадами по равнинам, лесам и холмам, идёт за игроком с пшеницей в руке, после удара убегает. ПКМ пустым ведром - ведро молока.",
+    "health": 10,
+    "environment": "land",
+    "drops": [
+      { "item": "leather", "min": 0, "max": 2, "chance": 1 }
+    ],
+    "interactions": [
+      { "trigger": "use", "held": "item", "held_item": "bucket", "chance": 1, "hand_result": "milk_bucket" }
+    ],
+    "spawn": { "enabled": true, "biomes": ["plains", "forest", "hills"], "weight": 8, "min_group": 2, "max_group": 4 }
+  },
   "parts": [
     {
       "name": "body",

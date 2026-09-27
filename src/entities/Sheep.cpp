@@ -6,7 +6,6 @@ namespace {
     constexpr const char* MODEL_NAME = "sheep";
     constexpr const char* WOOL_LAYER = "sheep_fur";
     constexpr float WALK_SPEED = 0.06f;     // blocks/tick, same stroll as a cow
-    constexpr float SHEAR_BY_HAND = 0.2f;   // chance a bare-handed hit knocks wool off
 }
 
 Sheep::Sheep(Vector3 feet_position, float yaw_degrees, uint32_t seed)
@@ -16,11 +15,9 @@ Sheep::Sheep(Vector3 feet_position, float yaw_degrees, uint32_t seed)
     settings.tempt_items = {ItemType::Wheat};
     settings.eats_grass = true;
     ai::add_animal_goals(goals, settings);
-
-    // Shearing by hand: a punch now and then pulls 1-3 wool off a woolly
-    // sheep, leaving it sheared until it eats grass (on_ate_grass()).
-    add_interaction(on_hit().with_empty_hand().unless(SHEARED).chance(SHEAR_BY_HAND)
-                        .drops(BlockType::WhiteWool, 1, 3).then_set(SHEARED));
+    // Shearing (a bare-handed hit now and then pulls wool off, leaving it
+    // "sheared" until it eats grass - on_ate_grass()) is one of its
+    // interaction rules in assets/models/sheep.json.
 }
 
 const EntityModel& Sheep::model() const

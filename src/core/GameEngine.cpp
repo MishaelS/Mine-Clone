@@ -10,6 +10,7 @@
 #include "entities/Cow.hpp"
 #include "entities/Npc.hpp"
 #include "entities/Sheep.hpp"
+#include "model/ModelLibrary.hpp"
 #include "ui/Widgets.hpp"
 #include "ui/Localization.hpp"
 #include "core/Keybindings.hpp"
@@ -268,6 +269,37 @@ namespace {
 
     // A new mob of the kind saved/summoned as `type` (Mob::type_id()), or
     // nothing for a name no mob has.
+    // Every kind of mob, and the model file describing it (EntityInfo -
+    // health, drops, natural spawning...).
+    struct MobKind {
+        const char* type;
+        const char* model;
+    };
+    constexpr MobKind MOB_KINDS[] = {{Cow::TYPE_ID, "cow"}, {Sheep::TYPE_ID, "sheep"}, {Npc::TYPE_ID, "player"}};
+
+    const EntityInfo* mob_kind_info(const std::string& type)
+    {
+        for (const MobKind& kind : MOB_KINDS) {
+            if (type == kind.type) return &entity_model(kind.model).entity;
+        }
+        return nullptr;
+    }
+
+    // Hit points a hit does, with this in hand - Minecraft Beta's weapon
+    // damage: a sword by far the best, other tools a little, a fist 1.
+    int attack_damage(const ItemStack& held)
+    {
+        if (!held.is_tool()) return 1;
+        const ItemProperties& tool = get_item_properties(held.tool);
+        switch (tool.tool_kind) {
+            case ToolKind::Sword: return 3 + tool.tier;
+            case ToolKind::Axe: return 2 + tool.tier;
+            case ToolKind::Pickaxe: return 1 + tool.tier;
+            case ToolKind::Shovel: return std::max(1, tool.tier);
+            default: return 1;
+        }
+    }
+
     std::unique_ptr<Mob> create_mob(const std::string& type, Vector3 feet, float yaw, uint32_t seed)
     {
         if (type == Cow::TYPE_ID) return std::make_unique<Cow>(feet, yaw, seed);
@@ -374,16 +406,16 @@ namespace {
     // time (each cell re-lights/remeshes its whole chunk neighborhood).
     constexpr long long COMMAND_VOLUME_LIMIT = 32768;
 
-    // Animal spawning (see GameEngine::try_spawn_animals()): every few
-    // seconds, while fewer than MAX_NEARBY_ANIMALS roam within NEARBY_RADIUS
-    // of the player, a small herd of cows or sheep appears on grass
-    // SPAWN_DISTANCE_MIN..MAX blocks away - out of sight, like Minecraft's
-    // own animals being "already there". MAX_ANIMALS caps the whole world's
-    // population.
+    // Natural spawning (see GameEngine::try_spawn_mobs()): every few
+    // seconds, while fewer than MAX_NEARBY_MOBS roam within NEARBY_RADIUS of
+    // the player, a group of one kind - picked by the spawn settings in its
+    // model file - appears SPAWN_DISTANCE_MIN..MAX blocks away, out of
+    // sight, like Minecraft's own animals being "already there".
+    // MAX_SPAWNED_MOBS caps the whole world's population.
     constexpr uint64_t MOB_SPAWN_INTERVAL_TICKS = 100;
     constexpr float NEARBY_RADIUS = 64.0f;
-    constexpr size_t MAX_NEARBY_ANIMALS = 8;
-    constexpr size_t MAX_ANIMALS = 50;
+    constexpr size_t MAX_NEARBY_MOBS = 8;
+    constexpr size_t MAX_SPAWNED_MOBS = 50;
     constexpr float SPAWN_DISTANCE_MIN = 24.0f;
     constexpr float SPAWN_DISTANCE_MAX = 48.0f;
 
@@ -557,8 +589,23 @@ void GameEngine::tick_mobs()
             world->swap_block_same_light(change->x, change->y, change->z, change->block);
         }
     }
+
+    // Mobs done dying: gone, leaving their drops behind.
+    for (auto it = mobs.begin(); it != mobs.end();) {
+        if (!(*it)->is_dead()) {
+            ++it;
+            continue;
+        }
+        const Vector3 at = Vector3Add((*it)->get_position(), {0.0f, (*it)->height() * 0.5f, 0.0f});
+        for (const ItemStack& drop : (*it)->roll_drops()) {
+            const Vector3 launch = {static_cast<float>(GetRandomValue(-100, 100)) / 100.0f * 0.05f, 0.1f,
+                                    static_cast<float>(GetRandomValue(-100, 100)) / 100.0f * 0.05f};
+            dropped_items.push_back(std::make_unique<DroppedItem>(at, drop, launch, DroppedItemOrigin::Natural));
+        }
+        it = mobs.erase(it);
+    }
     push_entities_apart();
-    if (game_tick % MOB_SPAWN_INTERVAL_TICKS == 0) try_spawn_animals();
+    if (game_tick % MOB_SPAWN_INTERVAL_TICKS == 0) try_spawn_mobs();
 }
 
 void GameEngine::push_entities_apart()
@@ -604,46 +651,96 @@ std::optional<int> GameEngine::grass_spawn_height(int x, int z) const
     return std::nullopt;
 }
 
-void GameEngine::try_spawn_animals()
+void GameEngine::try_spawn_mobs()
 {
+    // Only mobs that spawn by themselves count toward the caps.
     const Vector3 feet = player.feet_position();
-    size_t animal_count = 0, nearby = 0;
+    size_t spawned_count = 0, nearby = 0;
     for (const auto& mob : mobs) {
-        const std::string type = mob->type_id();
-        if (type != Cow::TYPE_ID && type != Sheep::TYPE_ID) continue;
-        ++animal_count;
+        const EntityInfo* info = mob_kind_info(mob->type_id());
+        if (!info || !info->spawn.enabled) continue;
+        ++spawned_count;
         const Vector3 d = Vector3Subtract(mob->get_position(), feet);
         if (d.x * d.x + d.z * d.z < NEARBY_RADIUS * NEARBY_RADIUS) ++nearby;
     }
-    if (animal_count >= MAX_ANIMALS) return;
-    if (nearby >= MAX_NEARBY_ANIMALS) return;
+    if (spawned_count >= MAX_SPAWNED_MOBS || nearby >= MAX_NEARBY_MOBS) return;
 
     std::uniform_real_distribution<float> angle(0.0f, 2.0f * PI);
     std::uniform_real_distribution<float> distance(SPAWN_DISTANCE_MIN, SPAWN_DISTANCE_MAX);
     std::uniform_real_distribution<float> yaw(-180.0f, 180.0f);
-    std::uniform_int_distribution<int> herd_size(2, 4);
     std::uniform_int_distribution<int> spread(-3, 3);
     for (int attempt = 0; attempt < 6; ++attempt) {
         const float a = angle(mob_rng), r = distance(mob_rng);
         const int center_x = static_cast<int>(std::floor(feet.x + std::cos(a) * r));
         const int center_z = static_cast<int>(std::floor(feet.z + std::sin(a) * r));
-        if (!grass_spawn_height(center_x, center_z)) continue;
+        if (!world->is_column_loaded(center_x, center_z)) continue;
 
-        // A few tries per cow around the herd's middle - some spots nearby
-        // may be a tree or a hole instead of grass.
-        int remaining = herd_size(mob_rng);
-        // Each herd is all cows or all sheep.
-        const char* kind = std::uniform_int_distribution<int>(0, 1)(mob_rng) == 0 ? Cow::TYPE_ID : Sheep::TYPE_ID;
-        for (int tries = remaining * 3; tries > 0 && remaining > 0 && animal_count < MAX_ANIMALS; --tries) {
+        // Every kind that spawns in this biome and has a spot here fitting
+        // where it lives, one picked by weight (see EntityInfo::spawn).
+        std::string biome = get_biome_name(world->get_biome(center_x, center_z));
+        std::transform(biome.begin(), biome.end(), biome.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        std::vector<std::pair<const MobKind*, const EntityInfo*>> candidates;
+        int total_weight = 0;
+        for (const MobKind& kind : MOB_KINDS) {
+            const EntityInfo& info = entity_model(kind.model).entity;
+            if (!info.spawn.enabled) continue;
+            const std::vector<std::string>& biomes = info.spawn.biomes;
+            if (!biomes.empty() && std::find(biomes.begin(), biomes.end(), biome) == biomes.end()) continue;
+            if (!mob_spawn_height(info.environment, center_x, center_z)) continue;
+            candidates.push_back({&kind, &info});
+            total_weight += info.spawn.weight;
+        }
+        if (candidates.empty()) continue;
+        int roll = std::uniform_int_distribution<int>(0, total_weight - 1)(mob_rng);
+        size_t picked = 0;
+        while (roll >= candidates[picked].second->spawn.weight) roll -= candidates[picked++].second->spawn.weight;
+        const MobKind& kind = *candidates[picked].first;
+        const EntityInfo& info = *candidates[picked].second;
+
+        // A few tries per member around the group's middle - some spots
+        // nearby may be a tree or a hole.
+        int remaining = std::uniform_int_distribution<int>(info.spawn.min_group, info.spawn.max_group)(mob_rng);
+        for (int tries = remaining * 3; tries > 0 && remaining > 0 && spawned_count < MAX_SPAWNED_MOBS; --tries) {
             const int x = center_x + spread(mob_rng);
             const int z = center_z + spread(mob_rng);
-            if (std::optional<int> y = grass_spawn_height(x, z)) {
-                mobs.push_back(create_mob(kind, Vector3{x + 0.5f, static_cast<float>(*y), z + 0.5f}, yaw(mob_rng), mob_rng()));
-                ++animal_count;
+            if (std::optional<float> y = mob_spawn_height(info.environment, x, z)) {
+                mobs.push_back(create_mob(kind.type, Vector3{x + 0.5f, *y, z + 0.5f}, yaw(mob_rng), mob_rng()));
+                ++spawned_count;
                 --remaining;
             }
         }
         return;
+    }
+}
+
+std::optional<float> GameEngine::mob_spawn_height(EntityEnvironment environment, int x, int z)
+{
+    if (!world || !world->is_column_loaded(x, z)) return std::nullopt;
+    switch (environment) {
+        case EntityEnvironment::Land:
+            // Animals appear on grass, like Minecraft's.
+            if (std::optional<int> y = grass_spawn_height(x, z)) return static_cast<float>(*y);
+            return std::nullopt;
+        case EntityEnvironment::Water: {
+            // In open water at least two blocks deep, just under its top.
+            for (int y = MIN_WORLD_Y + CHUNK_HEIGHT - 2; y > MIN_WORLD_Y; --y) {
+                const BlockType block = world->get_block(x, y, z);
+                if (block == BlockType::Air) continue;
+                if (block != BlockType::Water || world->get_block(x, y - 1, z) != BlockType::Water) return std::nullopt;
+                return static_cast<float>(y - 1);
+            }
+            return std::nullopt;
+        }
+        case EntityEnvironment::Air: {
+            // A few blocks up in the open sky over whatever the ground is.
+            for (int y = MIN_WORLD_Y + CHUNK_HEIGHT - 12; y > MIN_WORLD_Y; --y) {
+                if (world->get_block(x, y, z) == BlockType::Air) continue;
+                return static_cast<float>(y + 1 + std::uniform_int_distribution<int>(4, 10)(mob_rng));
+            }
+            return std::nullopt;
+        }
+        default:
+            return std::nullopt;
     }
 }
 
@@ -720,6 +817,7 @@ Mob* GameEngine::targeted_mob(Vector3 aim, float reach) const
     Mob* closest = nullptr;
     float closest_distance = reach;
     for (const auto& mob : mobs) {
+        if (mob->is_dying()) continue;
         std::optional<float> distance = mob->ray_distance(camera.position, aim);
         if (distance && *distance <= closest_distance) {
             closest_distance = *distance;
@@ -735,8 +833,14 @@ Mob* GameEngine::targeted_mob(Vector3 aim, float reach) const
 
 void GameEngine::hit_mob(Mob& mob)
 {
-    if (!mob.hurt(player.feet_position())) return; // still recovering from the last hit
-    apply_interaction(mob, mob.interact(InteractionTrigger::Hit, inventory.hotbar[inventory.selected_slot]));
+    ItemStack& held = inventory.hotbar[inventory.selected_slot];
+    if (!mob.hurt(player.feet_position(), attack_damage(held))) return; // still recovering from the last hit
+    apply_interaction(mob, mob.interact(InteractionTrigger::Hit, held));
+    // A weapon wears 1 per hit, any other tool 2 - vanilla's rule.
+    if (held.is_tool()) {
+        held.durability -= get_item_properties(held.tool).tool_kind == ToolKind::Sword ? 1 : 2;
+        if (held.durability <= 0) held.clear();
+    }
 }
 
 bool GameEngine::use_on_mob(Mob& mob)
@@ -2586,6 +2690,7 @@ bool GameEngine::open_world(const std::string& folder_name, const GameLoadProgre
         for (const MobSaveState& saved : WorldSave::load_mobs(folder_name)) {
             if (std::unique_ptr<Mob> mob = create_mob(saved.type, saved.position, saved.yaw, mob_rng())) {
                 for (const std::string& state : saved.states) mob->set_state(state, true);
+                if (saved.health > 0) mob->set_health(saved.health);
                 mobs.push_back(std::move(mob));
             }
         }
@@ -2646,7 +2751,10 @@ void GameEngine::save_player_state()
 
     std::vector<MobSaveState> saved_mobs;
     saved_mobs.reserve(mobs.size());
-    for (const auto& mob : mobs) saved_mobs.push_back({mob->type_id(), mob->get_position(), mob->get_yaw(), mob->states()});
+    for (const auto& mob : mobs) {
+        if (mob->is_dying()) continue;
+        saved_mobs.push_back({mob->type_id(), mob->get_position(), mob->get_yaw(), mob->states(), mob->health()});
+    }
     WorldSave::save_mobs(current_world_folder, saved_mobs);
 
     // Every chest's own storage (see World::all_chest_inventories()) -

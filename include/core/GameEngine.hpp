@@ -118,13 +118,16 @@ private:
 
     // One tick for every mob (animals, NPCs) in a loaded chunk, plus -
     // every few seconds - a herd of cows or sheep spawning on grass some way
-    // off if few animals are around (see try_spawn_animals()).
+    // off if few animals are around (see try_spawn_mobs()).
     void tick_mobs();
 
     // Every pair of overlapping hitboxes (mob-mob, player-mob) gets nudged
     // apart this tick - see push_apart() in the .cpp.
     void push_entities_apart();
-    void try_spawn_animals();
+    void try_spawn_mobs();
+    // Where a mob living in `environment` could appear in column (x, z):
+    // its feet height, or nothing if this column has no such spot.
+    std::optional<float> mob_spawn_height(EntityEnvironment environment, int x, int z);
 
     // The mob under the crosshair within `reach`, unless a block is in
     // front of it - that one gets the click instead.

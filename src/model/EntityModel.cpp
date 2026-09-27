@@ -109,6 +109,123 @@ EntityModel make_humanoid_model()
     return model;
 }
 
+namespace {
+    const char* TRIGGER_IDS[] = {"hit", "use"};
+    const char* HELD_IDS[] = {"any", "empty", "item"};
+
+    template <typename Enum, size_t N>
+    Enum enum_from_id(const std::string& id, const char* (&ids)[N], Enum fallback)
+    {
+        for (size_t i = 0; i < N; ++i) {
+            if (id == ids[i]) return static_cast<Enum>(i);
+        }
+        return fallback;
+    }
+
+    EntityInfo read_entity_info(const Json& json)
+    {
+        EntityInfo info;
+        if (json.get_type() != Json::Type::Object) return info;
+        info.description = json["description"].as_string();
+        info.health = std::max(1, static_cast<int>(json["health"].as_number(info.health)));
+        info.environment = entity_environment_from_id(json["environment"].as_string("land"));
+        for (const Json& d : json["drops"].as_array()) {
+            EntityDropInfo drop;
+            drop.item = d["item"].as_string();
+            drop.min_count = std::max(0, static_cast<int>(d["min"].as_number(1)));
+            drop.max_count = std::max(drop.min_count, static_cast<int>(d["max"].as_number(drop.min_count)));
+            drop.chance = std::clamp(static_cast<float>(d["chance"].as_number(1.0)), 0.0f, 1.0f);
+            drop.unless_state = d["unless_state"].as_string();
+            info.drops.push_back(drop);
+        }
+        for (const Json& r : json["interactions"].as_array()) {
+            EntityInteractionInfo rule;
+            rule.trigger = enum_from_id(r["trigger"].as_string("use"), TRIGGER_IDS, EntityTrigger::Use);
+            rule.held = enum_from_id(r["held"].as_string("any"), HELD_IDS, EntityHeld::Anything);
+            rule.held_item = r["held_item"].as_string();
+            rule.chance = std::clamp(static_cast<float>(r["chance"].as_number(1.0)), 0.0f, 1.0f);
+            rule.required_state = r["required_state"].as_string();
+            rule.blocking_state = r["blocking_state"].as_string();
+            rule.drop_item = r["drop"].as_string();
+            rule.drop_min = std::max(0, static_cast<int>(r["drop_min"].as_number(1)));
+            rule.drop_max = std::max(rule.drop_min, static_cast<int>(r["drop_max"].as_number(rule.drop_min)));
+            rule.hand_result = r["hand_result"].as_string();
+            rule.set_state = r["set_state"].as_string();
+            rule.clear_state = r["clear_state"].as_string();
+            info.interactions.push_back(rule);
+        }
+        const Json& spawn = json["spawn"];
+        info.spawn.enabled = spawn["enabled"].as_bool(false);
+        for (const Json& biome : spawn["biomes"].as_array()) {
+            if (!biome.as_string().empty()) info.spawn.biomes.push_back(biome.as_string());
+        }
+        info.spawn.weight = std::max(1, static_cast<int>(spawn["weight"].as_number(info.spawn.weight)));
+        info.spawn.min_group = std::max(1, static_cast<int>(spawn["min_group"].as_number(info.spawn.min_group)));
+        info.spawn.max_group = std::max(info.spawn.min_group, static_cast<int>(spawn["max_group"].as_number(info.spawn.max_group)));
+        return info;
+    }
+
+    void write_entity_info(std::ostream& out, const EntityInfo& info)
+    {
+        auto field = [&](const char* key, const std::string& value) {
+            if (!value.empty()) out << ", \"" << key << "\": \"" << escape(value) << "\"";
+        };
+        out << "  \"entity\": {\n";
+        out << "    \"description\": \"" << escape(info.description) << "\",\n";
+        out << "    \"health\": " << info.health << ",\n";
+        out << "    \"environment\": \"" << entity_environment_id(info.environment) << "\",\n";
+        out << "    \"drops\": [";
+        for (size_t i = 0; i < info.drops.size(); ++i) {
+            const EntityDropInfo& drop = info.drops[i];
+            out << (i ? ",\n      " : "\n      ") << "{ \"item\": \"" << escape(drop.item) << "\", \"min\": " << drop.min_count
+                << ", \"max\": " << drop.max_count << ", \"chance\": " << number(drop.chance);
+            field("unless_state", drop.unless_state);
+            out << " }";
+        }
+        out << (info.drops.empty() ? "],\n" : "\n    ],\n");
+        out << "    \"interactions\": [";
+        for (size_t i = 0; i < info.interactions.size(); ++i) {
+            const EntityInteractionInfo& rule = info.interactions[i];
+            out << (i ? ",\n      " : "\n      ") << "{ \"trigger\": \"" << TRIGGER_IDS[static_cast<int>(rule.trigger)]
+                << "\", \"held\": \"" << HELD_IDS[static_cast<int>(rule.held)] << "\"";
+            if (rule.held == EntityHeld::Item) field("held_item", rule.held_item);
+            out << ", \"chance\": " << number(rule.chance);
+            field("required_state", rule.required_state);
+            field("blocking_state", rule.blocking_state);
+            if (!rule.drop_item.empty()) {
+                field("drop", rule.drop_item);
+                out << ", \"drop_min\": " << rule.drop_min << ", \"drop_max\": " << rule.drop_max;
+            }
+            field("hand_result", rule.hand_result);
+            field("set_state", rule.set_state);
+            field("clear_state", rule.clear_state);
+            out << " }";
+        }
+        out << (info.interactions.empty() ? "],\n" : "\n    ],\n");
+        out << "    \"spawn\": { \"enabled\": " << (info.spawn.enabled ? "true" : "false") << ", \"biomes\": [";
+        for (size_t i = 0; i < info.spawn.biomes.size(); ++i) out << (i ? ", " : "") << "\"" << escape(info.spawn.biomes[i]) << "\"";
+        out << "], \"weight\": " << info.spawn.weight << ", \"min_group\": " << info.spawn.min_group
+            << ", \"max_group\": " << info.spawn.max_group << " }\n";
+        out << "  },\n";
+    }
+}
+
+const char* entity_environment_id(EntityEnvironment environment)
+{
+    switch (environment) {
+        case EntityEnvironment::Water: return "water";
+        case EntityEnvironment::Air: return "air";
+        default: return "land";
+    }
+}
+
+EntityEnvironment entity_environment_from_id(const std::string& id)
+{
+    if (id == "water") return EntityEnvironment::Water;
+    if (id == "air") return EntityEnvironment::Air;
+    return EntityEnvironment::Land;
+}
+
 std::optional<EntityModel> load_entity_model(const std::string& path)
 {
     std::ifstream in(path, std::ios::binary);
@@ -127,6 +244,7 @@ std::optional<EntityModel> load_entity_model(const std::string& path)
             model.skin_height = std::max(1, static_cast<int>(skin_size[1].as_number(64)));
         }
 
+        model.entity = read_entity_info(root["entity"]);
         for (const Json& layer : root["layers"].as_array()) {
             if (!layer.as_string().empty()) model.layers.push_back(layer.as_string());
         }
@@ -220,6 +338,7 @@ bool save_entity_model(const EntityModel& model, const std::string& path)
         for (size_t i = 0; i < model.layers.size(); ++i) out << (i ? ", " : "") << "\"" << escape(model.layers[i]) << "\"";
         out << "],\n";
     }
+    write_entity_info(out, model.entity);
     out << "  \"parts\": [";
     for (size_t i = 0; i < model.parts.size(); ++i) {
         const ModelPart& part = model.parts[i];
@@ -378,6 +497,7 @@ ModelPose EntityAnimator::pose(const EntityModel& model) const
     for (const EntityAnimation& animation : model.animations) {
         if (animation.trigger == AnimationTrigger::Sneaking) state_weight = sneaking_weight;
     }
+
     auto kept_by_state = [&](const std::string& name) {
         for (const EntityAnimation& state : model.animations) {
             if (state.trigger != AnimationTrigger::Sneaking) continue;

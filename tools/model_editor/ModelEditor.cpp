@@ -23,6 +23,7 @@ namespace {
     constexpr float MODEL_SCALE       = 1.0f / 16.0f; // 16 model pixels = one block = one grid cell
     constexpr float TOP_BAR_HEIGHT    = 40.0f;
     constexpr float RIGHT_PANEL_WIDTH = 360.0f;
+    constexpr float LEFT_PANEL_WIDTH  = 340.0f;
     constexpr float TIMELINE_HEIGHT   = 150.0f;
     constexpr float ROW               = 26.0f;     // one control row
     constexpr float GAP               = 6.0f;
@@ -157,6 +158,7 @@ void ModelEditor::run()
               tr("editor.viewport_hint"));
         draw_timeline(timeline_rect());
         draw_right_panel(right_panel_rect());
+        draw_left_panel(left_panel_rect());
         // The one on top last.
         draw_floating_window(top_window == UV_WINDOW ? GRAPH_WINDOW : UV_WINDOW);
         draw_floating_window(top_window);
@@ -179,14 +181,20 @@ Rectangle ModelEditor::right_panel_rect() const
             GetScreenHeight() - TOP_BAR_HEIGHT};
 }
 
+Rectangle ModelEditor::left_panel_rect() const
+{
+    return {0, TOP_BAR_HEIGHT, LEFT_PANEL_WIDTH, GetScreenHeight() - TOP_BAR_HEIGHT};
+}
+
 Rectangle ModelEditor::timeline_rect() const
 {
-    return {0, GetScreenHeight() - TIMELINE_HEIGHT, GetScreenWidth() - RIGHT_PANEL_WIDTH, TIMELINE_HEIGHT};
+    return {LEFT_PANEL_WIDTH, GetScreenHeight() - TIMELINE_HEIGHT, GetScreenWidth() - RIGHT_PANEL_WIDTH - LEFT_PANEL_WIDTH,
+            TIMELINE_HEIGHT};
 }
 
 Rectangle ModelEditor::viewport_rect() const
 {
-    return {0, TOP_BAR_HEIGHT, GetScreenWidth() - RIGHT_PANEL_WIDTH,
+    return {LEFT_PANEL_WIDTH, TOP_BAR_HEIGHT, GetScreenWidth() - RIGHT_PANEL_WIDTH - LEFT_PANEL_WIDTH,
             GetScreenHeight() - TOP_BAR_HEIGHT - TIMELINE_HEIGHT};
 }
 
@@ -388,6 +396,23 @@ bool ModelEditor::text_field(Rectangle bounds, char* buffer, int size)
         editing_widget = id;
     }
     return false;
+}
+
+bool ModelEditor::string_field(Rectangle bounds, std::string& value)
+{
+    // Only one field is ever being typed in: it gets the shared buffer,
+    // every other one just shows its value.
+    const int id = widget_counter; // the id text_field() is about to take
+    const bool was_editing = editing_widget == id;
+    static char shown[sizeof(string_edit_buffer)];
+    if (!was_editing) std::snprintf(shown, sizeof(shown), "%s", value.c_str());
+    const bool finished = text_field(bounds, was_editing ? string_edit_buffer : shown, sizeof(string_edit_buffer));
+    if (!was_editing && editing_widget == id) {
+        std::snprintf(string_edit_buffer, sizeof(string_edit_buffer), "%s", value.c_str()); // just clicked into it
+    }
+    if (!finished || value == string_edit_buffer) return false;
+    value = string_edit_buffer;
+    return true;
 }
 
 bool ModelEditor::int_field(Rectangle bounds, int& value, int min_value, int max_value)
@@ -1520,6 +1545,262 @@ void ModelEditor::draw_graph_window(Rectangle bounds)
     EndScissorMode();
 
     label({area.x + PAD, area.y + area.height - ROW - 2, area.width - PAD * 2, ROW}, tr("editor.graph_hint"));
+}
+
+// ------------------------------------------------------------ Left panel --
+
+namespace {
+    // `text` broken into lines no wider than `width` at `size`.
+    std::vector<std::string> wrap_lines(const std::string& text, float width, float size)
+    {
+        std::vector<std::string> lines;
+        std::istringstream words(text);
+        std::string word;
+        while (words >> word) {
+            if (lines.empty()) { lines.push_back(word); continue; }
+            const std::string longer = lines.back() + " " + word;
+            if (MeasureTextEx(editor_text::font(), longer.c_str(), size, 1).x > width) lines.push_back(word);
+            else lines.back() = longer;
+        }
+        return lines;
+    }
+
+    // The game's own name for a block or item (as /give takes it), or ""
+    // if there's no such thing - the translations know every one.
+    std::string item_display_name(const std::string& name)
+    {
+        for (const std::string& key : {"item." + name, "block." + name}) {
+            const std::string& text = tr(key);
+            if (text != key) return text;
+        }
+        return "";
+    }
+
+    int percent(float chance) { return static_cast<int>(std::lround(chance * 100.0f)); }
+}
+
+void ModelEditor::draw_left_panel(Rectangle bounds)
+{
+    EntityInfo& info = model.entity;
+    const float content_width = bounds.width - 14.0f;
+    static float content_height = 800.0f;
+    Rectangle view{};
+    GuiScrollPanel(bounds, nullptr, {0, 0, content_width, content_height}, &entity_panel_scroll, &view);
+
+    const bool mouse_inside = CheckCollisionPointRec(GetMousePosition(), view) && !models_dropdown_open;
+    if (!mouse_inside) GuiLock();
+    BeginScissorMode(static_cast<int>(view.x), static_cast<int>(view.y), static_cast<int>(view.width), static_cast<int>(view.height));
+
+    const float x = view.x + PAD;
+    const float width = content_width - PAD * 2;
+    const float label_w = 128.0f;
+    const float half = (width - GAP) * 0.5f;
+    float y = view.y + entity_panel_scroll.y + PAD;
+    const Color muted = Fade(gui_color(DEFAULT, TEXT_COLOR_NORMAL), 0.7f);
+
+    auto section = [&](const std::string& title) {
+        y += GAP;
+        GuiLine({x, y, width, ROW}, title.c_str());
+        y += ROW;
+    };
+    auto small_text = [&](const std::string& text, Color color) {
+        for (const std::string& line : wrap_lines(text, width, 14.0f)) {
+            DrawTextEx(editor_text::font(), line.c_str(), {x, y}, 14, 1, color);
+            y += 17.0f;
+        }
+    };
+    // Under a block/item name field: what it is, or that it isn't anything.
+    auto item_check = [&](const std::string& name) {
+        if (name.empty()) return;
+        const std::string shown = item_display_name(name);
+        small_text(shown.empty() ? tr("editor.entity_unknown_item") : "= " + shown,
+                   shown.empty() ? Color{230, 90, 80, 255} : Color{120, 200, 120, 255});
+    };
+    auto labeled_string = [&](const std::string& caption, std::string& value) {
+        label({x, y, label_w, ROW}, caption);
+        const bool changed = string_field({x + label_w, y, width - label_w, ROW}, value);
+        y += ROW + GAP;
+        if (changed) mark_dirty();
+        return changed;
+    };
+    auto labeled_int = [&](const std::string& caption, int& value, int min_value, int max_value) {
+        label({x, y, label_w, ROW}, caption);
+        const bool changed = int_field({x + label_w, y, width - label_w, ROW}, value, min_value, max_value);
+        y += ROW + GAP;
+        if (changed) mark_dirty();
+        return changed;
+    };
+    auto count_range = [&](const std::string& caption, int& min_value, int& max_value) {
+        label({x, y, label_w, ROW}, caption);
+        const float field = (width - label_w - GAP) * 0.5f;
+        bool changed = int_field({x + label_w, y, field, ROW}, min_value, 0, 64);
+        changed |= int_field({x + label_w + field + GAP, y, field, ROW}, max_value, 0, 64);
+        if (max_value < min_value) max_value = min_value;
+        y += ROW + GAP;
+        if (changed) mark_dirty();
+    };
+    auto chance_field = [&](float& chance) {
+        int value = percent(chance);
+        if (labeled_int(tr("editor.entity_chance"), value, 0, 100)) chance = static_cast<float>(value) / 100.0f;
+    };
+
+    // What it is
+    section(tr("editor.entity"));
+    label({x, y, width, ROW}, tr("editor.entity_description"));
+    y += ROW;
+    if (string_field({x, y, width, ROW}, info.description)) mark_dirty();
+    y += ROW + 4;
+    small_text(info.description, muted);
+    y += GAP;
+    labeled_int(tr("editor.entity_health"), info.health, 1, 1000);
+    {
+        const int hearts = info.health / 2;
+        const std::string text = std::to_string(hearts) + (info.health % 2 ? ".5" : "");
+        small_text(tr_format("editor.entity_hearts", {text}), muted);
+        y += GAP;
+    }
+    {
+        label({x, y, label_w, ROW}, tr("editor.entity_environment"));
+        const std::string items = tr("editor.environment_land") + ";" + tr("editor.environment_water") + ";" +
+                                  tr("editor.environment_air");
+        int active = static_cast<int>(info.environment);
+        GuiComboBox({x + label_w, y, width - label_w, ROW}, items.c_str(), &active);
+        if (active != static_cast<int>(info.environment)) {
+            info.environment = static_cast<EntityEnvironment>(active);
+            mark_dirty();
+        }
+        y += ROW + GAP;
+    }
+
+    // Drops
+    section(tr("editor.entity_drops"));
+    small_text(tr("editor.entity_drops_hint"), muted);
+    y += GAP;
+    int remove_drop = -1;
+    for (size_t i = 0; i < info.drops.size(); ++i) {
+        EntityDropInfo& drop = info.drops[i];
+        label({x, y, label_w, ROW}, tr("editor.entity_item"));
+        if (string_field({x + label_w, y, width - label_w - ROW - GAP, ROW}, drop.item)) mark_dirty();
+        if (GuiButton({x + width - ROW, y, ROW, ROW}, "x")) remove_drop = static_cast<int>(i);
+        y += ROW + 2;
+        item_check(drop.item);
+        y += GAP;
+        count_range(tr("editor.entity_count"), drop.min_count, drop.max_count);
+        chance_field(drop.chance);
+        labeled_string(tr("editor.entity_unless_state"), drop.unless_state);
+        GuiLine({x, y, width, 8}, nullptr);
+        y += 8 + GAP;
+    }
+    if (remove_drop >= 0) {
+        info.drops.erase(info.drops.begin() + remove_drop);
+        mark_dirty();
+    }
+    if (GuiButton({x, y, width, ROW}, tr("editor.entity_add_drop").c_str())) {
+        info.drops.push_back({});
+        mark_dirty();
+    }
+    y += ROW + GAP;
+
+    // Interactions
+    section(tr("editor.entity_interactions"));
+    small_text(tr("editor.entity_interactions_hint"), muted);
+    y += GAP;
+    int remove_rule = -1;
+    for (size_t i = 0; i < info.interactions.size(); ++i) {
+        EntityInteractionInfo& rule = info.interactions[i];
+        {
+            const std::string items = tr("editor.trigger_hit") + ";" + tr("editor.trigger_use");
+            int active = static_cast<int>(rule.trigger);
+            GuiComboBox({x, y, width - ROW - GAP, ROW}, items.c_str(), &active);
+            if (active != static_cast<int>(rule.trigger)) {
+                rule.trigger = static_cast<EntityTrigger>(active);
+                mark_dirty();
+            }
+            if (GuiButton({x + width - ROW, y, ROW, ROW}, "x")) remove_rule = static_cast<int>(i);
+            y += ROW + GAP;
+        }
+        {
+            label({x, y, label_w, ROW}, tr("editor.entity_held"));
+            const std::string items = tr("editor.held_any") + ";" + tr("editor.held_empty") + ";" + tr("editor.held_item");
+            int active = static_cast<int>(rule.held);
+            GuiComboBox({x + label_w, y, width - label_w, ROW}, items.c_str(), &active);
+            if (active != static_cast<int>(rule.held)) {
+                rule.held = static_cast<EntityHeld>(active);
+                mark_dirty();
+            }
+            y += ROW + GAP;
+        }
+        if (rule.held == EntityHeld::Item) {
+            labeled_string(tr("editor.entity_held_item"), rule.held_item);
+            item_check(rule.held_item);
+        }
+        chance_field(rule.chance);
+        labeled_string(tr("editor.entity_required_state"), rule.required_state);
+        labeled_string(tr("editor.entity_unless_state"), rule.blocking_state);
+        labeled_string(tr("editor.entity_rule_drop"), rule.drop_item);
+        item_check(rule.drop_item);
+        if (!rule.drop_item.empty()) count_range(tr("editor.entity_count"), rule.drop_min, rule.drop_max);
+        labeled_string(tr("editor.entity_hand_result"), rule.hand_result);
+        item_check(rule.hand_result);
+        labeled_string(tr("editor.entity_set_state"), rule.set_state);
+        labeled_string(tr("editor.entity_clear_state"), rule.clear_state);
+        GuiLine({x, y, width, 8}, nullptr);
+        y += 8 + GAP;
+    }
+    if (remove_rule >= 0) {
+        info.interactions.erase(info.interactions.begin() + remove_rule);
+        mark_dirty();
+    }
+    if (GuiButton({x, y, width, ROW}, tr("editor.entity_add_interaction").c_str())) {
+        info.interactions.push_back({});
+        mark_dirty();
+    }
+    y += ROW + GAP;
+
+    // Natural spawning
+    section(tr("editor.entity_spawn"));
+    {
+        bool enabled = info.spawn.enabled;
+        GuiCheckBox({x, y + 4, ROW - 8, ROW - 8}, tr("editor.entity_spawn_enabled").c_str(), &enabled);
+        if (enabled != info.spawn.enabled) {
+            info.spawn.enabled = enabled;
+            mark_dirty();
+        }
+        y += ROW + GAP;
+    }
+    label({x, y, width, ROW}, tr("editor.entity_biomes"));
+    y += ROW;
+    {
+        constexpr int BIOME_COUNT = static_cast<int>(sizeof(ENTITY_BIOME_IDS) / sizeof(ENTITY_BIOME_IDS[0]));
+        for (int i = 0; i < BIOME_COUNT; ++i) {
+            const std::string id = ENTITY_BIOME_IDS[i];
+            std::vector<std::string>& biomes = info.spawn.biomes;
+            auto found = std::find(biomes.begin(), biomes.end(), id);
+            bool on = found != biomes.end();
+            const bool was_on = on;
+            GuiCheckBox({x + (i % 2) * (half + GAP), y + (i / 2) * ROW + 4, ROW - 8, ROW - 8}, tr("biome." + id).c_str(), &on);
+            if (on != was_on) {
+                if (on) biomes.push_back(id);
+                else biomes.erase(found);
+                mark_dirty();
+            }
+        }
+        y += ((BIOME_COUNT + 1) / 2) * ROW + 2;
+    }
+    small_text(tr("editor.entity_biomes_hint"), muted);
+    y += GAP;
+    labeled_int(tr("editor.entity_spawn_weight"), info.spawn.weight, 1, 1000);
+    {
+        int min_group = info.spawn.min_group, max_group = info.spawn.max_group;
+        count_range(tr("editor.entity_group"), min_group, max_group);
+        info.spawn.min_group = std::max(1, min_group);
+        info.spawn.max_group = std::max(info.spawn.min_group, max_group);
+    }
+    small_text(tr("editor.entity_spawn_hint"), muted);
+
+    content_height = y - (view.y + entity_panel_scroll.y) + PAD;
+    EndScissorMode();
+    GuiUnlock();
 }
 
 // ---------------------------------------------------------- Model list --

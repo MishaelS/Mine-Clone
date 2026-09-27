@@ -128,6 +128,68 @@ struct EntityAnimation {
 const char* animation_trigger_id(AnimationTrigger trigger); // "manual" / "always" / "moving" / "sneaking"
 AnimationTrigger animation_trigger_from_id(const std::string& id);
 
+// --- What the entity is, beyond its looks: the model editor's left panel.
+// The game reads it too - health, drops, interactions, natural spawning. ---
+
+// Where it lives: decides where it spawns (on the ground, in water, in the
+// air).
+enum class EntityEnvironment : uint8_t { Land, Water, Air, Count };
+const char* entity_environment_id(EntityEnvironment environment); // "land" / "water" / "air"
+EntityEnvironment entity_environment_from_id(const std::string& id);
+
+// Biome ids spawning can name - lower-case get_biome_name().
+constexpr const char* ENTITY_BIOME_IDS[] = {"plains", "forest", "desert", "hills", "ocean", "sea"};
+
+// Dropped when it dies: `item` (a block or item name, as /give takes it)
+// with this chance, min..max of it - unless it has `unless_state` (a
+// sheared sheep keeps no wool to drop).
+struct EntityDropInfo {
+    std::string item;
+    int min_count = 1;
+    int max_count = 1;
+    float chance = 1.0f;
+    std::string unless_state;
+};
+
+// One way the player can act on it - see entities/Interaction.hpp, which
+// turns these into the rules the game runs.
+enum class EntityTrigger : uint8_t { Hit, Use, Count };   // left / right click
+enum class EntityHeld : uint8_t { Anything, EmptyHand, Item, Count };
+struct EntityInteractionInfo {
+    EntityTrigger trigger = EntityTrigger::Use;
+    EntityHeld held = EntityHeld::Anything;
+    std::string held_item;      // with EntityHeld::Item
+    float chance = 1.0f;
+    std::string required_state; // only while it has this state ("" = always)
+    std::string blocking_state; // ...and not while it has this one
+    std::string drop_item;      // dropped next to it ("" = nothing)
+    int drop_min = 1;
+    int drop_max = 1;
+    std::string hand_result;    // one held item turns into this ("" = stays)
+    std::string set_state;
+    std::string clear_state;
+};
+
+// Natural spawning: in these biomes (none listed = any), picked against
+// every other spawning entity there by `weight`, `min_group`..`max_group`
+// at a time.
+struct EntitySpawnInfo {
+    bool enabled = false;
+    std::vector<std::string> biomes;
+    int weight = 10;
+    int min_group = 2;
+    int max_group = 4;
+};
+
+struct EntityInfo {
+    std::string description;
+    int health = 10; // hit points - 2 per heart, like the player's
+    EntityEnvironment environment = EntityEnvironment::Land;
+    std::vector<EntityDropInfo> drops;
+    std::vector<EntityInteractionInfo> interactions;
+    EntitySpawnInfo spawn;
+};
+
 struct EntityModel {
     std::string name;
     std::string skin; // relative to ASSETS_PATH, e.g. "sprites/entities/player/Steve.png"
@@ -140,6 +202,7 @@ struct EntityModel {
     // by name. A sheep's wool is one: a layer the game hides once it's
     // sheared (see Mob::shows_layer()).
     std::vector<std::string> layers;
+    EntityInfo entity;
 
     int find_part(const std::string& part_name) const; // -1 if absent
 };

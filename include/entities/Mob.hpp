@@ -62,10 +62,21 @@ public:
     // nothing if it misses.
     std::optional<float> ray_distance(Vector3 origin, Vector3 direction) const;
 
-    // The player hits it: knocked back away from `from` and flashes red.
-    // False (nothing happens) while it's still recovering from the last hit
-    // - half a second, like Minecraft.
-    bool hurt(Vector3 from);
+    // The player hits it for `damage` hit points: knocked back away from
+    // `from`, flashes red, and dies at 0 (see is_dying()). False (nothing
+    // happens) while it's still recovering from the last hit - half a
+    // second, like Minecraft - or already dying.
+    bool hurt(Vector3 from, int damage);
+
+    // Hit points left - its model's EntityInfo::health to start with.
+    int health() const;
+    void set_health(int hit_points) { hit_points_left = hit_points; }
+    // Down to 0 health: tips over for a second (no more AI, no more hits),
+    // then is_dead() - GameEngine removes it and drops roll_drops().
+    bool is_dying() const { return dying; }
+    bool is_dead() const;
+    // What it drops on dying, from its model's EntityInfo::drops.
+    std::vector<ItemStack> roll_drops();
     // The player acts on it holding `held`: every one of its interaction
     // rules (add_interaction()) matching gets its chance to fire.
     InteractionResult interact(InteractionTrigger trigger, const ItemStack& held);
@@ -137,7 +148,7 @@ protected:
     // Whether its model's layer `layer` (EntityModel::layers) is drawn now.
     virtual bool shows_layer(const std::string&) const { return true; }
 
-    void add_interaction(const InteractionRule& rule) { interactions.push_back(rule); }
+    void add_interaction(const InteractionRule& rule) { all_rules.push_back(rule); }
 
     ai::GoalSelector goals;
 
@@ -159,11 +170,19 @@ private:
     bool jumping = false;
     Vector3 push_velocity = {0.0f, 0.0f, 0.0f}; // blocks/tick, from push()
 
-    std::vector<InteractionRule> interactions;
     std::vector<std::string> state_flags;
     std::optional<BlockChange> requested_change;
     int hurt_ticks = 0;        // red flash + no new hits while > 0
     int hurt_memory_ticks = 0; // see recently_hurt()
+    int hit_points_left = -1;  // -1 = not set yet: the model's full health
+    bool dying = false;
+    int death_ticks = 0;
+    // Interaction rules: its model's (EntityInfo::interactions) plus any
+    // add_interaction() added - built on first use, since the model is only
+    // known once the subclass exists.
+    const std::vector<InteractionRule>& rules();
+    std::vector<InteractionRule> all_rules;
+    bool rules_built = false;
     Vector3 hurt_from = {0.0f, 0.0f, 0.0f};
     int age_ticks = 0;
     std::string manual_animation; // see play_animation()

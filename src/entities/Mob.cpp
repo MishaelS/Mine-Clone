@@ -14,23 +14,24 @@
 
 namespace {
     // Per-tick physics, blocks/tick - vanilla's living-entity values.
-    constexpr float GRAVITY = 0.08f;
-    constexpr float VERTICAL_DRAG = 0.98f;
-    constexpr float JUMP_VELOCITY = 0.42f;    // clears one block
-    constexpr float WATER_GRAVITY = 0.02f;
-    constexpr float WATER_DRAG = 0.8f;
-    constexpr float SWIM_UP = 0.04f;          // jumping in water - see FloatGoal
-    constexpr float WATER_EXIT_JUMP = 0.3f;   // swimming into a bank: climbs out onto it
-    constexpr float WATER_WALK_FACTOR = 0.5f; // swimming is slower than walking
-    constexpr float COLLISION_EPSILON = 0.001f;
-    constexpr float PUSH_DECAY = 0.6f; // share of a shove still moving it the next tick
+    constexpr float GRAVITY                 = 0.08f;
+    constexpr float VERTICAL_DRAG           = 0.98f;
+    constexpr float JUMP_VELOCITY           = 0.42f;    // clears one block
+    constexpr float WATER_GRAVITY           = 0.02f;
+    constexpr float WATER_DRAG              =  0.8f;
+    constexpr float SWIM_UP                 = 0.04f;    // jumping in water - see FloatGoal
+    constexpr float WATER_EXIT_JUMP         =  0.3f;    // swimming into a bank: climbs out onto it
+    constexpr float WATER_WALK_FACTOR       =  0.5f;    // swimming is slower than walking
+    constexpr float COLLISION_EPSILON       = 0.001f;
+    constexpr float PUSH_DECAY              =  0.6f;    // share of a shove still moving it the next tick
     constexpr float DEFAULT_HEAD_TURN_LIMIT = 75.0f;
 
     // Being hit - vanilla's knockback and invulnerability time.
-    constexpr float KNOCKBACK_SPEED = 0.4f;  // blocks/tick, fading like a push
-    constexpr float KNOCKBACK_LIFT = 0.36f;  // blocks/tick up, when on the ground
-    constexpr int HURT_TICKS = 10;           // red flash, and no new hit counts meanwhile
-    constexpr int HURT_MEMORY_TICKS = 100;   // see Mob::recently_hurt()
+    constexpr float KNOCKBACK_SPEED = 0.4f;     // blocks/tick, fading like a push
+    constexpr float KNOCKBACK_LIFT  = 0.36f;    // blocks/tick up, when on the ground
+    constexpr int HURT_TICKS        = 10;       // red flash, and no new hit counts meanwhile
+    constexpr int HURT_MEMORY_TICKS = 100;      // see Mob::recently_hurt()
+    constexpr int DEATH_TICKS       = 20;       // tipping over before it's gone
 }
 
 Mob::Mob(Vector3 feet_position, float yaw_degrees, uint32_t seed, Dimensions dimensions)
@@ -48,13 +49,22 @@ Mob::Mob(Vector3 feet_position, float yaw_degrees, uint32_t seed, Dimensions dim
 void Mob::tick(const World& world, const ai::PlayerView& player)
 {
     motion.begin_tick();
-    previous_body_yaw = body_yaw_degrees;
-    previous_head_yaw = head_yaw_degrees;
+    previous_body_yaw   = body_yaw_degrees;
+    previous_head_yaw   = head_yaw_degrees;
     previous_head_pitch = head_pitch_degrees;
     jumping = false;
     ++age_ticks;
     if (hurt_ticks > 0) --hurt_ticks;
     if (hurt_memory_ticks > 0) --hurt_memory_ticks;
+
+    if (dying) {
+        // No more thinking - it just tips over where it stands.
+        ++death_ticks;
+        forward_speed = 0.0f;
+        move(world);
+        set_position(motion.current);
+        return;
+    }
 
     // Goals decide where to go and look; navigation turns that into the
     // next waypoint, the controls into body/head turning and walk input.
@@ -190,14 +200,19 @@ void Mob::render(float tick_alpha, const World& world) const
 
     const Texture2D& skin = entity.skin.empty() ? Texture2D{} : TextureManager::get(entity.skin);
     Color tint = entity_environment_tint(world, Vector3Add(position, {0.0f, dimensions.height * 0.5f, 0.0f}));
-    if (hurt_ticks > 0) {
-        // Just hit: flushed red, like Minecraft.
+    if (hurt_ticks > 0 || dying) {
+        // Just hit (or dying): flushed red, like Minecraft.
         tint.g = static_cast<unsigned char>(tint.g * 0.4f);
         tint.b = static_cast<unsigned char>(tint.b * 0.4f);
     }
     rlPushMatrix();
     rlTranslatef(position.x, position.y, position.z);
     rlRotatef(yaw, 0.0f, 1.0f, 0.0f);
+    if (dying) {
+        // Falls over onto its side, fast at first - Minecraft's death tilt.
+        const float fall = std::min(1.0f, (static_cast<float>(death_ticks) + tick_alpha) / DEATH_TICKS);
+        rlRotatef(std::sqrt(fall) * 90.0f, 0.0f, 0.0f, 1.0f);
+    }
     draw_entity_model(entity, skin, pose, model_scale(), tint);
     // Its layers (a sheep's wool) on top, in the same pose.
     for (const std::string& layer_name : entity.layers) {
@@ -246,9 +261,49 @@ std::optional<float> Mob::ray_distance(Vector3 origin, Vector3 direction) const
     return hit.distance;
 }
 
-bool Mob::hurt(Vector3 from)
+int Mob::health() const
 {
-    if (hurt_ticks > 0) return false;
+    return hit_points_left >= 0 ? hit_points_left : model().entity.health;
+}
+
+bool Mob::is_dead() const
+{
+    return dying && death_ticks >= DEATH_TICKS;
+}
+
+std::vector<ItemStack> Mob::roll_drops()
+{
+    std::vector<ItemStack> drops;
+    for (const EntityDropInfo& drop : model().entity.drops) {
+        if (!drop.unless_state.empty() && has_state(drop.unless_state)) continue;
+        if (random_float() >= drop.chance) continue;
+        const int count = random_int(drop.min_count, std::max(drop.min_count, drop.max_count));
+        if (count <= 0) continue;
+        if (std::optional<ItemRef> item = item_ref_from_name(drop.item)) {
+            drops.push_back(item->stack(count));
+        } else {
+            TraceLog(LOG_WARNING, "%s drop: no block or item named '%s'", type_id(), drop.item.c_str());
+        }
+    }
+    return drops;
+}
+
+const std::vector<InteractionRule>& Mob::rules()
+{
+    if (!rules_built) {
+        std::vector<InteractionRule> from_model;
+        for (const EntityInteractionInfo& info : model().entity.interactions) from_model.push_back(rule_from_info(info));
+        all_rules.insert(all_rules.begin(), from_model.begin(), from_model.end());
+        rules_built = true;
+    }
+    return all_rules;
+}
+
+bool Mob::hurt(Vector3 from, int damage)
+{
+    if (hurt_ticks > 0 || dying) return false;
+    hit_points_left = std::max(0, health() - std::max(0, damage));
+    if (hit_points_left == 0) dying = true;
     hurt_ticks = HURT_TICKS;
     hurt_memory_ticks = HURT_MEMORY_TICKS;
     hurt_from = from;
@@ -264,7 +319,8 @@ bool Mob::hurt(Vector3 from)
 InteractionResult Mob::interact(InteractionTrigger trigger, const ItemStack& held)
 {
     InteractionResult result;
-    for (const InteractionRule& rule : interactions) {
+    if (dying) return result;
+    for (const InteractionRule& rule : rules()) {
         if (rule.trigger != trigger || !rule.holds_right_item(held)) continue;
         if (!rule.required_state.empty() && !has_state(rule.required_state)) continue;
         if (!rule.blocking_state.empty() && has_state(rule.blocking_state)) continue;

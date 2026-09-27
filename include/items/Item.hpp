@@ -25,7 +25,7 @@ enum class ItemType : uint8_t {
     // tools (see ItemCategory below): they stack up to MAX_ITEM_STACK
     // instead of always sitting alone, and never carry durability.
     Stick, Coal, IronIngot, GoldIngot, Diamond, RedstoneDust,
-    Sapling, Apple, WheatSeeds, Wheat, Bucket, WaterBucket, LavaBucket,
+    Sapling, Apple, WheatSeeds, Wheat, Bucket, WaterBucket, LavaBucket, Leather,
 
     // Food - a Material like the ones above (stacks, no durability), plus
     // ItemProperties::heal_amount > 0 marks it edible - see PlayerHealth::

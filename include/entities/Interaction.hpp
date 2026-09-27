@@ -1,6 +1,7 @@
 #pragma once
 
 #include "items/Inventory.hpp"
+#include "model/EntityModel.hpp"
 
 #include <optional>
 #include <string>
@@ -69,3 +70,11 @@ struct InteractionResult {
     std::vector<ItemStack> drops;    // dropped next to the mob
     std::optional<ItemStack> in_hand; // one held item becomes this (the rest of the stack stays)
 };
+
+// A block or item by the name /give takes ("white_wool", "bucket"...) -
+// nothing for a name that's neither.
+std::optional<ItemRef> item_ref_from_name(const std::string& name);
+
+// The rule an entity's model file describes (EntityInfo::interactions). A
+// rule naming an item that doesn't exist is logged and never fires.
+InteractionRule rule_from_info(const EntityInteractionInfo& info);

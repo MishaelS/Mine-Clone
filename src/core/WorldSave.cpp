@@ -389,6 +389,7 @@ namespace WorldSave {
             const MobSaveState& mob = mobs[i];
             out << "    { \"type\": \"" << json_escape(mob.type) << "\", \"position\": { \"x\": " << mob.position.x
                 << ", \"y\": " << mob.position.y << ", \"z\": " << mob.position.z << " }, \"yaw\": " << mob.yaw;
+            if (mob.health >= 0) out << ", \"health\": " << mob.health;
             if (!mob.states.empty()) {
                 out << ", \"states\": [";
                 for (size_t s = 0; s < mob.states.size(); ++s) out << (s ? ", " : "") << "\"" << json_escape(mob.states[s]) << "\"";
@@ -417,6 +418,7 @@ namespace WorldSave {
                     static_cast<float>(entry["position"]["z"].as_number(0.0)),
                 };
                 mob.yaw = static_cast<float>(entry["yaw"].as_number(0.0));
+                mob.health = static_cast<int>(entry["health"].as_number(-1.0));
                 for (const Json& state : entry["states"].as_array()) {
                     if (!state.as_string().empty()) mob.states.push_back(state.as_string());
                 }

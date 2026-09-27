@@ -2,6 +2,14 @@
   "name": "player",
   "skin": "sprites/entities/player/Steve.png",
   "skin_size": [64, 64],
+  "entity": {
+    "description": "Житель (NPC) - та же модель, что у игрока. Гуляет возле своего дома, останавливается и смотрит на подошедшего игрока. Сам не появляется - только /summon npc.",
+    "health": 20,
+    "environment": "land",
+    "drops": [],
+    "interactions": [],
+    "spawn": { "enabled": false, "biomes": [], "weight": 10, "min_group": 1, "max_group": 1 }
+  },
   "parts": [
     {
       "name": "body",
