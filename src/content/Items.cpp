@@ -86,14 +86,10 @@ void register_items()
     food(I::MilkBucket    , "milk_bucket"    ,  6, {13,  4});
 
     // Blocks drawn as a flat item sprite instead of a 3D cube.
-    block_item_sprite(B::Torch           , {13,  3});
-    block_item_sprite(B::RedstoneTorch   , { 6,  7});
-    block_item_sprite(B::LitRedstoneTorch, { 6,  6});
     block_item_sprite(B::OakSapling      , {14,  2});
     block_item_sprite(B::OakDoorLower    , {11,  2});
     block_item_sprite(B::IronDoorLower   , {12,  2});
     block_item_sprite(B::BedHead         , {13,  2});
-    block_item_sprite(B::Cake            , {13,  1});
 }
 
 } // namespace content

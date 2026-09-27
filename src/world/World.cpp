@@ -320,19 +320,6 @@ namespace {
         return false;
     }
 
-    bool is_torch_block(BlockType type)
-    {
-        return type == BlockType::Torch || type == BlockType::RedstoneTorch || type == BlockType::LitRedstoneTorch;
-    }
-
-    std::optional<HorizontalDirection> side_from_normal(Vector3 normal)
-    {
-        if (normal.x > 0.5f) return HorizontalDirection::East;
-        if (normal.x < -0.5f) return HorizontalDirection::West;
-        if (normal.z > 0.5f) return HorizontalDirection::South;
-        if (normal.z < -0.5f) return HorizontalDirection::North;
-        return std::nullopt;
-    }
 }
 
 namespace {
@@ -935,8 +922,10 @@ BlockShapeBoxes World::outline_boxes_at(int x, int y, int z) const
     const BlockProperties& properties = get_block_properties(type);
     if (!properties.selectable) return BlockShapeBoxes{};
 
+    // Its facing/state matter to a shaped block's outline, and to where an
+    // attached one (a torch on a wall) has its hitbox.
     BlockInstanceState state;
-    if (properties.has_custom_shape) {
+    if (properties.has_custom_shape || block_is_attachable(type)) {
         state = unpack_block_state(get_block_orientation(x, y, z), get_block_state(x, y, z));
     }
 
@@ -1214,10 +1203,11 @@ bool World::attachment_has_support(int x, int y, int z) const
     return has_support_on(*this, x, y, z, state.attachment);
 }
 
-bool World::combine_oak_slab(int x, int y, int z)
+bool World::combine_slab(int x, int y, int z)
 {
-    if (get_block(x, y, z) != BlockType::OakSlab) return false;
-    set_block_and_rebuild(x, y, z, BlockType::OakPlanks);
+    const BlockProperties& slab = get_block_properties(get_block(x, y, z));
+    if (slab.shape_kind != BlockShapeKind::Slab || slab.double_block == BlockType::Air) return false;
+    set_block_and_rebuild(x, y, z, slab.double_block);
     schedule_fluid_neighbors(x, y, z);
     schedule_falling_check(x, y, z);
     return true;

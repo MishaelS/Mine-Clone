@@ -2,6 +2,7 @@
 
 #include "raylib.h"
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -204,6 +205,53 @@ enum class ToolKind : uint8_t { None, Sword, Pickaxe, Shovel, Axe, Hoe };
 // Chunk::build_mesh_data()'s own Shaped branch.
 enum class BlockRenderShape : uint8_t { Cube, Cross, Shaped };
 
+// What shape a block is, and so how it behaves - not which block it is: any
+// block of a kind gets that kind's geometry (core/BlockShape.hpp) and its
+// placing/using rules (GameEngine), a stone slab exactly like an oak one.
+//   Cube     - an ordinary full block
+//   Slab     - half a block, bottom or top by where it's clicked; two
+//              halves in one cell become its "double" block
+//   Stairs   - a slab plus a step, turned toward the player
+//   Trapdoor - a thin panel on the floor or ceiling that opens up
+//   Cake     - eaten a slice at a time
+//   Torch    - a stick on the floor or a wall, no collision
+//   Door, Bed - two-cell blocks (their halves are separate blocks)
+enum class BlockShapeKind : uint8_t { Cube, Slab, Stairs, Trapdoor, Cake, Torch, Door, Bed, Count };
+
+// How a block looks and is aimed at in one of its states (a torch: on the
+// floor, on a wall - see shape_state_index() in core/BlockShape.hpp): its
+// own hitbox, and its model moved and then tilted about a pivot. Cell units
+// (0..1), laid out for a block on the north wall - on another wall the
+// whole thing is turned to it (place_model_point(), place_hitbox()).
+struct BlockStateModel {
+    bool has_hitbox = false;                       // else the hitbox is its shape (or a full cube)
+    BoundingBox hitbox{{0, 0, 0}, {1, 1, 1}};      // what the crosshair aims at and is outlined
+    Vector3 offset{0, 0, 0};                       // the model moved by this...
+    Vector3 pivot{0.5f, 0, 0.5f};                  // ...then turned about this point
+    float angle = 0.0f;                            // degrees about X: its top leans toward +z (out of a north wall)
+};
+constexpr int MAX_BLOCK_STATES = 2;
+
+// Which way a face of a model part (BlockElement) is seen from: outside
+// (its normal pointing out of the part - an ordinary face), inside
+// (turned round - visible from within the part) or from both sides.
+enum class ElementNormal : uint8_t { Out, In, Both };
+
+struct BlockElementFace {
+    bool enabled = true;
+    Rectangle uv{0, 0, 1, 1}; // the part of that side's tile it shows, 0..1 (x, y, width, height)
+    ElementNormal normal = ElementNormal::Out;
+};
+
+// One box of a block's own model, like a Blockbench element: drawn from
+// its enabled faces, each textured with the block's tile for that side.
+// Cell units (0..1).
+struct BlockElement {
+    BoundingBox box{{0, 0, 0}, {1, 1, 1}};
+    bool shade = true; // per-direction shading (off for a torch: evenly lit)
+    std::array<BlockElementFace, 6> faces{};
+};
+
 // Everything Mesh Generation needs to know about a BlockType, looked up once
 // per face while building a chunk's mesh (not stored per-block). Loaded from
 // src/content/Blocks.cpp by Load_block_definitions().
@@ -293,6 +341,23 @@ struct BlockProperties {
     // who placed it, the other sides all showing its east face's texture -
     // furnaces, chests, workbenches, pumpkins. See block_is_directional().
     bool directional;
+
+    // Its shape and so its behavior - see BlockShapeKind.
+    BlockShapeKind shape_kind;
+    // A slab's two halves in one cell turn into this block (oak slab ->
+    // oak planks). Air for any other block.
+    BlockType double_block;
+    // Shown as this flat sprite from sprites/items.png ({column, row}) in
+    // the inventory and as a dropped item instead of a small 3D copy - a
+    // torch, a cake. -1 for none.
+    int item_sprite_x;
+    int item_sprite_y;
+    // Its hitbox and model placement per state - see BlockStateModel.
+    std::array<BlockStateModel, MAX_BLOCK_STATES> state_models;
+    // Its own model from parts (a torch's stick and flame) - drawn instead
+    // of its shape's boxes when not empty. Rendering only: collision and
+    // the hitbox stay its shape's / its state's.
+    std::vector<BlockElement> elements;
 
     // UV rectangle (0..1) within get_block_atlas_texture(), indexed by
     // BlockFace - every block's faces share one atlas texture, so a whole

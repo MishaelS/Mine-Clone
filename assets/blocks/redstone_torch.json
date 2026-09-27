@@ -1,0 +1,40 @@
+{
+  "id": 75,
+  "name": "redstone_torch",
+  "sound": "wood",
+  "hardness": 0,
+  "tool": "axe",
+  "density": 0.1,
+  "luminance": 0,
+  "shape": "torch",
+  "item_sprite": [6, 7],
+  "solid": false,
+  "transparent": true,
+  "cutout": true,
+  "elements": [
+    { "name": "cap", "from": [7, 0, 7], "to": [9, 10, 9], "shade": false, "faces": {
+      "top": { "uv": [7, 6, 9, 8] },
+      "bottom": { "uv": [7, 13, 9, 15] }
+    } },
+    { "name": "planes_x", "from": [7, 0, 0], "to": [9, 16, 16], "shade": false, "faces": {
+      "east": {},
+      "west": {}
+    } },
+    { "name": "planes_z", "from": [0, 0, 7], "to": [16, 16, 9], "shade": false, "faces": {
+      "north": {},
+      "south": {}
+    } }
+  ],
+  "states": {
+    "floor": { "hitbox": [6, 0, 6, 10, 10, 10] },
+    "wall": { "hitbox": [5, 3, 1, 11, 14, 7], "offset": [0, 2.4, -8], "pivot": [8, 2.4, 0], "angle": 22.5 }
+  },
+  "faces": {
+    "top": { "tile": [3, 7] },
+    "bottom": { "tile": [3, 7] },
+    "north": { "tile": [3, 7] },
+    "south": { "tile": [3, 7] },
+    "east": { "tile": [3, 7] },
+    "west": { "tile": [3, 7] }
+  }
+}

@@ -2,6 +2,8 @@
 
 #include "raylib.h"
 
+struct BlockShapeBoxes;
+
 // One face of a cube icon: its UV rectangle (0..1) in the block atlas and
 // its tint.
 struct CubeIconFace {
@@ -19,3 +21,10 @@ struct CubeIconFace {
 // so both show exactly the same icon.
 void draw_cube_icon(Rectangle bounds, const Texture2D& atlas, const CubeIconFace& top, const CubeIconFace& left,
                     const CubeIconFace& right, float side_inset);
+
+// The same isometric view for a block of some other shape (slab, stairs,
+// trapdoor...): each box of `item_shape` (local 0..1 space - get_item_shape()
+// / item_shape_of_kind()) drawn with only its part of each face's tile, as
+// the inventory shows it.
+void draw_shaped_icon(Rectangle bounds, const Texture2D& atlas, const BlockShapeBoxes& item_shape, const CubeIconFace& top,
+                      const CubeIconFace& left, const CubeIconFace& right);

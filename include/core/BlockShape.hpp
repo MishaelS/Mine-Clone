@@ -103,8 +103,9 @@ BlockShapeBoxes get_block_shape(BlockType type, const BlockInstanceState& state)
 // ray hits (World::raycast()), what the black target outline and the
 // breaking cracks are drawn around. Separate from collision, same as
 // vanilla: a torch or a sapling has none of the latter but still has a
-// small box to aim at. In order: the block's own "outline" boxes (static
-// shapes - torch, plants, cactus); else, for a custom_shape block, its
+// small box to aim at. In order: the plants' fixed box; the hitbox its
+// file gives it in this state (BlockStateModel - a torch on the floor or
+// on a wall, a cactus); else, for a custom_shape block, its
 // collision shape (get_block_shape() - it depends on facing/open/half/
 // bites); else one full cube. Local 0..1 cell space.
 BlockShapeBoxes get_outline_shape(BlockType type, const BlockInstanceState& state);
@@ -171,3 +172,37 @@ struct ShapedFaceTexture {
 };
 ShapedFaceTexture shaped_face_texture(BlockType type, const BlockInstanceState& state,
                                       const BlockProperties& properties, BlockFace face, const BoundingBox& box);
+
+// --- Pure geometry (core/BlockShapeKinds.cpp) - no block registry, so the
+// model editor shares it. ---
+
+// The boxes a block of `kind` has in `state`, local 0..1 cell space. Empty
+// for BlockShapeKind::Cube.
+BlockShapeBoxes shape_of_kind(BlockShapeKind kind, const BlockInstanceState& state);
+// Its look out of the world (inventory icon, dropped item): default state,
+// facing North - see get_item_shape().
+BlockShapeBoxes item_shape_of_kind(BlockShapeKind kind);
+// One face of one of a torch's boxes: the flame on its cap's top, the
+// stick's foot under it, the whole tile on each plane pair's two broad
+// faces - everything else hidden; never direction-shaded (vanilla's torch
+// model).
+ShapedFaceTexture torch_face_texture(Rectangle tile, BlockFace face, const BoundingBox& box);
+
+// The states a block of `kind` has its own look and hitbox in
+// (BlockProperties::state_models): a torch 2 - 0 on the floor, 1 on a
+// wall; every other kind just 0.
+int shape_state_count(BlockShapeKind kind);
+// Which of them `state` is.
+int shape_state_index(BlockShapeKind kind, const BlockInstanceState& state);
+// A state that is `index` - as the editor shows it: facing north, a wall
+// torch on the north wall (the layout BlockStateModel is written for).
+BlockInstanceState shape_state_example(BlockShapeKind kind, int index);
+// Whether `model` moves the model at all (else it's drawn as it is).
+bool state_model_moves(const BlockStateModel& model);
+// Where a point of the model (local 0..1 cell space) ends up: moved by
+// the offset, tilted about the pivot, then turned to the wall `attachment`
+// names. Its normals the same way.
+Vector3 place_model_point(const BlockStateModel& model, BlockFace attachment, Vector3 p);
+Vector3 place_model_normal(const BlockStateModel& model, BlockFace attachment, Vector3 normal);
+// `model`'s hitbox turned to the wall `attachment` names.
+BoundingBox place_hitbox(const BlockStateModel& model, BlockFace attachment);

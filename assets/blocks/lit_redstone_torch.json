@@ -1,0 +1,48 @@
+{
+  "id": 76,
+  "name": "lit_redstone_torch",
+  "sound": "wood",
+  "hardness": 0,
+  "tool": "axe",
+  "density": 0.1,
+  "luminance": 7,
+  "shape": "torch",
+  "item_sprite": [6, 6],
+  "solid": false,
+  "transparent": true,
+  "cutout": true,
+  "elements": [
+    { "name": "cap", "from": [7, 0, 7], "to": [9, 10, 9], "shade": false, "faces": {
+      "top": { "uv": [7, 6, 9, 8] },
+      "bottom": { "uv": [7, 13, 9, 15] }
+    } },
+    { "name": "planes_x", "from": [7, 0, 0], "to": [9, 16, 16], "shade": false, "faces": {
+      "east": {},
+      "west": {}
+    } },
+    { "name": "planes_z", "from": [0, 0, 7], "to": [16, 16, 9], "shade": false, "faces": {
+      "north": { "uv": [0, 0, 16, 16] },
+      "south": {}
+    } },
+    { "name": "active", "from": [6.5, 10.5, 6.5], "to": [9.5, 7.5, 9.5], "shade": false, "faces": {
+      "top": { "uv": [8, 6, 9, 7], "normal": "in" },
+      "bottom": { "uv": [8, 6, 9, 7], "normal": "in" },
+      "north": { "uv": [8, 6, 9, 7], "normal": "in" },
+      "south": { "uv": [8, 6, 9, 7], "normal": "in" },
+      "east": { "uv": [8, 6, 9, 7], "normal": "in" },
+      "west": { "uv": [8, 6, 9, 7], "normal": "in" }
+    } }
+  ],
+  "states": {
+    "floor": { "hitbox": [6, 0, 6, 10, 10, 10] },
+    "wall": { "hitbox": [5, 3, 1, 11, 14, 7], "offset": [0, 2.4, -8], "pivot": [8, 2.4, 0], "angle": 22.5 }
+  },
+  "faces": {
+    "top": { "tile": [3, 6] },
+    "bottom": { "tile": [3, 6] },
+    "north": { "tile": [3, 6] },
+    "south": { "tile": [3, 6] },
+    "east": { "tile": [3, 6] },
+    "west": { "tile": [3, 6] }
+  }
+}

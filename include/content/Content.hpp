@@ -66,6 +66,11 @@ public:
     BlockDef& cross();              // BlockRenderShape::Cross (plants)
     BlockDef& shaped();             // BlockRenderShape::Shaped (torches, stairs, doors, ...)
     BlockDef& custom_shape();       // non-cube collision - see BlockProperties::has_custom_shape
+    BlockDef& shape(BlockShapeKind kind);  // its shape and behavior - see BlockShapeKind
+    BlockDef& double_block(BlockType type); // a slab's two halves in one cell become this
+    BlockDef& item_sprite(Tile tile);      // a flat sprites/items.png icon instead of a 3D one
+    BlockDef& state_model(int state, const BlockStateModel& model); // its hitbox/model placement in that state
+    BlockDef& elements(std::vector<BlockElement> parts);             // its own model from parts (BlockElement)
 
     BlockDef& attach_floor();
     BlockDef& attach_wall();
@@ -90,9 +95,9 @@ private:
 
     BlockType type_;
     FacePriority face_priority_[6] = {};
-    bool hardness_set_ = false;
-    bool tool_set_ = false;
-    bool density_set_ = false;
+    bool hardness_set_    = false;
+    bool tool_set_        = false;
+    bool density_set_     = false;
     bool replaceable_set_ = false;
 };
 

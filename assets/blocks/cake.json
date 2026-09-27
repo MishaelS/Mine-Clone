@@ -1,0 +1,23 @@
+{
+  "id": 85,
+  "name": "cake",
+  "sound": "cloth",
+  "hardness": 0.5,
+  "tool": "none",
+  "density": 0.4,
+  "luminance": 0,
+  "shape": "cake",
+  "cut": [11, 7],
+  "item_sprite": [13, 1],
+  "solid": false,
+  "transparent": true,
+  "cutout": true,
+  "faces": {
+    "top": { "tile": [9, 7] },
+    "bottom": { "tile": [12, 7] },
+    "north": { "tile": [10, 7] },
+    "south": { "tile": [10, 7] },
+    "east": { "tile": [10, 7] },
+    "west": { "tile": [10, 7] }
+  }
+}

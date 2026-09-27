@@ -7,6 +7,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <unordered_map>
+#include <utility>
 
 namespace {
 
@@ -117,6 +118,10 @@ namespace content {
         properties.attach_ceiling   = false;
         properties.damages_on_touch = false;
         properties.directional = false;
+        properties.shape_kind = BlockShapeKind::Cube;
+        properties.double_block = BlockType::Air;
+        properties.item_sprite_x = -1;
+        properties.item_sprite_y = -1;
         for (int face = 0; face < 6; ++face) {
             properties.texture_uvs[face] = tile_uv(0, 0);
             properties.texture_tints[face] = WHITE;
@@ -195,6 +200,32 @@ namespace content {
 
     BlockDef& BlockDef::keep_same_faces() {
         block_table[static_cast<size_t>(type_)].cull_same_faces = false;
+        return *this;
+    }
+
+    BlockDef& BlockDef::shape(BlockShapeKind kind) {
+        block_table[static_cast<size_t>(type_)].shape_kind = kind;
+        return *this;
+    }
+
+    BlockDef& BlockDef::double_block(BlockType type) {
+        block_table[static_cast<size_t>(type_)].double_block = type;
+        return *this;
+    }
+
+    BlockDef& BlockDef::item_sprite(Tile tile) {
+        block_table[static_cast<size_t>(type_)].item_sprite_x = tile.x;
+        block_table[static_cast<size_t>(type_)].item_sprite_y = tile.y;
+        return *this;
+    }
+
+    BlockDef& BlockDef::state_model(int state, const BlockStateModel& model) {
+        block_table[static_cast<size_t>(type_)].state_models[static_cast<size_t>(state)] = model;
+        return *this;
+    }
+
+    BlockDef& BlockDef::elements(std::vector<BlockElement> parts) {
+        block_table[static_cast<size_t>(type_)].elements = std::move(parts);
         return *this;
     }
 
@@ -300,6 +331,8 @@ void Load_block_definitions()
         air.hardness        = 0.0f;
         air.effective_tool  = ToolKind::None;
         air.density         = 0.0f; // never dropped/simulated - air has no falling/buoyancy meaning
+        air.item_sprite_x   = -1;
+        air.item_sprite_y   = -1;
     }
     block_names[static_cast<uint8_t>(BlockType::Air)] = "air";
 
@@ -343,7 +376,8 @@ bool block_is_directional(BlockType type)
 
 bool block_needs_facing(BlockType type)
 {
-    return block_is_directional(type) || type == BlockType::OakStairs || type == BlockType::OakTrapdoor;
+    const BlockShapeKind kind = get_block_properties(type).shape_kind;
+    return block_is_directional(type) || kind == BlockShapeKind::Stairs || kind == BlockShapeKind::Trapdoor;
 }
 
 FaceOffset block_face_offset(BlockFace face)

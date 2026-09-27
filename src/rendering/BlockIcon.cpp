@@ -1,6 +1,8 @@
 #include "rendering/BlockIcon.hpp"
+#include "core/BlockShape.hpp"
 
 #include "rlgl.h"
+
 
 #include <algorithm>
 #include <cmath>
@@ -87,6 +89,66 @@ void draw_cube_icon(Rectangle bounds, const Texture2D& atlas, const CubeIconFace
     atlas_quad(left_uv, left_face, shade(left.tint, LEFT_BRIGHTNESS), atlas);
     atlas_quad(right_uv, right_face, shade(right.tint, RIGHT_BRIGHTNESS), atlas);
     atlas_quad(top_uv, top_face, top.tint, atlas);
+    rlEnd();
+    rlSetTexture(0);
+}
+
+void draw_shaped_icon(Rectangle bounds, const Texture2D& atlas, const BlockShapeBoxes& item_shape, const CubeIconFace& top,
+                      const CubeIconFace& left, const CubeIconFace& right)
+{
+    // Same isometric view as the full-cube icon below (whose fixed
+    // points this projection reproduces for a 0..1 cube), but drawn
+    // per box of the block's item-form shape so a slab/stair/
+    // trapdoor reads as one. Each visible face samples only its
+    // matching part of the tile, oriented the way the cube icon's
+    // own faces are (top: u along x, v along z; left/South: u along
+    // x; right/East: u along -z; sides: v along -y) - so a full box
+    // gives exactly the full-cube icon.
+    auto project = [&](float px, float py, float pz) {
+        return Vector2{
+            bounds.x + bounds.width * (0.07f + 0.43f * (px - pz + 1.0f)),
+            bounds.y + bounds.height * (0.04f + 0.205f * (px + pz) + 0.51f * (1.0f - py)),
+        };
+    };
+    auto crop = [](Rectangle uv, float u0, float u1, float v0, float v1) {
+        return Rectangle{uv.x + u0 * uv.width, uv.y + v0 * uv.height,
+                         (u1 - u0) * uv.width, (v1 - v0) * uv.height};
+    };
+
+    BlockShapeBoxes shape = item_shape;
+    // Painter's order: lower boxes first, then farther ones (the
+    // viewer sits at +x/+z), so a stair's raised step is drawn over
+    // the slab it stands on.
+    std::sort(shape.boxes.begin(), shape.boxes.begin() + shape.count,
+              [](const BoundingBox& a, const BoundingBox& b) {
+                  if (a.min.y != b.min.y) return a.min.y < b.min.y;
+                  return a.min.x + a.min.z < b.min.x + b.min.z;
+              });
+
+    rlSetTexture(atlas.id);
+    rlBegin(RL_QUADS);
+    for (int b = 0; b < shape.count; ++b) {
+        const Vector3 lo = shape.boxes[b].min;
+        const Vector3 hi = shape.boxes[b].max;
+        Vector2 left_face[4] = {
+            project(lo.x, hi.y, hi.z), project(hi.x, hi.y, hi.z),
+            project(hi.x, lo.y, hi.z), project(lo.x, lo.y, hi.z),
+        };
+        Vector2 right_face[4] = {
+            project(hi.x, hi.y, hi.z), project(hi.x, hi.y, lo.z),
+            project(hi.x, lo.y, lo.z), project(hi.x, lo.y, hi.z),
+        };
+        Vector2 top_face[4] = {
+            project(lo.x, hi.y, lo.z), project(hi.x, hi.y, lo.z),
+            project(hi.x, hi.y, hi.z), project(lo.x, hi.y, hi.z),
+        };
+        atlas_quad(crop(left.uv, lo.x, hi.x, 1.0f - hi.y, 1.0f - lo.y), left_face,
+                        shade(left.tint, 0.72f), atlas);
+        atlas_quad(crop(right.uv, 1.0f - hi.z, 1.0f - lo.z, 1.0f - hi.y, 1.0f - lo.y), right_face,
+                        shade(right.tint, 0.86f), atlas);
+        atlas_quad(crop(top.uv, lo.x, hi.x, lo.z, hi.z), top_face,
+                        top.tint, atlas);
+    }
     rlEnd();
     rlSetTexture(0);
 }

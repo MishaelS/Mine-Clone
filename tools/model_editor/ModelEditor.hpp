@@ -45,6 +45,8 @@ private:
     void draw_blocks_top_bar(Rectangle bounds);
     void draw_block_list(Rectangle bounds);
     void draw_block_properties(Rectangle bounds);
+    void draw_block_hitbox_panel(Rectangle bounds);
+    void draw_block_model_panel(Rectangle bounds);
     void update_block_camera(Rectangle view);
     void draw_block_preview(Rectangle view);
     // Two small panels over the block view: the block as the game draws it
@@ -52,6 +54,7 @@ private:
     void draw_block_game_view(Rectangle bounds);
     void draw_block_inventory_icon(Rectangle bounds);
     const Texture2D& terrain_atlas();
+    const Texture2D& items_atlas();
     void mark_block_dirty();
     void commit_block_history(bool force = false);
     void block_undo();
@@ -65,6 +68,14 @@ private:
     std::string block_search;
     Vector2 block_list_scroll = {0, 0};
     Vector2 block_panel_scroll = {0, 0};
+    Vector2 block_hitbox_scroll = {0, 0};
+    int block_panel_tab = 0;   // the right panel: 0 properties, 1 model (its parts), 2 hitbox
+    Vector2 block_model_scroll = {0, 0};
+    int selected_element = 0;  // the part of its model being edited
+    bool uv_dragging = false;  // drawing a face's UV rectangle over its tile
+    Vector2 uv_drag_from = {0, 0};
+    int block_state_view = 0;  // which of its states (a torch: floor, wall) is shown and edited
+    bool show_hitbox = true;   // its hitbox drawn over the preview and "in the game"
     RenderTexture2D block_view_texture{};
     RenderTexture2D block_game_texture{};
     int game_ui_scale = 2; // the game's settings.json ui_scale - its inventory's size

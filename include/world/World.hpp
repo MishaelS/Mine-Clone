@@ -241,10 +241,10 @@ public:
     // don't after a neighbor is removed.
     bool attachment_has_support(int x, int y, int z) const;
 
-    // Replaces an existing oak slab with its full-block material. Used by
-    // placement when the player adds the missing slab half to the same
-    // cell, Minecraft-style.
-    bool combine_oak_slab(int x, int y, int z);
+    // Replaces an existing slab with its double block (BlockProperties::
+    // double_block - oak slab -> oak planks). Used by placement when the
+    // player adds the missing slab half to the same cell, Minecraft-style.
+    bool combine_slab(int x, int y, int z);
 
     // Atomically places both halves of a door: `lower_type` (OakDoorLower
     // or IronDoorLower) at (x, y, z), its matching upper half directly

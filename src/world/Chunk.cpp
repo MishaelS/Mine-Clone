@@ -500,58 +500,6 @@ namespace {
                (WATER_MIN_FLOW_SURFACE_HEIGHT - WATER_SOURCE_SURFACE_HEIGHT) * t;
     }
 
-    bool is_torch_block(BlockType type)
-    {
-        return type == BlockType::Torch || type == BlockType::RedstoneTorch || type == BlockType::LitRedstoneTorch;
-    }
-
-    BlockShapeBoxes upright_torch_shape()
-    {
-        constexpr float TORCH_NEAR   =  7.0f / 16.0f;
-        constexpr float TORCH_FAR    =  9.0f / 16.0f;
-        constexpr float TORCH_HEIGHT = 10.0f / 16.0f;
-
-        BlockShapeBoxes result;
-        result.count = 3;
-        result.boxes[0] = {{TORCH_NEAR, 0.0f, TORCH_NEAR}, {TORCH_FAR, TORCH_HEIGHT, TORCH_FAR}};
-        result.boxes[1] = {{TORCH_NEAR, 0.0f,       0.0f}, {TORCH_FAR,         1.0f,      1.0f}};
-        result.boxes[2] = {{      0.0f, 0.0f, TORCH_NEAR}, {     1.0f,         1.0f, TORCH_FAR}};
-        return result;
-    }
-
-    Vector3 wall_torch_transform(Vector3 local, HorizontalDirection facing)
-    {
-        DirectionOffset step = horizontal_direction_offset(facing);
-        Vector3 outward = {static_cast<float>(step.dx), 0.0f, static_cast<float>(step.dz)};
-        Vector3 lateral = {-outward.z, 0.0f, outward.x};
-        Vector3 up = {0.0f, 1.0f, 0.0f};
-        Vector3 axis = Vector3Normalize(Vector3Add(Vector3Scale(outward, 0.38f), Vector3Scale(up, 0.92f)));
-        Vector3 vertical_plane = Vector3Normalize(Vector3Subtract(Vector3Scale(up, 0.38f), Vector3Scale(outward, 0.92f)));
-        Vector3 base = {-outward.x * HALF, -0.35f, -outward.z * HALF};
-
-        float height = local.y + HALF;
-        float side   = local.x * lateral.x + local.z * lateral.z;
-        float depth  = local.x * outward.x + local.z * outward.z;
-        return Vector3Add(base, Vector3Add(Vector3Scale(axis, height),
-                          Vector3Add(Vector3Scale(lateral, side), Vector3Scale(vertical_plane, depth))));
-    }
-
-    Vector3 wall_torch_normal(Vector3 normal, HorizontalDirection facing)
-    {
-        DirectionOffset step = horizontal_direction_offset(facing);
-        Vector3 outward = {static_cast<float>(step.dx), 0.0f, static_cast<float>(step.dz)};
-        Vector3 lateral = {-outward.z, 0.0f, outward.x};
-        Vector3 up = {0.0f, 1.0f, 0.0f};
-        Vector3 axis = Vector3Normalize(Vector3Add(Vector3Scale(outward, 0.38f), Vector3Scale(up, 0.92f)));
-        Vector3 vertical_plane = Vector3Normalize(Vector3Subtract(Vector3Scale(up, 0.38f), Vector3Scale(outward, 0.92f)));
-
-        float side = normal.x * lateral.x + normal.z * lateral.z;
-        float depth = normal.x * outward.x + normal.z * outward.z;
-        Vector3 transformed = Vector3Add(Vector3Scale(axis, normal.y),
-                              Vector3Add(Vector3Scale(lateral, side), Vector3Scale(vertical_plane, depth)));
-        return Vector3LengthSqr(transformed) > 0.000001f ? Vector3Normalize(transformed) : normal;
-    }
-
     BoundingBox face_rect_for_box(const BoundingBox& box, BlockFace face)
     {
         switch (face) {
@@ -2008,25 +1956,21 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                     // and visible corners get the same AO/smooth-lighting
                     // sampling ordinary cube faces use.
                     BlockInstanceState state = unpack_block_state(get_orientation(x, y, z), get_block_state(x, y, z));
-                    // A wall-mounted torch (BlockInstanceState::attachment -
-                    // see BlockProperties::attach_*) gets the upright model
-                    // leaned out from its wall below; a floor one is the
-                    // plain shape. `torch_outward` points from that wall
-                    // into the cell, the direction it leans.
-                    const bool wall_torch = is_torch_block(type) && state.attachment != BlockFace::Bottom;
-                    HorizontalDirection torch_outward = HorizontalDirection::South;
-                    if (wall_torch) {
-                        switch (state.attachment) {
-                            case BlockFace::West:  torch_outward = HorizontalDirection::East; break;
-                            case BlockFace::East:  torch_outward = HorizontalDirection::West; break;
-                            case BlockFace::North: torch_outward = HorizontalDirection::South; break;
-                            default:               torch_outward = HorizontalDirection::North; break;
-                        }
-                    }
-                    BlockShapeBoxes shape = wall_torch ? upright_torch_shape() : get_block_shape(type, state);
+                    // In some states the model is moved and tilted (a torch
+                    // on a wall leans out of it - BlockStateModel, from its
+                    // file): each corner then goes where place_model_point()
+                    // puts it.
+                    const BlockStateModel& state_model =
+                        properties.state_models[static_cast<size_t>(shape_state_index(properties.shape_kind, state))];
+                    const bool placed_model = state_model_moves(state_model);
+                    // Drawn from its own parts (BlockElement - a torch's
+                    // stick and flame) if it has any, else its shape's boxes.
+                    const bool from_elements = !properties.elements.empty();
+                    BlockShapeBoxes shape = from_elements ? BlockShapeBoxes{} : get_block_shape(type, state);
+                    const int part_count = from_elements ? static_cast<int>(properties.elements.size()) : shape.count;
 
-                    for (int b = 0; b < shape.count; ++b) {
-                        const BoundingBox& box = shape.boxes[b];
+                    for (int b = 0; b < part_count; ++b) {
+                        const BoundingBox& box = from_elements ? properties.elements[static_cast<size_t>(b)].box : shape.boxes[b];
                         Vector3 half = {
                             (box.max.x - box.min.x) * 0.5f,
                             (box.max.y - box.min.y) * 0.5f,
@@ -2052,26 +1996,40 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                         for (int face = 0; face < 6; ++face) {
                             BlockFace block_face = static_cast<BlockFace>(face);
                             BoundingBox face_rect = face_rect_for_box(box, block_face);
-                            if (shape_covers_face(shape.boxes.data(), shape.count, block_face,
-                                                  face_plane_for_box(box, block_face), face_rect)) {
+                            const Face& box_face = box_faces[face];
+
+                            // A part's face: its own piece of the side's
+                            // tile, and which way it's seen from.
+                            ElementNormal normal_mode = ElementNormal::Out;
+                            ShapedFaceTexture texture;
+                            if (from_elements) {
+                                const BlockElement& element = properties.elements[static_cast<size_t>(b)];
+                                const BlockElementFace& element_face = element.faces[static_cast<size_t>(face)];
+                                if (!element_face.enabled) continue;
+                                const Rectangle tile = properties.texture_uvs[face];
+                                texture.uv = {tile.x + element_face.uv.x * tile.width, tile.y + element_face.uv.y * tile.height,
+                                              element_face.uv.width * tile.width, element_face.uv.height * tile.height};
+                                texture.flat_shade = !element.shade;
+                                normal_mode = element_face.normal;
+                            } else if (shape_covers_face(shape.boxes.data(), shape.count, block_face,
+                                                         face_plane_for_box(box, block_face), face_rect)) {
                                 continue;
                             }
 
-                            const Face& box_face = box_faces[face];
                             int nx = x + static_cast<int>(box_face.normal.x);
                             int ny = y + static_cast<int>(box_face.normal.y);
                             int nz = z + static_cast<int>(box_face.normal.z);
-                            if (shaped_face_on_cell_boundary(box, block_face) &&
+                            if (normal_mode == ElementNormal::Out && shaped_face_on_cell_boundary(box, block_face) &&
                                 !get_block_properties(neighbor_block(nx, ny, nz)).transparent) {
                                 continue;
                             }
 
                             // Tile choice, crop and orientation all live in
                             // shaped_face_texture() (core/BlockShape.hpp).
-                            ShapedFaceTexture texture = shaped_face_texture(
-                                type, state, properties, block_face, box);
-                            if (texture.hidden) continue;
-                            const float shade_value = texture.flat_shade ? 1.0f : FACE_DIRECTION_SHADE[face];
+                            if (!from_elements) {
+                                texture = shaped_face_texture(type, state, properties, block_face, box);
+                                if (texture.hidden) continue;
+                            }
                             Vector3 face_center = Vector3Subtract(box_center, Vector3Scale(box_face.normal, texture.inset));
                             Face textured_face = box_face;
                             for (int turn = 0; turn < texture.quarter_turns; ++turn) {
@@ -2081,44 +2039,64 @@ ChunkMeshBuildResult Chunk::build_mesh_data(const Chunk* west, const Chunk* east
                                 textured_face.v3 = textured_face.v4;
                                 textured_face.v4 = first;
                             }
-                            if (wall_torch) {
-                                Vector3 corners_before[4] = {textured_face.v1, textured_face.v2, textured_face.v3, textured_face.v4};
-                                textured_face.v1 = wall_torch_transform(Vector3Add(local_box_center, corners_before[0]), torch_outward);
-                                textured_face.v2 = wall_torch_transform(Vector3Add(local_box_center, corners_before[1]), torch_outward);
-                                textured_face.v3 = wall_torch_transform(Vector3Add(local_box_center, corners_before[2]), torch_outward);
-                                textured_face.v4 = wall_torch_transform(Vector3Add(local_box_center, corners_before[3]), torch_outward);
-                                std::swap(textured_face.v2, textured_face.v4);
-                                textured_face.normal = Vector3Negate(wall_torch_normal(textured_face.normal, torch_outward));
+                            if (placed_model) {
+                                // Corners relative to the cell's center from here on.
+                                Vector3* corners_to_place[4] = {&textured_face.v1, &textured_face.v2, &textured_face.v3, &textured_face.v4};
+                                for (Vector3* corner : corners_to_place) {
+                                    Vector3 cell_point = Vector3Add(Vector3Subtract(Vector3Add(local_box_center, *corner),
+                                                                                   Vector3Scale(box_face.normal, texture.inset)),
+                                                                    {0.5f, 0.5f, 0.5f});
+                                    *corner = Vector3Subtract(place_model_point(state_model, state.attachment, cell_point), {0.5f, 0.5f, 0.5f});
+                                }
+                                textured_face.normal = place_model_normal(state_model, state.attachment, textured_face.normal);
                                 face_center = center;
                             }
 
                             Vector3 corners[4] = {textured_face.v1, textured_face.v2, textured_face.v3, textured_face.v4};
-                            float shade[4];
-                            float ao[4];
-                            float sky_fraction[4];
-                            float block_fraction[4];
-                            for (int i = 0; i < 4; ++i) {
-                                int ao_level = texture.flat_shade ? 3 : vertex_ao(nb, x, y, z, textured_face.normal, corners[i]);
-                                VertexLight light = vertex_light(nb, x, y, z, textured_face.normal, corners[i]);
-                                shade[i] = shade_value;
-                                ao[i] = AO_BRIGHTNESS[ao_level];
-                                sky_fraction[i] = light.sky;
-                                block_fraction[i] = light.block;
-                            }
-                            if (wall_torch) {
-                                Rectangle uv = get_sample_safe_block_uv(texture.uv);
-                                float u[4] = {uv.x, uv.x, uv.x + uv.width, uv.x + uv.width};
-                                float v[4] = {uv.y, uv.y + uv.height, uv.y + uv.height, uv.y};
-                                Vector3 corners_for_uv[4] = {
-                                    textured_face.v1, textured_face.v2, textured_face.v3, textured_face.v4
-                                };
-                                append_custom_face(mesh_data, corners_for_uv, textured_face.normal, face_center,
-                                                   u, v, shade, sky_fraction, block_fraction, ao,
-                                                   properties.texture_tints[face]);
-                            } else {
-                                append_face(mesh_data, textured_face, face_center, texture.uv,
-                                    shade, sky_fraction, block_fraction, ao, properties.texture_tints[face]);
-                            }
+                            // `inward`: the same quad turned round - wound the
+                            // other way, its normal flipped, each corner keeping
+                            // its texel, so it's seen from inside the part.
+                            auto emit = [&](bool inward) {
+                                const Vector3 normal = inward ? Vector3Negate(textured_face.normal) : textured_face.normal;
+                                const float shade_value = texture.flat_shade ? 1.0f : FACE_DIRECTION_SHADE[inward ? (face ^ 1) : face];
+                                float shade[4];
+                                float ao[4];
+                                float sky_fraction[4];
+                                float block_fraction[4];
+                                for (int i = 0; i < 4; ++i) {
+                                    int ao_level = texture.flat_shade ? 3 : vertex_ao(nb, x, y, z, normal, corners[i]);
+                                    VertexLight light = vertex_light(nb, x, y, z, normal, corners[i]);
+                                    shade[i] = shade_value;
+                                    ao[i] = AO_BRIGHTNESS[ao_level];
+                                    sky_fraction[i] = light.sky;
+                                    block_fraction[i] = light.block;
+                                }
+                                if (!inward) {
+                                    append_face(mesh_data, textured_face, face_center, texture.uv,
+                                        shade, sky_fraction, block_fraction, ao, properties.texture_tints[face]);
+                                    return;
+                                }
+                                const Rectangle uv = get_sample_safe_block_uv(texture.uv);
+                                constexpr int ORDER[4] = {0, 3, 2, 1};
+                                const float corner_u[4] = {uv.x, uv.x + uv.width, uv.x + uv.width, uv.x};
+                                const float corner_v[4] = {uv.y, uv.y, uv.y + uv.height, uv.y + uv.height};
+                                Vector3 turned[4];
+                                float u[4], v[4], turned_shade[4], turned_sky[4], turned_block[4], turned_ao[4];
+                                for (int i = 0; i < 4; ++i) {
+                                    const int c = ORDER[i];
+                                    turned[i] = corners[c];
+                                    u[i] = corner_u[c];
+                                    v[i] = corner_v[c];
+                                    turned_shade[i] = shade[c];
+                                    turned_sky[i] = sky_fraction[c];
+                                    turned_block[i] = block_fraction[c];
+                                    turned_ao[i] = ao[c];
+                                }
+                                append_custom_face(mesh_data, turned, normal, face_center, u, v, turned_shade, turned_sky,
+                                                   turned_block, turned_ao, properties.texture_tints[face]);
+                            };
+                            if (normal_mode != ElementNormal::In) emit(false);
+                            if (normal_mode != ElementNormal::Out) emit(true);
                         }
                     }
                     continue;

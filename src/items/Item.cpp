@@ -97,6 +97,14 @@ void Load_item_definitions()
 
     content::register_items();
 
+    // A block file's "item_sprite" (BlockProperties::item_sprite_*), unless
+    // Items.cpp gave that block one already.
+    for (BlockType type : all_block_types()) {
+        const BlockProperties& properties = get_block_properties(type);
+        if (properties.item_sprite_x < 0 || block_item_sprites[static_cast<size_t>(type)]) continue;
+        content::block_item_sprite(type, {properties.item_sprite_x, properties.item_sprite_y});
+    }
+
     for (size_t i = 1; i < item_names.size(); ++i) {
         if (item_names[i].empty()) {
             throw std::runtime_error("src/content/Items.cpp: definition missing for ItemType id " + std::to_string(i));

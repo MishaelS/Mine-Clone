@@ -10,6 +10,9 @@
   "cutout": true,
   "damages_on_touch": true,
   "side_inset": 1,
+  "states": {
+    "default": { "hitbox": [1, 0, 1, 15, 16, 15] }
+  },
   "faces": {
     "top": { "tile": [5, 4] },
     "bottom": { "tile": [7, 4] },

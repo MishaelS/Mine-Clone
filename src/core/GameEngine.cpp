@@ -2234,6 +2234,7 @@ void GameEngine::update(float delta_time)
         bool targeted_is_door = targeted_type == BlockType::OakDoorLower || targeted_type == BlockType::OakDoorUpper ||
                                  targeted_type == BlockType::IronDoorLower || targeted_type == BlockType::IronDoorUpper;
         bool targeted_is_bed = targeted_type == BlockType::BedHead || targeted_type == BlockType::BedFoot;
+        const BlockShapeKind targeted_kind = get_block_properties(targeted_type).shape_kind;
 
         if (container_kind && !chest_blocked_above) {
             inventory_hud.open_container(*container_kind, targeted_block->x, targeted_block->y, targeted_block->z);
@@ -2241,7 +2242,7 @@ void GameEngine::update(float delta_time)
             EnableCursor();
         } else if (!container_kind && targeted_block && targeted_is_bed) {
             start_sleeping(*targeted_block);
-        } else if (!container_kind && targeted_block && (targeted_is_door || targeted_type == BlockType::OakTrapdoor)) {
+        } else if (!container_kind && targeted_block && (targeted_is_door || targeted_kind == BlockShapeKind::Trapdoor)) {
             // Right-click toggles open/closed instead of placing - same
             // priority tier as the chest-container-open branch above. A
             // door's two halves stay in sync: whichever half was clicked,
@@ -2259,7 +2260,7 @@ void GameEngine::update(float delta_time)
                 world->set_block_state(x, partner_y, z, partner_packed);
             }
             hand.swing();
-        } else if (!container_kind && targeted_block && targeted_type == BlockType::Cake &&
+        } else if (!container_kind && targeted_block && targeted_kind == BlockShapeKind::Cake &&
                    current_game_mode == GameMode::Survival && player.health().current() < PlayerHealth::MAX_HEALTH) {
             // Eating restores HP directly (see CAKE_HEAL_PER_BITE's own
             // comment) instead of vanilla's hunger/saturation restore. No
@@ -2316,14 +2317,15 @@ void GameEngine::update(float delta_time)
                 // was targeted).
                 bool placed = false;
                 HorizontalDirection player_facing = direction_facing_player(aim);
-                HorizontalDirection facing = selected.block == BlockType::OakStairs
+                const BlockShapeKind selected_kind = get_block_properties(selected.block).shape_kind;
+                HorizontalDirection facing = selected_kind == BlockShapeKind::Stairs
                     ? opposite_direction(player_facing)
                     : player_facing;
 
-                if (selected.block == BlockType::OakSlab && targeted_type == BlockType::OakSlab &&
+                if (selected_kind == BlockShapeKind::Slab && targeted_type == selected.block &&
                     slab_click_adds_missing_half(*world, *targeted_block)) {
                     if (!player.intersects_block(targeted_block->x, targeted_block->y, targeted_block->z)) {
-                        placed = world->combine_oak_slab(targeted_block->x, targeted_block->y, targeted_block->z);
+                        placed = world->combine_slab(targeted_block->x, targeted_block->y, targeted_block->z);
                     }
                 } else {
                     bool replace_target = get_block_properties(targeted_type).replaceable;
@@ -2356,7 +2358,7 @@ void GameEngine::update(float delta_time)
                             if (block_needs_facing(selected.block)) {
                                 world->set_block_orientation(place_x, place_y, place_z, facing);
                             }
-                            if (selected.block == BlockType::OakTrapdoor || selected.block == BlockType::OakSlab) {
+                            if (selected_kind == BlockShapeKind::Trapdoor || selected_kind == BlockShapeKind::Slab) {
                                 // Upper or lower half, vanilla's rule, from the
                                 // original raycast hit (the face actually
                                 // clicked), not the new cell - see RaycastHit::
