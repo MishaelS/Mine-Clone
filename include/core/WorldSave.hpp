@@ -66,6 +66,13 @@ struct DroppedItemSaveState {
     std::optional<Color> block_tint; // grass/foliage tint - see DroppedItem's own field
 };
 
+// A mob (only cows so far) still in the world, last time it was exited.
+struct MobSaveState {
+    std::string type;                      // Mob::type_id() - "cow", "npc"
+    Vector3 position = {0.0f, 0.0f, 0.0f}; // feet
+    float yaw = 0.0f;                      // degrees
+};
+
 // A Chest's own 27-slot storage at a specific block position - see
 // World::chest_inventory()/World::all_chest_inventories().
 struct ChestSaveState {
@@ -145,6 +152,11 @@ namespace WorldSave {
     // behavior for "never saved" vs "nothing was on the ground", so callers
     // don't need to tell them apart.
     std::vector<DroppedItemSaveState> load_dropped_items(const std::string& folder_name);
+
+    // saves/<folder_name>/mobs.json - every mob in the world, same
+    // overwrite-every-save/empty-on-missing rules as the dropped items.
+    bool save_mobs(const std::string& folder_name, const std::vector<MobSaveState>& mobs);
+    std::vector<MobSaveState> load_mobs(const std::string& folder_name);
 
     // saves/<folder_name>/chests.json - every Chest's own storage (see
     // World::all_chest_inventories()). Same overwrite-on-every-save

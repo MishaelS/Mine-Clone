@@ -58,8 +58,15 @@ private:
 
     // Model operations
     void new_model();
-    void open_model();
+    void open_model();                        // the model named in model_name
+    void open_model_named(const std::string& name);
     void save_model();
+    // Every model saved in assets/models, by name - the "Open" list.
+    void refresh_model_list();
+    // The model opened last, remembered across editor runs in
+    // model_editor.json next to the game's settings.json.
+    void remember_last_model() const;
+    std::string last_model() const;
     void load_skin(const std::string& path);
     void select_part(int index);
     void add_part();
@@ -68,7 +75,23 @@ private:
     bool is_descendant(int part, int ancestor) const;
     std::vector<int> part_display_order(std::vector<int>* depths) const;
     void set_status(const std::string& text);
-    void mark_dirty() { dirty = true; }
+    void mark_dirty() { dirty = true; uncommitted_change = true; }
+
+    // Undo/redo (Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y): whole-model
+    // snapshots. One drag or one edited field is one step - a change is
+    // committed once the mouse is let go and no field is being typed in.
+    struct HistoryState {
+        EntityModel model;
+        int selected_part = -1;
+        int selected_cube = 0;
+        int animation_index = -1;
+    };
+    HistoryState current_state() const;
+    void restore_state(const HistoryState& state);
+    void commit_history(bool force = false);
+    void reset_history();
+    void undo();
+    void redo();
 
     // Animation
     EntityAnimation* current_animation();
@@ -83,10 +106,20 @@ private:
     Rectangle graph_window_rect(Rectangle viewport) const;
     void draw_graph_window(Rectangle bounds);
     void rename_animation(EntityAnimation& animation, const std::string& new_name);
+
+    // UV window - the skin with every cube's sides laid over it; drag a
+    // side to move the cube's whole layout (Shift: just that side).
+    Rectangle uv_window_rect(Rectangle viewport) const;
+    void draw_uv_window(Rectangle bounds);
+    bool over_floating_window(Rectangle viewport, Vector2 point) const;
     float snapped_time() const;
 
     EntityModel model;
     bool dirty = false;
+    std::vector<HistoryState> undo_stack;
+    std::vector<HistoryState> redo_stack;
+    HistoryState committed_state;    // the model as of the last history step
+    bool uncommitted_change = false; // edited since then (see mark_dirty())
     std::string status;
     double status_time = -10.0;
 
@@ -112,6 +145,18 @@ private:
     int graph_drag_node = -1;          // animation whose block is being moved
     Vector2 graph_drag_grab = {0, 0};  // where on the block it was grabbed
     int graph_link_from = -1;          // animation a new link is being dragged out of
+
+    bool uv_open = false;
+    int uv_drag_face = -1;             // side being dragged (MODEL_FACE_IDS order), -1 = none
+    bool uv_drag_single = false;       // that side alone, not the whole layout
+    // A second click on the same layout picks one side: from then on only
+    // that side moves (-1 = the whole layout). Remembers which layout was
+    // clicked last to tell a first click from a second one.
+    int uv_side = -1;
+    int uv_clicked_part = -1;
+    int uv_clicked_cube = -1;
+    Vector2 uv_drag_mouse = {0, 0};    // where the drag started, screen
+    Vector2 uv_drag_value = {0, 0};    // the uv/face_uv it started from
     bool scrubbing = false;
 
     // Orbit camera
@@ -126,6 +171,11 @@ private:
     int widget_counter = 0;
     int editing_widget = -1;
     char model_name[64] = "player";
+
+    std::vector<std::string> model_names; // assets/models/*.json, sorted
+    std::string current_model_file;       // what's open was loaded from/saved as - "" while unsaved
+    bool models_dropdown_open = false;
+    std::string pending_open;             // picked once with unsaved changes - a second pick opens it
     char part_name[64] = "";
     char animation_name[64] = "";
 };

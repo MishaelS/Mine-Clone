@@ -2,6 +2,7 @@
 
 #include "raylib.h"
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -26,7 +27,34 @@ struct ModelCube {
     Vector3 origin = {0.0f, 0.0f, 0.0f}; // min corner, model pixels
     Vector3 size = {1.0f, 1.0f, 1.0f};   // model pixels
     Vector2 uv = {0.0f, 0.0f};           // skin pixels
+    // A fixed turn of this cube alone (degrees, X then Y then Z) about
+    // `rotation_origin` (model pixels) - for a box whose skin is laid out
+    // for another orientation, like a cow's body lying on its side. Unlike
+    // a part's animated rotation it never moves the part's other cubes or
+    // children.
+    Vector3 rotation = {0.0f, 0.0f, 0.0f};
+    Vector3 rotation_origin = {0.0f, 0.0f, 0.0f};
+
+    // Per-side UV override (skin pixels, the side's top-left corner) - a
+    // side moved on its own in the editor's UV window instead of with the
+    // rest of the box layout. Indexed like MODEL_FACE_IDS; unset = where
+    // the box layout from `uv` puts it.
+    std::array<std::optional<Vector2>, 6> face_uv{};
+
+    // Decoration (Minecraft's second skin layer - hat, jacket, sleeves, or
+    // any small detail): keeps its own size but stands MODEL_OVERLAY_GAP
+    // pixels off the part's regular cubes it lies against - see
+    // cube_draw_bounds(). Its transparent pixels show nothing - only the
+    // painted bits stand out, giving the skin some depth.
+    bool overlay = false;
 };
+
+constexpr float MODEL_OVERLAY_GAP = 0.5f; // model pixels
+
+// The six sides of a cube, in drawing/face_uv order: top, bottom, back
+// (-Z), front (+Z), the entity's right (-X), its left (+X). Also the keys
+// face_uv is saved under.
+constexpr const char* MODEL_FACE_IDS[6] = {"top", "bottom", "back", "front", "right", "left"};
 
 struct ModelPart {
     std::string name;
@@ -152,6 +180,15 @@ private:
 // A model file that doesn't say which part looks (saved before look nodes
 // existed) gets it on the part with this name.
 constexpr const char* HEAD_PART = "head";
+
+// Where `cube` (one of `part`'s) is actually drawn, model pixels. A regular
+// cube: its own box. A decoration moves MODEL_OVERLAY_GAP off each regular
+// cube of the part it touches: a side lying on the same side of a regular
+// cube (a layer wrapped around it) moves out by the gap - so a layer as big
+// as the cube under it hovers all round - and a decoration sitting on a
+// cube's side moves away from it by the gap, keeping its own size (a
+// 1-pixel detail stays 1 pixel). Its skin layout always follows `size`.
+BoundingBox cube_draw_bounds(const ModelPart& part, const ModelCube& cube);
 
 // The part that looks (ModelPart::look), -1 if none.
 int look_part(const EntityModel& model);

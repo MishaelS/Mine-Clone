@@ -50,6 +50,15 @@ add_executable(${PROJECT_NAME}
     src/entities/Player.cpp
     src/entities/PlayerHealth.cpp
     src/entities/DroppedItem.cpp
+    src/entities/Cow.cpp
+    src/entities/Mob.cpp
+    src/entities/Npc.cpp
+    src/entities/ai/Goal.cpp
+    src/entities/ai/Pathfinder.cpp
+    src/entities/ai/Controls.cpp
+    src/entities/ai/CommonGoals.cpp
+    src/entities/ai/MobAI.cpp
+    src/entities/ai/NpcAI.cpp
 
     # Items: item/tool stats, inventory, drops, crafting and smelting
     src/items/Item.cpp
@@ -78,6 +87,7 @@ add_executable(${PROJECT_NAME}
     src/rendering/PlayerRenderer.cpp
     src/model/EntityModel.cpp
     src/model/EntityModelRenderer.cpp
+    src/model/ModelLibrary.cpp
     src/worldgen/Structure.cpp
     src/worldgen/StructureGenerator.cpp
     src/worldgen/CustomWorld.cpp

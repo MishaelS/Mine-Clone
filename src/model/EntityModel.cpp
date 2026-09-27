@@ -145,6 +145,15 @@ std::optional<EntityModel> load_entity_model(const std::string& path)
                 cube.size = read_vec3(c["size"], cube.size);
                 const std::vector<Json>& uv = c["uv"].as_array();
                 if (uv.size() >= 2) cube.uv = {static_cast<float>(uv[0].as_number()), static_cast<float>(uv[1].as_number())};
+                cube.rotation = read_vec3(c["rotation"], cube.rotation);
+                cube.rotation_origin = read_vec3(c["rotation_origin"], cube.rotation_origin);
+                cube.overlay = c["overlay"].as_bool(false);
+                for (int f = 0; f < 6; ++f) {
+                    const std::vector<Json>& face = c["face_uv"][MODEL_FACE_IDS[f]].as_array();
+                    if (face.size() >= 2) {
+                        cube.face_uv[f] = Vector2{static_cast<float>(face[0].as_number()), static_cast<float>(face[1].as_number())};
+                    }
+                }
                 part.cubes.push_back(cube);
             }
             model.parts.push_back(part);
@@ -211,7 +220,20 @@ bool save_entity_model(const EntityModel& model, const std::string& path)
         for (size_t c = 0; c < part.cubes.size(); ++c) {
             const ModelCube& cube = part.cubes[c];
             out << (c ? ", " : "") << "{ \"origin\": " << vec3(cube.origin) << ", \"size\": " << vec3(cube.size)
-                << ", \"uv\": [" << number(cube.uv.x) << ", " << number(cube.uv.y) << "] }";
+                << ", \"uv\": [" << number(cube.uv.x) << ", " << number(cube.uv.y) << "]";
+            if (cube.rotation.x != 0.0f || cube.rotation.y != 0.0f || cube.rotation.z != 0.0f) {
+                out << ", \"rotation\": " << vec3(cube.rotation) << ", \"rotation_origin\": " << vec3(cube.rotation_origin);
+            }
+            if (cube.overlay) out << ", \"overlay\": true";
+            bool any_face = false;
+            for (int f = 0; f < 6; ++f) {
+                if (!cube.face_uv[f]) continue;
+                out << (any_face ? ", " : ", \"face_uv\": { ") << "\"" << MODEL_FACE_IDS[f] << "\": ["
+                    << number(cube.face_uv[f]->x) << ", " << number(cube.face_uv[f]->y) << "]";
+                any_face = true;
+            }
+            if (any_face) out << " }";
+            out << " }";
         }
         out << "]\n    }";
     }
@@ -399,6 +421,43 @@ float wrap_degrees(float degrees)
     degrees = std::fmod(degrees + 180.0f, 360.0f);
     if (degrees < 0.0f) degrees += 360.0f;
     return degrees - 180.0f;
+}
+
+BoundingBox cube_draw_bounds(const ModelPart& part, const ModelCube& cube)
+{
+    const Vector3 low = cube.origin;
+    const Vector3 high = Vector3Add(cube.origin, cube.size);
+    if (!cube.overlay) return {low, high};
+
+    constexpr float TOUCH_EPSILON = 0.001f;
+    auto near = [](float a, float b) { return std::fabs(a - b) < TOUCH_EPSILON; };
+    auto axis = [](const Vector3& v, int a) { return a == 0 ? v.x : a == 1 ? v.y : v.z; };
+    float grow_low[3] = {0, 0, 0}, grow_high[3] = {0, 0, 0}, shift[3] = {0, 0, 0};
+    for (const ModelCube& base : part.cubes) {
+        if (base.overlay) continue;
+        // Only a cube turned the same way shares its sides' planes.
+        if (!Vector3Equals(base.rotation, cube.rotation) ||
+            (!Vector3Equals(cube.rotation, {0, 0, 0}) && !Vector3Equals(base.rotation_origin, cube.rotation_origin))) {
+            continue;
+        }
+        const Vector3 base_low = base.origin;
+        const Vector3 base_high = Vector3Add(base.origin, base.size);
+        for (int a = 0; a < 3; ++a) {
+            // The two sides only touch if they overlap across the other axes.
+            bool overlaps = true;
+            for (int b = 0; b < 3; ++b) {
+                if (b == a) continue;
+                overlaps = overlaps && std::min(axis(high, b), axis(base_high, b)) - std::max(axis(low, b), axis(base_low, b)) > TOUCH_EPSILON;
+            }
+            if (!overlaps) continue;
+            if (near(axis(high, a), axis(base_high, a))) grow_high[a] = MODEL_OVERLAY_GAP; // wraps its + side
+            if (near(axis(low, a), axis(base_low, a))) grow_low[a] = MODEL_OVERLAY_GAP;    // wraps its - side
+            if (near(axis(low, a), axis(base_high, a))) shift[a] = MODEL_OVERLAY_GAP;      // sits on its + side
+            if (near(axis(high, a), axis(base_low, a))) shift[a] = -MODEL_OVERLAY_GAP;     // sits on its - side
+        }
+    }
+    return {{low.x - grow_low[0] + shift[0], low.y - grow_low[1] + shift[1], low.z - grow_low[2] + shift[2]},
+            {high.x + grow_high[0] + shift[0], high.y + grow_high[1] + shift[1], high.z + grow_high[2] + shift[2]}};
 }
 
 int look_part(const EntityModel& model)

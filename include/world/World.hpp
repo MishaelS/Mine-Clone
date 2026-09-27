@@ -119,6 +119,11 @@ public:
     // height - there's no vertical chunk stacking yet) reads as Air.
     BlockType get_block(int x, int y, int z) const;
 
+    // Whether the chunk holding world column (x, z) is loaded right now -
+    // entities outside loaded chunks stay frozen (get_block() would read
+    // their surroundings as Air and let them fall).
+    bool is_column_loaded(int x, int z) const;
+
     // max(sky, block) light, 0..15, at world-space (x, y, z). Out-of-range
     // reads as MAX_LIGHT (open, sunlit space), same as Chunk::get_light.
     // This is the raw, time-invariant *potential* light - real Minecraft

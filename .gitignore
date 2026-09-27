@@ -8,3 +8,4 @@ build/
 # Player-generated runtime data, not source - see core/WorldSave, core/Settings
 saves/
 settings.json
+model_editor.json

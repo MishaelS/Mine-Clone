@@ -7,6 +7,8 @@
 #include "items/Recipe.hpp"
 #include "items/Smelting.hpp"
 #include "entities/Player.hpp"
+#include "entities/Cow.hpp"
+#include "entities/Npc.hpp"
 #include "ui/Widgets.hpp"
 #include "ui/Localization.hpp"
 #include "core/Keybindings.hpp"
@@ -236,18 +238,66 @@ namespace {
         return existing_top_half ? local_y < 0.5f : local_y >= 0.5f;
     }
 
-    bool placement_intersects_player(const Player& player, BlockType block, int x, int y, int z,
-                                     HorizontalDirection facing)
+    // Whether placing `block` at (x, y, z) would put it inside the player's
+    // or any mob's hitbox - including a door's upper half and a bed's
+    // second cell.
+    bool placement_hits_entity(const Player& player, const std::vector<std::unique_ptr<Mob>>& mobs, BlockType block,
+                               int x, int y, int z, HorizontalDirection facing)
     {
-        if (player.intersects_block(x, y, z)) return true;
+        struct Cell { int x, y, z; };
+        Cell cells[2] = {{x, y, z}, {x, y, z}};
+        int count = 1;
         if (block == BlockType::OakDoorLower || block == BlockType::IronDoorLower) {
-            return player.intersects_block(x, y + 1, z);
-        }
-        if (block == BlockType::BedHead) {
+            cells[count++] = {x, y + 1, z};
+        } else if (block == BlockType::BedHead) {
             DirectionOffset step = horizontal_direction_offset(facing);
-            return player.intersects_block(x + step.dx, y, z + step.dz);
+            cells[count++] = {x + step.dx, y, z + step.dz};
+        }
+        for (int i = 0; i < count; ++i) {
+            if (player.intersects_block(cells[i].x, cells[i].y, cells[i].z)) return true;
+            for (const auto& mob : mobs) {
+                if (mob->intersects_block(cells[i].x, cells[i].y, cells[i].z)) return true;
+            }
         }
         return false;
+    }
+
+    // A new mob of the kind saved/summoned as `type` (Mob::type_id()), or
+    // nothing for a name no mob has.
+    std::unique_ptr<Mob> create_mob(const std::string& type, Vector3 feet, float yaw, uint32_t seed)
+    {
+        if (type == Cow::TYPE_ID) return std::make_unique<Cow>(feet, yaw, seed);
+        if (type == Npc::TYPE_ID) return std::make_unique<Npc>(feet, yaw, seed);
+        return nullptr;
+    }
+
+    // Minecraft's own Entity.push(): two overlapping hitboxes (feet
+    // position, half width, height) are shoved apart horizontally - harder
+    // the deeper they overlap, capped at PUSH_STRENGTH blocks/tick each.
+    // Returns false if they don't overlap; otherwise `dx`/`dz` is how far
+    // `b` moves this tick (and `a` moves the opposite way).
+    constexpr float PUSH_STRENGTH = 0.05f;
+
+    bool push_apart(Vector3 a, float a_half, float a_height, Vector3 b, float b_half, float b_height,
+                    float& dx, float& dz)
+    {
+        if (std::fabs(a.x - b.x) >= a_half + b_half || std::fabs(a.z - b.z) >= a_half + b_half) return false;
+        if (a.y >= b.y + b_height || b.y >= a.y + a_height) return false;
+        dx = b.x - a.x;
+        dz = b.z - a.z;
+        float distance = std::max(std::fabs(dx), std::fabs(dz));
+        if (distance < 0.01f) {
+            // Exactly on top of each other (summoned at the same spot):
+            // any direction will do to start them apart.
+            dx = PUSH_STRENGTH;
+            dz = 0.0f;
+            return true;
+        }
+        distance = std::sqrt(distance);
+        const float strength = std::min(1.0f, 1.0f / distance) * PUSH_STRENGTH / distance;
+        dx *= strength;
+        dz *= strength;
+        return true;
     }
 
     bool has_nearby_log(World& world, int x, int y, int z) {
@@ -319,13 +369,25 @@ namespace {
     // time (each cell re-lights/remeshes its whole chunk neighborhood).
     constexpr long long COMMAND_VOLUME_LIMIT = 32768;
 
+    // Cow spawning (see GameEngine::try_spawn_cows()): every few seconds,
+    // while fewer than MAX_NEARBY_COWS roam within NEARBY_RADIUS of the
+    // player, a small herd appears on grass SPAWN_DISTANCE_MIN..MAX blocks
+    // away - out of sight, like Minecraft's own animals being "already
+    // there". MAX_COWS caps the whole world's population.
+    constexpr uint64_t MOB_SPAWN_INTERVAL_TICKS = 100;
+    constexpr float NEARBY_RADIUS = 64.0f;
+    constexpr size_t MAX_NEARBY_COWS = 6;
+    constexpr size_t MAX_COWS = 40;
+    constexpr float SPAWN_DISTANCE_MIN = 24.0f;
+    constexpr float SPAWN_DISTANCE_MAX = 48.0f;
+
     // Commands real Minecraft has that this project deliberately doesn't
     // implement yet - each names the missing underlying system (mobs/
     // entities, enchanting, hunger/XP, gamerules, weather/difficulty,
     // multiplayer accounts) rather than silently no-op-ing or pretending.
     const std::unordered_set<std::string> UNSUPPORTED_COMMANDS = {
         "enchant", "effect", "xp", "gamerule", "weather", "difficulty",
-        "summon", "spawnpoint", "kick", "op", "execute",
+        "spawnpoint", "kick", "op", "execute",
     };
 
     // Translation key naming what's missing for an UNSUPPORTED_COMMANDS entry.
@@ -351,6 +413,7 @@ namespace {
         "command.help.clone",
         "command.help.kill",
         "command.help.say",
+        "command.help.summon",
     };
 
     std::vector<std::string> chat_command_suggestion_keys() {
@@ -405,6 +468,7 @@ void GameEngine::add_object(std::unique_ptr<GameObject> object)
 void GameEngine::set_world(std::unique_ptr<World> new_world)
 {
     dropped_items.clear();
+    mobs.clear();
     particles.clear();
     footstep_particle_distance = 0.0f;
     world = std::move(new_world);
@@ -461,8 +525,113 @@ void GameEngine::tick()
         world->update_furnaces();
     }
     tick_dropped_items();
+    tick_mobs();
     update_leaf_decay();
     update_random_ticks();
+}
+
+void GameEngine::tick_mobs()
+{
+    if (!world) return;
+    // What the mobs' AI sees of the player: where it stands and looks
+    // from, and the item in its hand (animals follow food they like).
+    ai::PlayerView view;
+    view.present = !player.health().is_dead();
+    view.feet = player.feet_position();
+    view.eyes = Vector3Add(view.feet, {0.0f, player.eye_height(), 0.0f});
+    view.held = inventory.hotbar[static_cast<size_t>(inventory.selected_slot)];
+
+    for (auto& mob : mobs) {
+        const Vector3 p = mob->get_position();
+        // Outside loaded chunks a mob just waits - its ground isn't there.
+        if (!world->is_column_loaded(static_cast<int>(std::floor(p.x)), static_cast<int>(std::floor(p.z)))) continue;
+        mob->tick(*world, view);
+    }
+    push_entities_apart();
+    if (game_tick % MOB_SPAWN_INTERVAL_TICKS == 0) try_spawn_cows();
+}
+
+void GameEngine::push_entities_apart()
+{
+    for (size_t i = 0; i < mobs.size(); ++i) {
+        for (size_t j = i + 1; j < mobs.size(); ++j) {
+            const Mob& a = *mobs[i];
+            const Mob& b = *mobs[j];
+            float dx, dz;
+            if (push_apart(a.get_position(), a.width() * 0.5f, a.height(), b.get_position(), b.width() * 0.5f,
+                           b.height(), dx, dz)) {
+                mobs[i]->push(-dx, -dz);
+                mobs[j]->push(dx, dz);
+            }
+        }
+    }
+
+    // The player shoves mobs (in any mode) and is shoved back - only in
+    // Survival, where it walks; Creative flight isn't nudged around.
+    const float player_half = Player::WIDTH * 0.5f;
+    for (const auto& mob : mobs) {
+        float dx, dz;
+        if (!push_apart(player.feet_position(), player_half, player.height(), mob->get_position(), mob->width() * 0.5f,
+                        mob->height(), dx, dz)) {
+            continue;
+        }
+        mob->push(dx, dz);
+        if (current_game_mode == GameMode::Survival) player.push(-dx * TICKS_PER_SECOND, -dz * TICKS_PER_SECOND);
+    }
+}
+
+std::optional<int> GameEngine::grass_spawn_height(int x, int z) const
+{
+    if (!world || !world->is_column_loaded(x, z)) return std::nullopt;
+    for (int y = MIN_WORLD_Y + CHUNK_HEIGHT - 3; y > MIN_WORLD_Y; --y) {
+        const BlockType block = world->get_block(x, y, z);
+        if (block == BlockType::Air || !get_block_properties(block).solid) continue; // air, tall grass, flowers...
+        if (block != BlockType::Grass) return std::nullopt; // the surface here isn't grass
+        if (get_block_properties(world->get_block(x, y + 1, z)).solid ||
+            get_block_properties(world->get_block(x, y + 2, z)).solid) return std::nullopt;
+        return y + 1;
+    }
+    return std::nullopt;
+}
+
+void GameEngine::try_spawn_cows()
+{
+    const Vector3 feet = player.feet_position();
+    size_t cow_count = 0, nearby = 0;
+    for (const auto& mob : mobs) {
+        if (std::string(mob->type_id()) != Cow::TYPE_ID) continue;
+        ++cow_count;
+        const Vector3 d = Vector3Subtract(mob->get_position(), feet);
+        if (d.x * d.x + d.z * d.z < NEARBY_RADIUS * NEARBY_RADIUS) ++nearby;
+    }
+    if (cow_count >= MAX_COWS) return;
+    if (nearby >= MAX_NEARBY_COWS) return;
+
+    std::uniform_real_distribution<float> angle(0.0f, 2.0f * PI);
+    std::uniform_real_distribution<float> distance(SPAWN_DISTANCE_MIN, SPAWN_DISTANCE_MAX);
+    std::uniform_real_distribution<float> yaw(-180.0f, 180.0f);
+    std::uniform_int_distribution<int> herd_size(2, 4);
+    std::uniform_int_distribution<int> spread(-3, 3);
+    for (int attempt = 0; attempt < 6; ++attempt) {
+        const float a = angle(mob_rng), r = distance(mob_rng);
+        const int center_x = static_cast<int>(std::floor(feet.x + std::cos(a) * r));
+        const int center_z = static_cast<int>(std::floor(feet.z + std::sin(a) * r));
+        if (!grass_spawn_height(center_x, center_z)) continue;
+
+        // A few tries per cow around the herd's middle - some spots nearby
+        // may be a tree or a hole instead of grass.
+        int remaining = herd_size(mob_rng);
+        for (int tries = remaining * 3; tries > 0 && remaining > 0 && cow_count < MAX_COWS; --tries) {
+            const int x = center_x + spread(mob_rng);
+            const int z = center_z + spread(mob_rng);
+            if (std::optional<int> y = grass_spawn_height(x, z)) {
+                mobs.push_back(std::make_unique<Cow>(Vector3{x + 0.5f, static_cast<float>(*y), z + 0.5f}, yaw(mob_rng), mob_rng()));
+                ++cow_count;
+                --remaining;
+            }
+        }
+        return;
+    }
 }
 
 void GameEngine::tick_dropped_items()
@@ -1280,6 +1449,23 @@ void GameEngine::execute_chat_command(const std::string& command)
         return;
     }
 
+    if (name == "summon") {
+        if (args.empty() || (args.size() != 1 && args.size() != 4)) { push("command.summon.usage"); return; }
+        if (args[0] != Cow::TYPE_ID && args[0] != Npc::TYPE_ID) { push("command.summon.unknown", {args[0]}); return; }
+        Vector3 at = player.feet_position();
+        if (args.size() == 4) {
+            std::optional<float> x = parse_float(args[1]);
+            std::optional<float> y = parse_float(args[2]);
+            std::optional<float> z = parse_float(args[3]);
+            if (!x || !y || !z) { push("command.error.coordinates"); return; }
+            at = {*x, *y, *z};
+        }
+        std::unique_ptr<Mob> mob = create_mob(args[0], at, std::uniform_real_distribution<float>(-180.0f, 180.0f)(mob_rng), mob_rng());
+        mobs.push_back(std::move(mob));
+        push("command.summon.done", {ui::tr("entity." + args[0])});
+        return;
+    }
+
     if (name == "kill") {
         if (current_game_mode != GameMode::Survival) {
             push("command.kill.survival_only");
@@ -1324,6 +1510,7 @@ void GameEngine::draw_player_model() const
 
 void GameEngine::draw_hitboxes() const
 {
+    constexpr float LOOK_RAY_LENGTH = 1.5f; // blocks
     if (camera_view != CameraView::FirstPerson) {
         const Vector3 feet = player.feet_position();
         const float half = Player::WIDTH * 0.5f;
@@ -1333,13 +1520,36 @@ void GameEngine::draw_hitboxes() const
         DrawBoundingBox({{feet.x - half, eye_y - 0.005f, feet.z - half}, {feet.x + half, eye_y + 0.005f, feet.z + half}}, RED);
         const Vector3 eye = {feet.x, eye_y, feet.z};
         const Vector3 look = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
-        DrawLine3D(eye, Vector3Add(eye, Vector3Scale(look, 2.0f)), BLUE);
+        DrawLine3D(eye, Vector3Add(eye, Vector3Scale(look, LOOK_RAY_LENGTH)), BLUE);
     }
     for (const auto& item : dropped_items) {
         if (!item->is_active()) continue;
         const Vector3 p = item->get_position();
         const float h = DroppedItem::HITBOX_HALF_SIZE;
         DrawBoundingBox({{p.x - h, p.y - h, p.z - h}, {p.x + h, p.y + h, p.z + h}}, WHITE);
+    }
+    for (const auto& mob : mobs) {
+        const Vector3 p = mob->get_position();
+        const float h = mob->width() * 0.5f;
+        DrawBoundingBox({{p.x - h, p.y, p.z - h}, {p.x + h, p.y + mob->height(), p.z + h}}, WHITE);
+        // Same eye-height square and look ray as the player's.
+        const Vector3 eye = mob->eye_position();
+        DrawBoundingBox({{p.x - h, eye.y - 0.005f, p.z - h}, {p.x + h, eye.y + 0.005f, p.z + h}}, RED);
+        DrawLine3D(eye, Vector3Add(eye, Vector3Scale(mob->look_direction(), LOOK_RAY_LENGTH)), BLUE);
+
+        // The path it's walking: the rest of the route in yellow, its end in
+        // green (reached the target) or orange (as close as it could get).
+        const ai::Navigation& navigation = mob->navigation();
+        if (navigation.done()) continue;
+        const std::vector<ai::PathNode>& nodes = navigation.path().nodes;
+        Vector3 from = {p.x, p.y + 0.05f, p.z};
+        for (size_t i = navigation.next_node(); i < nodes.size(); ++i) {
+            const Vector3 to = Vector3Add(nodes[i].center(), {0.0f, 0.05f, 0.0f});
+            DrawLine3D(from, to, YELLOW);
+            DrawCube(to, 0.1f, 0.1f, 0.1f, YELLOW);
+            from = to;
+        }
+        DrawCubeWires(from, 0.3f, 0.3f, 0.3f, navigation.path().reaches_target ? GREEN : ORANGE);
     }
 }
 
@@ -1827,7 +2037,7 @@ void GameEngine::update(float delta_time)
                     int place_x = targeted_block->x + (replace_target ? 0 : static_cast<int>(targeted_block->normal.x));
                     int place_y = targeted_block->y + (replace_target ? 0 : static_cast<int>(targeted_block->normal.y));
                     int place_z = targeted_block->z + (replace_target ? 0 : static_cast<int>(targeted_block->normal.z));
-                    if (!placement_intersects_player(player, selected.block, place_x, place_y, place_z, facing)) {
+                    if (!placement_hits_entity(player, mobs, selected.block, place_x, place_y, place_z, facing)) {
                         // Door/bed are placed as one atomic pair (World::
                         // place_door()/place_bed()) rather than through the
                         // generic single-cell path below - see their own
@@ -1974,6 +2184,13 @@ void GameEngine::draw()
         }
         for (const auto& item : dropped_items) {
             if (item->is_active() && world) item->render(tick_alpha, render_camera.position, *world);
+        }
+        const float mob_draw_distance = static_cast<float>(settings.render_distance_chunks * CHUNK_SIZE);
+        for (const auto& mob : mobs) {
+            if (!world) break;
+            Vector3 offset = Vector3Subtract(mob->get_position(), render_camera.position);
+            if (offset.x * offset.x + offset.z * offset.z > mob_draw_distance * mob_draw_distance) continue;
+            mob->render(tick_alpha, *world);
         }
         draw_player_model();
         particles.draw(render_camera, world.get());
@@ -2224,6 +2441,14 @@ bool GameEngine::open_world(const std::string& folder_name, const GameLoadProgre
             dropped_items.push_back(std::move(dropped));
         }
 
+        // Every mob still in this world when it was last saved.
+        mobs.clear();
+        for (const MobSaveState& saved : WorldSave::load_mobs(folder_name)) {
+            if (std::unique_ptr<Mob> mob = create_mob(saved.type, saved.position, saved.yaw, mob_rng())) {
+                mobs.push_back(std::move(mob));
+            }
+        }
+
         // Whatever every chest had in it, last time this world was saved
         // (see GameEngine::save_player_state()) - chest_inventory() creates
         // the entry on first touch, so just writing straight into the
@@ -2278,6 +2503,11 @@ void GameEngine::save_player_state()
     }
     WorldSave::save_dropped_items(current_world_folder, saved_items);
 
+    std::vector<MobSaveState> saved_mobs;
+    saved_mobs.reserve(mobs.size());
+    for (const auto& mob : mobs) saved_mobs.push_back({mob->type_id(), mob->get_position(), mob->get_yaw()});
+    WorldSave::save_mobs(current_world_folder, saved_mobs);
+
     // Every chest's own storage (see World::all_chest_inventories()) -
     // save_chests() itself skips any chest with nothing actually in it, so
     // this doesn't need to filter those out first.
@@ -2302,6 +2532,7 @@ void GameEngine::close_world()
     save_player_state();
     world.reset(); // ~World() flushes any modified chunks still resident - same guarantee quitting the app outright already relies on
     dropped_items.clear();
+    mobs.clear();
     particles.clear();
     footstep_particle_distance = 0.0f;
     current_world_folder.clear();

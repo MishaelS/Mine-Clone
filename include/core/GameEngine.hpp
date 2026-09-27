@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -10,6 +11,7 @@
 #include "core/GameObject.hpp"
 #include "core/Settings.hpp"
 #include "items/Inventory.hpp"
+#include "entities/Mob.hpp"
 #include "entities/DroppedItem.hpp"
 #include "entities/Player.hpp"
 #include "effects/ParticleSystem.hpp"
@@ -113,6 +115,19 @@ private:
     // DroppedItem::try_merge()) - called from tick(), not every frame, so
     // falling items move at Minecraft's own fixed rate.
     void tick_dropped_items();
+
+    // One tick for every mob (cows, NPCs) in a loaded chunk, plus - every
+    // few seconds - a herd of cows spawning on grass some way off if few are
+    // around (see try_spawn_cows()).
+    void tick_mobs();
+
+    // Every pair of overlapping hitboxes (mob-mob, player-mob) gets nudged
+    // apart this tick - see push_apart() in the .cpp.
+    void push_entities_apart();
+    void try_spawn_cows();
+    // Feet height for a mob on the grass at column (x, z) - loaded, grass
+    // on top, two free cells above it - or nothing.
+    std::optional<int> grass_spawn_height(int x, int z) const;
 
     // Every-frame (not tick-locked) part of dropped-item handling: pulls
     // anything within magnet range toward the player (DroppedItem::
@@ -365,6 +380,8 @@ private:
     InventoryHud inventory_hud;
     ChatHud chat_hud;
     std::vector<std::unique_ptr<DroppedItem>> dropped_items;
+    std::vector<std::unique_ptr<Mob>> mobs;
+    std::mt19937 mob_rng{std::random_device{}()};
     std::vector<PendingLeafDecay> pending_leaf_decay;
     ParticleSystem particles;
     float footstep_particle_distance = 0.0f;

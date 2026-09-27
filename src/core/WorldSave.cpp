@@ -380,6 +380,45 @@ namespace WorldSave {
         return static_cast<bool>(out);
     }
 
+    bool save_mobs(const std::string& folder_name, const std::vector<MobSaveState>& mobs) {
+        std::ofstream out(world_directory(folder_name) + "/mobs.json", std::ios::binary | std::ios::trunc);
+        if (!out) return false;
+
+        out << "{\n  \"mobs\": [\n";
+        for (size_t i = 0; i < mobs.size(); ++i) {
+            const MobSaveState& mob = mobs[i];
+            out << "    { \"type\": \"" << json_escape(mob.type) << "\", \"position\": { \"x\": " << mob.position.x
+                << ", \"y\": " << mob.position.y << ", \"z\": " << mob.position.z << " }, \"yaw\": " << mob.yaw << " }";
+            if (i + 1 < mobs.size()) out << ",";
+            out << "\n";
+        }
+        out << "  ]\n}\n";
+        return static_cast<bool>(out);
+    }
+
+    std::vector<MobSaveState> load_mobs(const std::string& folder_name) {
+        std::vector<MobSaveState> result;
+        std::string text = read_whole_file(world_directory(folder_name) + "/mobs.json");
+        if (text.empty()) return result;
+        try {
+            Json root = Json::parse(text);
+            for (const Json& entry : root["mobs"].as_array()) {
+                MobSaveState mob;
+                mob.type = entry["type"].as_string();
+                mob.position = {
+                    static_cast<float>(entry["position"]["x"].as_number(0.0)),
+                    static_cast<float>(entry["position"]["y"].as_number(0.0)),
+                    static_cast<float>(entry["position"]["z"].as_number(0.0)),
+                };
+                mob.yaw = static_cast<float>(entry["yaw"].as_number(0.0));
+                if (!mob.type.empty()) result.push_back(mob);
+            }
+        } catch (const std::exception&) {
+            return {};
+        }
+        return result;
+    }
+
     std::vector<DroppedItemSaveState> load_dropped_items(const std::string& folder_name) {
         std::vector<DroppedItemSaveState> result;
         std::string text = read_whole_file(world_directory(folder_name) + "/items.json");

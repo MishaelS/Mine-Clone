@@ -1,6 +1,7 @@
 #include "ModelEditor.hpp"
 #include "EditorText.hpp"
 #include "model/EntityModelRenderer.hpp"
+#include "core/Json.hpp"
 
 #include "raygui.h"
 #include "raymath.h"
@@ -10,6 +11,8 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 
 void editor_load_dark_style(); // RayGuiImpl.cpp
 
@@ -96,8 +99,9 @@ ModelEditor::ModelEditor()
     }
     std::sort(skin_paths.begin(), skin_paths.end());
 
-    // Start on the player model if it was saved before, else the template.
-    open_model();
+    // Start on the model opened last time (or the player), else the template.
+    refresh_model_list();
+    open_model_named(last_model());
     if (model.parts.empty()) new_model();
     status.clear();
 }
@@ -120,6 +124,11 @@ void ModelEditor::run()
             bool ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL) ||
                         IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER);
             if (ctrl && IsKeyPressed(KEY_S)) save_model();
+            const bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+            const bool z = IsKeyPressed(KEY_Z) || IsKeyPressedRepeat(KEY_Z); // held down: keeps stepping
+            const bool y = IsKeyPressed(KEY_Y) || IsKeyPressedRepeat(KEY_Y);
+            if (ctrl && z && !shift) undo();
+            else if (ctrl && ((z && shift) || y)) redo();
             if (IsKeyPressed(KEY_SPACE) && current_animation()) playing = !playing;
         }
         if (playing) {
@@ -147,8 +156,10 @@ void ModelEditor::run()
         draw_timeline(timeline_rect());
         draw_right_panel(right_panel_rect());
         if (graph_open) draw_graph_window(graph_window_rect(viewport));
+        if (uv_open) draw_uv_window(uv_window_rect(viewport));
         draw_top_bar(top_bar_rect());
         EndDrawing();
+        commit_history();
     }
 }
 
@@ -194,8 +205,8 @@ Camera3D ModelEditor::camera() const
 void ModelEditor::update_camera(Rectangle viewport)
 {
     const Vector2 mouse = GetMousePosition();
-    const bool over = CheckCollisionPointRec(mouse, viewport) &&
-                      !(graph_open && CheckCollisionPointRec(mouse, graph_window_rect(viewport)));
+    const bool over = CheckCollisionPointRec(mouse, viewport) && !models_dropdown_open &&
+                      !over_floating_window(viewport, mouse);
     const bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
     const bool alt = IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT);
     const bool navigating = IsMouseButtonDown(MOUSE_BUTTON_MIDDLE) || (alt && IsMouseButtonDown(MOUSE_BUTTON_LEFT));
@@ -256,7 +267,9 @@ void ModelEditor::draw_viewport(Rectangle viewport)
     draw_grid();
     rlPushMatrix();
     rlRotatef(displayed_body_yaw(), 0.0f, 1.0f, 0.0f); // the look preview may turn the whole body
+    BeginShaderMode(entity_cutout_shader());
     draw_entity_model(model, skin, displayed_pose(), MODEL_SCALE);
+    EndShaderMode();
     draw_selection();
     rlPopMatrix();
     EndMode3D();
@@ -293,9 +306,13 @@ void ModelEditor::draw_selection() const
     push_part_transform(model, pose, selected_part, MODEL_SCALE);
     for (size_t c = 0; c < part.cubes.size(); ++c) {
         const ModelCube& cube = part.cubes[c];
-        Vector3 size = Vector3Scale(cube.size, MODEL_SCALE);
-        Vector3 center = Vector3Add(Vector3Scale(cube.origin, MODEL_SCALE), Vector3Scale(size, 0.5f));
+        const BoundingBox bounds = cube_draw_bounds(part, cube);
+        Vector3 size = Vector3Scale(Vector3Subtract(bounds.max, bounds.min), MODEL_SCALE);
+        Vector3 center = Vector3Add(Vector3Scale(bounds.min, MODEL_SCALE), Vector3Scale(size, 0.5f));
+        rlPushMatrix();
+        rlMultMatrixf(MatrixToFloat(cube_rotation_matrix(cube, MODEL_SCALE))); // the cube's own fixed turn, if any
         DrawCubeWiresV(center, size, static_cast<int>(c) == selected_cube ? SELECTION : Fade(SELECTION, 0.45f));
+        rlPopMatrix();
     }
     Vector3 pivot = Vector3Scale(part.pivot, MODEL_SCALE);
     const float arm = 0.12f;
@@ -318,14 +335,16 @@ void ModelEditor::pick_part(Rectangle viewport)
     int best_part = -1, best_cube = 0;
     float best_distance = 1e9f;
     for (size_t p = 0; p < model.parts.size(); ++p) {
-        // The ray in this part's own (rest) space, so its cubes stay plain boxes.
-        Matrix inverse = MatrixInvert(MatrixMultiply(part_world_matrix(model, pose, static_cast<int>(p)), body_turn));
-        Vector3 origin = Vector3Transform(ray.position, inverse);
-        Vector3 direction = Vector3Normalize(Vector3Subtract(Vector3Transform(Vector3Add(ray.position, ray.direction), inverse), origin));
+        const Matrix part_to_world = MatrixMultiply(part_world_matrix(model, pose, static_cast<int>(p)), body_turn);
         for (size_t c = 0; c < model.parts[p].cubes.size(); ++c) {
             const ModelCube& cube = model.parts[p].cubes[c];
-            BoundingBox box{Vector3Scale(cube.origin, MODEL_SCALE),
-                            Vector3Scale(Vector3Add(cube.origin, cube.size), MODEL_SCALE)};
+            // The ray in this cube's own unrotated space, where it's a plain
+            // box (all transforms are rigid, so hit distances still compare).
+            Matrix inverse = MatrixInvert(MatrixMultiply(cube_rotation_matrix(cube, MODEL_SCALE), part_to_world));
+            Vector3 origin = Vector3Transform(ray.position, inverse);
+            Vector3 direction = Vector3Normalize(Vector3Subtract(Vector3Transform(Vector3Add(ray.position, ray.direction), inverse), origin));
+            const BoundingBox bounds = cube_draw_bounds(model.parts[p], cube);
+            BoundingBox box{Vector3Scale(bounds.min, MODEL_SCALE), Vector3Scale(bounds.max, MODEL_SCALE)};
             RayCollision hit = GetRayCollisionBox({origin, direction}, box);
             if (hit.hit && hit.distance < best_distance) {
                 best_distance = hit.distance;
@@ -387,22 +406,56 @@ void ModelEditor::draw_top_bar(Rectangle bounds)
     GuiPanel(bounds, nullptr);
     float x = bounds.x + PAD;
     const float y = bounds.y + (bounds.height - ROW) * 0.5f;
-    label({x, y, 70, ROW}, tr("editor.model"));
-    x += 70;
-    text_field({x, y, 180, ROW}, model_name, sizeof(model_name));
-    x += 180 + GAP;
+    label({x, y, 80, ROW}, tr("editor.open"));
+    x += 80;
+    const Rectangle dropdown = {x, y, 200, ROW}; // drawn last, so its open list covers everything else
+    x += 200 + GAP * 3;
+    label({x, y, 50, ROW}, tr("editor.name"));
+    x += 50;
+    text_field({x, y, 160, ROW}, model_name, sizeof(model_name));
+    x += 160 + GAP;
     if (GuiButton({x, y, 90, ROW}, tr("editor.new").c_str())) new_model();
-    x += 90 + GAP;
-    if (GuiButton({x, y, 90, ROW}, tr("editor.open").c_str())) open_model();
     x += 90 + GAP;
     if (GuiButton({x, y, 110, ROW}, tr("editor.save").c_str())) save_model();
     x += 110 + GAP * 2;
     GuiToggle({x, y, 170, ROW}, tr("editor.graph").c_str(), &graph_open);
-    x += 170 + GAP * 2;
+    x += 170 + GAP;
+    GuiToggle({x, y, 120, ROW}, tr("editor.uv_window").c_str(), &uv_open);
+    x += 120 + GAP * 2;
 
     std::string line = dirty ? tr("editor.unsaved") : std::string();
     if (GetTime() - status_time < 4.0) line = status + (dirty ? "   " + line : "");
     label({x, y, bounds.width - x - PAD, ROW}, line);
+
+    // "Open": every saved model; picking one opens it. An unsaved new
+    // model shows as its own first entry until it's saved.
+    std::string items;
+    int active = -1;
+    const bool unsaved_new = current_model_file.empty();
+    if (unsaved_new) {
+        items = tr("editor.unsaved_model");
+        active = 0;
+    }
+    for (size_t i = 0; i < model_names.size(); ++i) {
+        if (!items.empty()) items += ";";
+        items += model_names[i];
+        if (model_names[i] == current_model_file) active = static_cast<int>(i) + (unsaved_new ? 1 : 0);
+    }
+    if (items.empty()) items = tr("editor.no_models");
+    int chosen = std::max(active, 0);
+    if (GuiDropdownBox(dropdown, items.c_str(), &chosen, models_dropdown_open)) {
+        models_dropdown_open = !models_dropdown_open;
+        const int index = chosen - (unsaved_new ? 1 : 0);
+        if (!models_dropdown_open && chosen != active && index >= 0 && index < static_cast<int>(model_names.size())) {
+            const std::string& name = model_names[index];
+            if (dirty && pending_open != name) {
+                pending_open = name; // don't lose edits on one click - a second pick confirms
+                set_status(tr_format("editor.unsaved_open_confirm", {name}));
+            } else {
+                open_model_named(name);
+            }
+        }
+    }
 }
 
 // ------------------------------------------------------------ Right panel --
@@ -591,6 +644,29 @@ float ModelEditor::draw_part_properties(float x, float y, float width)
             label({x, y, label_w, ROW}, tr("editor.uv"));
             if (float_as_int_field({x + label_w, y, field_w, ROW}, cube.uv.x, 0, model.skin_width)) mark_dirty();
             if (float_as_int_field({x + label_w + field_w + GAP, y, field_w, ROW}, cube.uv.y, 0, model.skin_height)) mark_dirty();
+            y += ROW + GAP;
+            if (vec3_row(tr("editor.cube_rotation"), cube.rotation, -180, 180)) mark_dirty();
+            if (vec3_row(tr("editor.cube_rotation_origin"), cube.rotation_origin, -256, 256)) mark_dirty();
+
+            // Decoration layer: this cube hovers half a pixel off the ones
+            // under it - or add such a layer over this cube in one go (same
+            // box and skin spot; move its layout in the UV window after).
+            bool overlay = cube.overlay;
+            GuiCheckBox({x, y + 4, ROW - 8, ROW - 8}, tr("editor.overlay").c_str(), &overlay);
+            if (overlay != cube.overlay) {
+                cube.overlay = overlay;
+                mark_dirty();
+            }
+            y += ROW + GAP;
+            GuiSetState(cube.overlay ? STATE_DISABLED : STATE_NORMAL);
+            if (GuiButton({x, y, width, ROW}, tr("editor.add_overlay").c_str()) && !cube.overlay) {
+                ModelCube layer = cube;
+                layer.overlay = true;
+                part.cubes.insert(part.cubes.begin() + selected_cube + 1, layer);
+                ++selected_cube;
+                mark_dirty();
+            }
+            GuiSetState(STATE_NORMAL);
             y += ROW + GAP;
         }
     }
@@ -821,6 +897,8 @@ void ModelEditor::draw_timeline(Rectangle bounds)
 
 void ModelEditor::new_model()
 {
+    current_model_file.clear();
+    pending_open.clear();
     model = make_humanoid_model();
     if (model_name[0] != '\0') model.name = model_name;
     load_skin(model.skin);
@@ -829,7 +907,14 @@ void ModelEditor::new_model()
     playing = false;
     select_part(model.parts.empty() ? -1 : 0);
     dirty = true;
+    reset_history();
     set_status(tr("editor.created"));
+}
+
+void ModelEditor::open_model_named(const std::string& name)
+{
+    std::snprintf(model_name, sizeof(model_name), "%s", name.c_str());
+    open_model();
 }
 
 void ModelEditor::open_model()
@@ -851,7 +936,99 @@ void ModelEditor::open_model()
     playing = false;
     select_part(model.parts.empty() ? -1 : 0);
     dirty = false;
+    current_model_file = model_name;
+    pending_open.clear();
+    remember_last_model();
+    reset_history();
     set_status(tr_format("editor.opened", {path}));
+}
+
+// ------------------------------------------------------------- History --
+
+namespace {
+    constexpr size_t MAX_UNDO_STEPS = 200;
+}
+
+ModelEditor::HistoryState ModelEditor::current_state() const
+{
+    return {model, selected_part, selected_cube, animation_index};
+}
+
+void ModelEditor::restore_state(const HistoryState& state)
+{
+    const std::string previous_skin = model.skin;
+    model = state.model;
+    if (model.skin != previous_skin) load_skin(model.skin);
+
+    // Back to what was selected then, as far as it still exists.
+    const int part_count = static_cast<int>(model.parts.size());
+    select_part(state.selected_part >= 0 && state.selected_part < part_count ? state.selected_part : (part_count ? 0 : -1));
+    if (selected_part >= 0) {
+        const int cube_count = static_cast<int>(model.parts[selected_part].cubes.size());
+        selected_cube = std::clamp(state.selected_cube, 0, std::max(0, cube_count - 1));
+    }
+    const int animation_count = static_cast<int>(model.animations.size());
+    animation_index = state.animation_index < animation_count ? state.animation_index : animation_count - 1;
+    if (EntityAnimation* animation = current_animation()) {
+        std::snprintf(animation_name, sizeof(animation_name), "%s", animation->name.c_str());
+        time = std::min(time, animation->length);
+    }
+
+    // Nothing half-dragged carries over into the restored model.
+    uv_drag_face = -1;
+    graph_drag_node = -1;
+    graph_link_from = -1;
+    editing_widget = -1;
+    dirty = true;
+}
+
+void ModelEditor::commit_history(bool force)
+{
+    if (!uncommitted_change) return;
+    const bool mouse_busy = IsMouseButtonDown(MOUSE_BUTTON_LEFT) || IsMouseButtonDown(MOUSE_BUTTON_RIGHT) ||
+                            IsMouseButtonDown(MOUSE_BUTTON_MIDDLE);
+    if (!force && (mouse_busy || typing())) return; // still in the middle of this change
+    undo_stack.push_back(std::move(committed_state));
+    if (undo_stack.size() > MAX_UNDO_STEPS) undo_stack.erase(undo_stack.begin());
+    redo_stack.clear();
+    committed_state = current_state();
+    uncommitted_change = false;
+}
+
+void ModelEditor::reset_history()
+{
+    undo_stack.clear();
+    redo_stack.clear();
+    committed_state = current_state();
+    uncommitted_change = false;
+}
+
+void ModelEditor::undo()
+{
+    commit_history(true);
+    if (undo_stack.empty()) {
+        set_status(tr("editor.nothing_to_undo"));
+        return;
+    }
+    redo_stack.push_back(current_state());
+    restore_state(undo_stack.back());
+    undo_stack.pop_back();
+    committed_state = current_state();
+    set_status(tr_format("editor.undone", {std::to_string(undo_stack.size())}));
+}
+
+void ModelEditor::redo()
+{
+    commit_history(true);
+    if (redo_stack.empty()) {
+        set_status(tr("editor.nothing_to_redo"));
+        return;
+    }
+    undo_stack.push_back(current_state());
+    restore_state(redo_stack.back());
+    redo_stack.pop_back();
+    committed_state = current_state();
+    set_status(tr_format("editor.redone", {std::to_string(redo_stack.size())}));
 }
 
 void ModelEditor::save_model()
@@ -863,6 +1040,10 @@ void ModelEditor::save_model()
     const std::string path = models_directory() + model_name + ".json";
     if (save_entity_model(model, path)) {
         dirty = false;
+        current_model_file = model_name;
+        pending_open.clear();
+        refresh_model_list(); // a newly named model shows up in "Open" right away
+        remember_last_model();
         set_status(tr_format("editor.saved", {path}));
     } else {
         set_status(tr_format("editor.save_failed", {path}));
@@ -1060,7 +1241,9 @@ void ModelEditor::rename_animation(EntityAnimation& animation, const std::string
 
 Rectangle ModelEditor::graph_window_rect(Rectangle viewport) const
 {
-    const float width = std::min(620.0f, viewport.width - 24.0f);
+    // Leaves room for the UV window on the right when that's open too.
+    const float room = viewport.width - 24.0f - (uv_open ? uv_window_rect(viewport).width + 12.0f : 0.0f);
+    const float width = std::max(200.0f, std::min(620.0f, room));
     const float height = std::min(340.0f, viewport.height - 60.0f);
     return {viewport.x + 12.0f, viewport.y + 12.0f, width, height};
 }
@@ -1082,7 +1265,7 @@ void ModelEditor::draw_graph_window(Rectangle bounds)
     }
     const Rectangle area = {bounds.x + 2, bounds.y + 26, bounds.width - 4, bounds.height - 28};
     const Vector2 mouse = GetMousePosition();
-    const bool mouse_in_area = CheckCollisionPointRec(mouse, area);
+    const bool mouse_in_area = CheckCollisionPointRec(mouse, area) && !models_dropdown_open;
 
     // Blocks without a stored place get a tidy grid position.
     for (size_t i = 0; i < model.animations.size(); ++i) {
@@ -1209,4 +1392,239 @@ void ModelEditor::draw_graph_window(Rectangle bounds)
     EndScissorMode();
 
     label({area.x + PAD, area.y + area.height - ROW - 2, area.width - PAD * 2, ROW}, tr("editor.graph_hint"));
+}
+
+// ---------------------------------------------------------- Model list --
+
+void ModelEditor::refresh_model_list()
+{
+    model_names.clear();
+    std::error_code error;
+    for (const auto& entry : std::filesystem::directory_iterator(models_directory(), error)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".json") {
+            model_names.push_back(entry.path().stem().string());
+        }
+    }
+    std::sort(model_names.begin(), model_names.end());
+}
+
+namespace {
+    std::string editor_state_path() { return std::string(SAVE_DATA_PATH) + "model_editor.json"; }
+}
+
+void ModelEditor::remember_last_model() const
+{
+    std::ofstream out(editor_state_path(), std::ios::binary | std::ios::trunc);
+    if (out) out << "{\n  \"last_model\": \"" << current_model_file << "\"\n}\n";
+}
+
+std::string ModelEditor::last_model() const
+{
+    std::ifstream in(editor_state_path(), std::ios::binary);
+    std::stringstream buffer;
+    buffer << in.rdbuf();
+    try {
+        std::string name = Json::parse(buffer.str())["last_model"].as_string();
+        if (std::find(model_names.begin(), model_names.end(), name) != model_names.end()) return name;
+    } catch (const std::exception&) {
+    }
+    return "player";
+}
+
+// ------------------------------------------------------------ UV window --
+
+bool ModelEditor::over_floating_window(Rectangle viewport, Vector2 point) const
+{
+    return (graph_open && CheckCollisionPointRec(point, graph_window_rect(viewport))) ||
+           (uv_open && CheckCollisionPointRec(point, uv_window_rect(viewport)));
+}
+
+Rectangle ModelEditor::uv_window_rect(Rectangle viewport) const
+{
+    const float width = std::min(470.0f, viewport.width * 0.5f);
+    const float height = std::min(540.0f, viewport.height - 24.0f);
+    return {viewport.x + viewport.width - width - 12.0f, viewport.y + 12.0f, width, height};
+}
+
+void ModelEditor::draw_uv_window(Rectangle bounds)
+{
+    // One color per side, in MODEL_FACE_IDS order.
+    constexpr Color FACE_COLORS[6] = {
+        {90, 200, 90, 255}, {60, 140, 60, 255}, {200, 90, 200, 255},
+        {230, 80, 80, 255}, {80, 150, 240, 255}, {240, 200, 60, 255},
+    };
+    const char* face_keys[6] = {"editor.face.top", "editor.face.bottom", "editor.face.back",
+                                "editor.face.front", "editor.face.right", "editor.face.left"};
+
+    if (GuiWindowBox(bounds, tr("editor.uv_title").c_str())) {
+        uv_open = false;
+        return;
+    }
+    // The hint along the bottom, wrapped to the window's width.
+    constexpr float HINT_FONT = 14.0f, HINT_LINE = 17.0f;
+    std::vector<std::string> hint_lines(1);
+    {
+        std::istringstream words(tr("editor.uv_hint"));
+        std::string word;
+        while (words >> word) {
+            const std::string longer = hint_lines.back().empty() ? word : hint_lines.back() + " " + word;
+            if (!hint_lines.back().empty() &&
+                MeasureTextEx(editor_text::font(), longer.c_str(), HINT_FONT, 1).x > bounds.width - PAD * 2) {
+                hint_lines.push_back(word);
+            } else {
+                hint_lines.back() = longer;
+            }
+        }
+    }
+    const float hint_height = HINT_LINE * static_cast<float>(hint_lines.size());
+    for (size_t i = 0; i < hint_lines.size(); ++i) {
+        DrawTextEx(editor_text::font(), hint_lines[i].c_str(),
+                   {bounds.x + PAD, bounds.y + bounds.height - hint_height - PAD + HINT_LINE * static_cast<float>(i)},
+                   HINT_FONT, 1, Color{200, 200, 200, 255});
+    }
+    const Rectangle area = {bounds.x + PAD, bounds.y + 30, bounds.width - PAD * 2, bounds.height - 30 - hint_height - PAD * 2};
+    if (skin.id == 0) {
+        label(area, tr("editor.uv_no_skin"));
+        return;
+    }
+
+    // Whole-pixel zoom that fits, the skin centered in the window.
+    const float skin_w = static_cast<float>(model.skin_width), skin_h = static_cast<float>(model.skin_height);
+    const float zoom = std::max(1.0f, std::floor(std::min(area.width / skin_w, area.height / skin_h)));
+    const Vector2 origin = {std::floor(area.x + (area.width - skin_w * zoom) * 0.5f),
+                            std::floor(area.y + (area.height - skin_h * zoom) * 0.5f)};
+    const Rectangle canvas = {origin.x, origin.y, skin_w * zoom, skin_h * zoom};
+    auto to_screen = [&](Rectangle r) { return Rectangle{origin.x + r.x * zoom, origin.y + r.y * zoom, r.width * zoom, r.height * zoom}; };
+
+    // Checkerboard under the skin, so transparent pixels read as empty.
+    const float check = zoom * 4.0f;
+    for (float cy = 0; cy < canvas.height; cy += check) {
+        for (float cx = 0; cx < canvas.width; cx += check) {
+            bool dark = (static_cast<int>(cx / check) + static_cast<int>(cy / check)) % 2 == 0;
+            DrawRectangleRec({canvas.x + cx, canvas.y + cy, std::min(check, canvas.width - cx), std::min(check, canvas.height - cy)},
+                             dark ? Color{44, 44, 48, 255} : Color{56, 56, 60, 255});
+        }
+    }
+    DrawTexturePro(skin, {0, 0, skin_w, skin_h}, canvas, {0, 0}, 0.0f, WHITE);
+    if (zoom >= 5.0f) {
+        for (int i = 0; i <= model.skin_width; ++i) DrawLineV({canvas.x + i * zoom, canvas.y}, {canvas.x + i * zoom, canvas.y + canvas.height}, Color{0, 0, 0, 40});
+        for (int i = 0; i <= model.skin_height; ++i) DrawLineV({canvas.x, canvas.y + i * zoom}, {canvas.x + canvas.width, canvas.y + i * zoom}, Color{0, 0, 0, 40});
+    }
+
+    // A side picked for a cube no longer selected (picked another part in
+    // the panel, deleted the cube...) doesn't carry over.
+    if (uv_clicked_part != selected_part || uv_clicked_cube != selected_cube) {
+        uv_side = -1;
+        uv_clicked_part = uv_clicked_cube = -1;
+    }
+
+    // Every cube's sides: other parts faint, the selected part clearer,
+    // the selected cube filled and labeled - and with one side picked, that
+    // side stands out and the rest step back.
+    for (size_t p = 0; p < model.parts.size(); ++p) {
+        for (size_t c = 0; c < model.parts[p].cubes.size(); ++c) {
+            const bool this_part = static_cast<int>(p) == selected_part;
+            const bool this_cube = this_part && static_cast<int>(c) == selected_cube;
+            const std::array<Rectangle, 6> faces = cube_face_uvs(model.parts[p].cubes[c]);
+            for (int f = 0; f < 6; ++f) {
+                const Rectangle r = to_screen(faces[f]);
+                if (this_cube && uv_side >= 0 && f != uv_side) {
+                    DrawRectangleRec(r, Fade(FACE_COLORS[f], 0.08f));
+                    DrawRectangleLinesEx(r, 1.0f, Fade(FACE_COLORS[f], 0.6f));
+                } else if (this_cube) {
+                    const bool picked = f == uv_side;
+                    DrawRectangleRec(r, Fade(FACE_COLORS[f], picked ? 0.45f : 0.28f));
+                    DrawRectangleLinesEx(r, 2.0f, FACE_COLORS[f]);
+                    if (picked) DrawRectangleLinesEx({r.x - 2, r.y - 2, r.width + 4, r.height + 4}, 2.0f, WHITE);
+                    if (r.width > 34 && r.height > 14) {
+                        DrawTextEx(editor_text::font(), tr(face_keys[f]).c_str(), {r.x + 3, r.y + 2}, 14, 1, WHITE);
+                    }
+                } else {
+                    DrawRectangleLinesEx(r, 1.0f, this_part ? Fade(SELECTION, 0.8f) : Color{255, 255, 255, 60});
+                }
+            }
+        }
+    }
+
+    // Interaction: press on a side to grab it (selecting that part/cube),
+    // drag to move by whole skin pixels; right click puts a side back.
+    const Vector2 mouse = GetMousePosition();
+    const bool mouse_in = CheckCollisionPointRec(mouse, area) && !models_dropdown_open;
+    auto side_under_mouse = [&](int& part, int& cube, int& face) {
+        // The selected cube wins over anything overlapping it, then the
+        // selected part's other cubes, then the rest.
+        for (int pass = 0; pass < 3; ++pass) {
+            for (size_t p = 0; p < model.parts.size(); ++p) {
+                for (size_t c = 0; c < model.parts[p].cubes.size(); ++c) {
+                    const bool this_part = static_cast<int>(p) == selected_part;
+                    const bool this_cube = this_part && static_cast<int>(c) == selected_cube;
+                    if ((pass == 0) != this_cube || (pass == 1 && (!this_part || this_cube)) || (pass == 2 && this_part)) continue;
+                    const std::array<Rectangle, 6> faces = cube_face_uvs(model.parts[p].cubes[c]);
+                    for (int f = 0; f < 6; ++f) {
+                        if (CheckCollisionPointRec(mouse, to_screen(faces[f]))) {
+                            part = static_cast<int>(p); cube = static_cast<int>(c); face = f;
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    };
+
+    if (mouse_in && IsKeyPressed(KEY_ESCAPE)) uv_side = -1;
+    if (mouse_in && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        int part, cube, face;
+        if (side_under_mouse(part, cube, face)) {
+            // First click on a layout takes it whole; clicking it again
+            // picks the side under the mouse (another side switches to it).
+            const bool again = part == uv_clicked_part && cube == uv_clicked_cube;
+            if (part != selected_part) select_part(part);
+            selected_cube = cube;
+            uv_side = again ? face : -1;
+            uv_clicked_part = part;
+            uv_clicked_cube = cube;
+            ModelCube& grabbed = model.parts[selected_part].cubes[selected_cube];
+            uv_drag_face = face;
+            uv_drag_single = uv_side >= 0 || IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+            uv_drag_mouse = mouse;
+            const Rectangle side = cube_face_uvs(grabbed)[face];
+            uv_drag_value = uv_drag_single ? Vector2{side.x, side.y} : grabbed.uv;
+        } else {
+            // Empty spot: back to moving whole layouts.
+            uv_side = -1;
+            uv_clicked_part = uv_clicked_cube = -1;
+        }
+    }
+    if (mouse_in && IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
+        int part, cube, face;
+        if (side_under_mouse(part, cube, face) && model.parts[part].cubes[cube].face_uv[face]) {
+            model.parts[part].cubes[cube].face_uv[face].reset();
+            mark_dirty();
+        }
+    }
+    if (uv_drag_face >= 0 && selected_part >= 0 && selected_cube < static_cast<int>(model.parts[selected_part].cubes.size())) {
+        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+            ModelCube& cube = model.parts[selected_part].cubes[selected_cube];
+            const Vector2 moved = {std::round((mouse.x - uv_drag_mouse.x) / zoom), std::round((mouse.y - uv_drag_mouse.y) / zoom)};
+            Vector2 target = {std::clamp(uv_drag_value.x + moved.x, 0.0f, skin_w - 1.0f),
+                              std::clamp(uv_drag_value.y + moved.y, 0.0f, skin_h - 1.0f)};
+            if (uv_drag_single) {
+                if (!cube.face_uv[uv_drag_face] || cube.face_uv[uv_drag_face]->x != target.x || cube.face_uv[uv_drag_face]->y != target.y) {
+                    cube.face_uv[uv_drag_face] = target;
+                    mark_dirty();
+                }
+            } else if (cube.uv.x != target.x || cube.uv.y != target.y) {
+                // Sides moved on their own before travel along with the layout.
+                const Vector2 delta = Vector2Subtract(target, cube.uv);
+                for (auto& face : cube.face_uv) {
+                    if (face) *face = Vector2Add(*face, delta);
+                }
+                cube.uv = target;
+                mark_dirty();
+            }
+        } else {
+            uv_drag_face = -1;
+        }
+    }
 }

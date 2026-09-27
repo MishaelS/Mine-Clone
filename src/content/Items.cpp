@@ -64,6 +64,7 @@ void register_items()
     material(I::RedstoneDust, "redstone_dust", { 8,  3});
     material(I::Sapling     , "sapling"      , {14,  2});
     material(I::WheatSeeds  , "wheat_seeds"  , { 9,  0});
+    material(I::Wheat       , "wheat"        , { 9,  1});
 
     // Food - heal amount in half-hearts (2 per heart): roughly vanilla's
     // hunger-point values, applied straight to health since there's no

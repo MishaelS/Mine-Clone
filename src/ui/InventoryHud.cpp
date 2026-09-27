@@ -8,6 +8,7 @@
 #include "items/Smelting.hpp"
 #include "core/WorldSave.hpp"
 #include "rendering/PlayerRenderer.hpp"
+#include "model/EntityModelRenderer.hpp"
 #include "world/World.hpp"
 
 #include "raylib.h"
@@ -137,7 +138,9 @@ namespace {
         BeginTextureMode(target);
         ClearBackground(BLANK);
         BeginMode3D(camera);
+        BeginShaderMode(entity_cutout_shader()); // the skin's decoration layer: see-through pixels stay see-through
         PlayerRenderer{}.draw_flat({0.0f, 0.0f, 0.0f}, yaw, pitch, WHITE);
+        EndShaderMode();
         EndMode3D();
         EndTextureMode();
 

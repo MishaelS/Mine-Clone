@@ -54,6 +54,10 @@ public:
     // The hitbox's current height - SNEAK_HEIGHT while sneaking.
     float height() const { return sneaking ? SNEAK_HEIGHT : HEIGHT; }
     float eye_height() const { return current_eye_height; }
+
+    // Another hitbox shoved into this one (blocks/second, horizontal) -
+    // added to the current velocity; Survival only (Creative flies free).
+    void push(float dx, float dz) { velocity.x += dx; velocity.z += dz; }
     Vector3 closest_hitbox_point(Vector3 point) const;
     bool intersects_block(int x, int y, int z) const;
     bool is_grounded()        const { return grounded; }

@@ -993,6 +993,12 @@ World::ChunkCoordinates World::chunk_coordinates(int x, int z) const
     return {floor_div(x, CHUNK_SIZE), floor_div(z, CHUNK_SIZE)};
 }
 
+bool World::is_column_loaded(int x, int z) const
+{
+    ChunkCoordinates chunk = chunk_coordinates(x, z);
+    return chunk_at(chunk.x, chunk.z) != nullptr;
+}
+
 Biome World::get_biome(int x, int z) const
 {
     return terrain_noise->biome(static_cast<float>(x), static_cast<float>(z));
