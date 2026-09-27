@@ -1731,7 +1731,7 @@ void GameEngine::draw_player_model() const
     if (camera_view == CameraView::FirstPerson) return;
     Vector3 feet = player.feet_position();
     Vector3 look = Vector3Subtract(camera.target, camera.position);
-    if (world) player_renderer.draw(feet, look, player.is_sneaking(), *world);
+    if (world) player_renderer.draw(feet, look, player.is_sneaking(), *world, hand.swing_seconds());
 }
 
 void GameEngine::draw_hitboxes() const
@@ -2032,6 +2032,7 @@ void GameEngine::update(float delta_time)
     // the camera), so the aim direction needs normalizing before it's used
     // as a ray direction.
     Vector3 aim = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
+    hand.update(delta_time, inventory.hotbar[inventory.selected_slot], player.feet_position(), player.is_grounded(), aim);
 
     if (!alive || ui_captured) {
         // Dead, or a UI screen owns the mouse: no aiming, no breaking/
@@ -2065,7 +2066,10 @@ void GameEngine::update(float delta_time)
     if (aimed_mob) {
         if (binding_pressed(settings.keybindings[static_cast<size_t>(GameAction::BreakBlock)])) hit_mob(*aimed_mob);
         if (binding_pressed(settings.keybindings[static_cast<size_t>(GameAction::PlaceBlock)])) used_on_mob = use_on_mob(*aimed_mob);
+        if (used_on_mob) hand.swing();
     }
+    // Every left click swings the arm, at anything or nothing - Minecraft's.
+    if (world && binding_pressed(settings.keybindings[static_cast<size_t>(GameAction::BreakBlock)])) hand.swing();
 
     bool creative_break = world && !aimed_mob && current_game_mode == GameMode::Creative &&
         binding_pressed(settings.keybindings[static_cast<size_t>(GameAction::BreakBlock)]);
@@ -2111,6 +2115,7 @@ void GameEngine::update(float delta_time)
             BlockType target_type = world->get_block(breaking_x, breaking_y, breaking_z);
             ItemStack& selected = inventory.hotbar[inventory.selected_slot];
             breaking_progress += delta_time / break_seconds_required(target_type, selected);
+            hand.swing(); // keeps swinging while digging
 
             if (breaking_progress >= 1.0f) {
                 std::optional<Color> dropped_block_tint;
@@ -2190,6 +2195,7 @@ void GameEngine::update(float delta_time)
 
         if (container_kind && !chest_blocked_above) {
             inventory_hud.open_container(*container_kind, targeted_block->x, targeted_block->y, targeted_block->z);
+            hand.swing();
             EnableCursor();
         } else if (!container_kind && targeted_block && targeted_is_bed) {
             start_sleeping(*targeted_block);
@@ -2210,6 +2216,7 @@ void GameEngine::update(float delta_time)
                 partner_packed = static_cast<uint16_t>((partner_packed & ~BlockStateBits::OPEN) | (packed & BlockStateBits::OPEN));
                 world->set_block_state(x, partner_y, z, partner_packed);
             }
+            hand.swing();
         } else if (!container_kind && targeted_block && targeted_type == BlockType::Cake &&
                    current_game_mode == GameMode::Survival && player.health().current() < PlayerHealth::MAX_HEALTH) {
             // Eating restores HP directly (see CAKE_HEAL_PER_BITE's own
@@ -2327,6 +2334,7 @@ void GameEngine::update(float delta_time)
                 // sapling any more - it's just a regular block in a
                 // loaded chunk now, so update_random_ticks() will find
                 // it on its own on some future random tick.
+                if (placed) hand.swing();
                 if (placed && current_game_mode == GameMode::Survival && --selected.count <= 0) selected.clear();
             }
         }
@@ -2467,6 +2475,11 @@ void GameEngine::draw()
             }
         }
         EndMode3D();
+
+        // The arm and whatever it holds, over the world - first person only.
+        if (world && camera_view == CameraView::FirstPerson && !player.health().is_dead() && !sleeping) {
+            hand.draw(entity_environment_tint(*world, camera.position));
+        }
 
         Color haze_color = skybox_horizon_color();
         haze_color.a = CAMERA_HAZE_ALPHA;

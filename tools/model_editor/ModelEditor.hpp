@@ -59,6 +59,9 @@ private:
     bool string_field(Rectangle bounds, std::string& value);
     bool int_field(Rectangle bounds, int& value, int min_value, int max_value);
     bool float_as_int_field(Rectangle bounds, float& value, int min_value, int max_value);
+    // A number with decimals: dragged across (0.1 a step, Shift 0.01), or
+    // clicked and typed in.
+    bool float_field(Rectangle bounds, float& value, float min_value, float max_value);
     void label(Rectangle bounds, const std::string& text) const;
     bool typing() const { return editing_widget >= 0; }
 
@@ -158,6 +161,11 @@ private:
     Vector2 panel_scroll = {0.0f, 0.0f};
     Vector2 entity_panel_scroll = {0.0f, 0.0f};
     char string_edit_buffer[256] = ""; // what string_field() is editing
+    char float_edit_buffer[32] = "";   // what float_field() is editing
+    int float_drag_id = -1;            // the float_field() being dragged
+    float float_drag_start = 0.0f;
+    float float_drag_value = 0.0f;
+    bool float_dragged = false;
 
     int animation_index = -1; // into model.animations, -1 = none (rest pose)
     float time = 0.0f;
@@ -193,6 +201,31 @@ private:
     bool uv_panning = false;
     Vector2 uv_pan_grab = {0, 0};
 
+    // "Player's view": the viewport sees through the player's own eyes -
+    // the camera the game draws the first-person hand with (the eye at the
+    // origin looking down -Z, 70 degree FOV) - for the first_person model.
+    // `preview_item` puts an example in its item slot: 0 nothing (the
+    // "empty" animation's pose), 1 a block, 2 a tool, 3 any other item.
+    bool player_view = false;
+    int preview_item = 0;
+    Texture2D preview_items_atlas{};
+    Texture2D preview_blocks_atlas{};
+    Rectangle preview_combo_rect(Rectangle viewport) const;
+    // The game window's width/height (the game's settings.json): the
+    // player's view shows exactly that frame, letterboxed in the viewport.
+    float game_aspect = 16.0f / 9.0f;
+    // Where the 3D view is drawn: the whole viewport, or in the player's
+    // view the game-shaped frame inside it.
+    Rectangle scene_rect(Rectangle viewport) const;
+    // Player's view: picking a pose animation ("empty", "hold_block"...)
+    // picks the matching item to show, and picking an item while one is
+    // open switches to that item's pose - so what's shown is what the game
+    // shows.
+    void sync_player_view_pose();
+    int synced_animation = -2;
+    int synced_preview = -1;
+    void draw_item_slots(const ModelPose& pose);
+
     bool uv_open = false;
     int uv_drag_face = -1;             // side being dragged (MODEL_FACE_IDS order), -1 = none
     bool uv_drag_single = false;       // that side alone, not the whole layout
@@ -205,6 +238,33 @@ private:
     Vector2 uv_drag_mouse = {0, 0};    // where the drag started, screen
     Vector2 uv_drag_value = {0, 0};    // the uv/face_uv it started from
     bool scrubbing = false;
+
+    // Panels folded away to a thin strip (their header button, or the
+    // strip's own, folds/unfolds them); the timeline's height is dragged by
+    // its top edge.
+    bool left_panel_open = true;
+    bool right_panel_open = true;
+    bool timeline_open = true;
+    float timeline_height = 190.0f;
+    bool timeline_resizing = false;
+    float left_width() const;
+    float right_width() const;
+    float timeline_visible_height() const;
+    // A side panel's header: its title and the fold button. Returns the
+    // rest of `bounds` below it.
+    Rectangle panel_header(Rectangle bounds, const std::string& title, bool& open, bool button_on_right);
+    void draw_folded_panels();
+
+    // Timeline view: zoom (pixels per second, 0 = the whole clip fits) and
+    // the time at its left edge. Scrubbing snaps to the nearest keyframe,
+    // else to a step that shrinks as it zooms in (time_snap_step).
+    float timeline_zoom = 0.0f;
+    float timeline_scroll = 0.0f;
+    bool timeline_panning = false;
+    bool timeline_thumb_drag = false;
+    float timeline_pan_grab = 0.0f;
+    float time_snap_step = 0.05f;
+    void jump_to_keyframe(int direction); // -1 previous, +1 next
 
     // Orbit camera
     Vector3 orbit_target = {0.0f, 1.0f, 0.0f};

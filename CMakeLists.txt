@@ -87,6 +87,7 @@ add_executable(${PROJECT_NAME}
     src/rendering/Skybox.cpp
     src/rendering/BlockMesh.cpp
     src/rendering/PlayerRenderer.cpp
+    src/rendering/FirstPersonHand.cpp
     src/model/EntityModel.cpp
     src/model/EntityModelRenderer.cpp
     src/model/ModelLibrary.cpp

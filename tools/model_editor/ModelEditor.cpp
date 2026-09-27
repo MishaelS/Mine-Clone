@@ -24,13 +24,30 @@ namespace {
     constexpr float TOP_BAR_HEIGHT    = 40.0f;
     constexpr float RIGHT_PANEL_WIDTH = 360.0f;
     constexpr float LEFT_PANEL_WIDTH  = 340.0f;
-    constexpr float TIMELINE_HEIGHT   = 150.0f;
+    constexpr float FOLDED_PANEL      = 26.0f;  // a folded side panel's strip
+    constexpr float FOLDED_TIMELINE   = 34.0f;
+    constexpr float PANEL_HEADER      = 28.0f;
+    constexpr float TIMELINE_MIN      = 120.0f;
     constexpr float ROW               = 26.0f;     // one control row
     constexpr float GAP               = 6.0f;
     constexpr float PAD               = 10.0f;
-    constexpr float TIME_SNAP         = 0.05f; // keyframes land on 1/20 s - one game tick
 
     constexpr Color VIEWPORT_BACKGROUND = {48, 48, 52, 255};
+    constexpr Color PLAYER_VIEW_SKY     = {120, 165, 220, 255};
+    constexpr float PLAYER_VIEW_FOV     = 70.0f; // FirstPersonHand's own
+    constexpr Color SLOT_BOX            = {120, 220, 255, 255};
+    constexpr Color LETTERBOX           = {20, 20, 22, 255};
+
+    // The first-person arm's pose for each preview_item (as FirstPersonHand
+    // plays them): nothing, a block, a tool, any other item.
+    constexpr const char* POSE_ANIMATIONS[4] = {"empty", "hold_block", "hold_tool", "hold_item"};
+    int pose_animation_index(const std::string& name)
+    {
+        for (int i = 0; i < 4; ++i) {
+            if (name == POSE_ANIMATIONS[i]) return i;
+        }
+        return -1;
+    }
     constexpr Color GRID_LINE           = {68, 68, 74, 255};
     constexpr Color GRID_SUBLINE        = {56, 56, 61, 255};
     constexpr Color AXIS_X              = {200, 70, 70, 255};
@@ -49,7 +66,7 @@ namespace {
 
     std::string format_seconds(float seconds) {
         char buffer[32];
-        std::snprintf(buffer, sizeof(buffer), "%.2f", seconds);
+        std::snprintf(buffer, sizeof(buffer), "%.3f", seconds);
         return buffer;
     }
 
@@ -63,6 +80,9 @@ namespace {
         m = MatrixMultiply(m, MatrixRotate({1, 0, 0}, pose.rotation.x * DEG2RAD));
         m = MatrixMultiply(m, MatrixRotate({0, 1, 0}, pose.rotation.y * DEG2RAD));
         m = MatrixMultiply(m, MatrixRotate({0, 0, 1}, pose.rotation.z * DEG2RAD));
+        m = MatrixMultiply(m, MatrixRotate({1, 0, 0}, part.rotation.x * DEG2RAD)); // the rest turn, outside the pose's
+        m = MatrixMultiply(m, MatrixRotate({0, 1, 0}, part.rotation.y * DEG2RAD));
+        m = MatrixMultiply(m, MatrixRotate({0, 0, 1}, part.rotation.z * DEG2RAD));
         m = MatrixMultiply(m, MatrixTranslate(pivot.x, pivot.y, pivot.z));
         return MatrixMultiply(m, MatrixTranslate(offset.x, offset.y, offset.z));
     }
@@ -86,6 +106,18 @@ ModelEditor::ModelEditor()
 
     editor_text::load();
     SetWindowTitle(tr("editor.title").c_str());
+    {
+        // The game's window shape, for the player's view.
+        std::ifstream in(std::string(SAVE_DATA_PATH) + "settings.json", std::ios::binary);
+        std::stringstream text;
+        text << in.rdbuf();
+        try {
+            const Json settings = Json::parse(text.str());
+            const double w = settings["window_width"].as_number(1280.0), h = settings["window_height"].as_number(720.0);
+            if (w > 0.0 && h > 0.0) game_aspect = static_cast<float>(w / h);
+        } catch (const std::exception&) {
+        }
+    }
     editor_load_dark_style();
     GuiSetFont(editor_text::font());
     GuiSetStyle(DEFAULT, TEXT_SIZE, 16);
@@ -110,6 +142,8 @@ ModelEditor::ModelEditor()
 ModelEditor::~ModelEditor()
 {
     if (skin.id != 0) UnloadTexture(skin);
+    if (preview_items_atlas.id != 0) UnloadTexture(preview_items_atlas);
+    if (preview_blocks_atlas.id != 0) UnloadTexture(preview_blocks_atlas);
     unload_layer_previews();
     if (viewport_texture.id != 0) UnloadRenderTexture(viewport_texture);
     editor_text::unload();
@@ -132,6 +166,18 @@ void ModelEditor::run()
             if (ctrl && z && !shift) undo();
             else if (ctrl && ((z && shift) || y)) redo();
             if (IsKeyPressed(KEY_SPACE) && current_animation()) playing = !playing;
+            // Left/Right: previous/next keyframe; with Shift one snap step.
+            const bool step_left = IsKeyPressed(KEY_LEFT) || IsKeyPressedRepeat(KEY_LEFT);
+            const bool step_right = IsKeyPressed(KEY_RIGHT) || IsKeyPressedRepeat(KEY_RIGHT);
+            if ((step_left || step_right) && current_animation()) {
+                if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) {
+                    const float step = step_left ? -time_snap_step : time_snap_step;
+                    time = std::clamp(std::round((time + step) / time_snap_step) * time_snap_step, 0.0f, current_animation()->length);
+                    playing = false;
+                } else {
+                    jump_to_keyframe(step_left ? -1 : 1);
+                }
+            }
         }
         if (playing) {
             if (EntityAnimation* animation = current_animation()) {
@@ -145,20 +191,31 @@ void ModelEditor::run()
             }
         }
 
+        sync_player_view_pose();
         update_floating_windows(viewport);
         update_camera(viewport);
         draw_viewport(viewport);
 
         BeginDrawing();
         ClearBackground(gui_color(DEFAULT, BACKGROUND_COLOR));
+        if (player_view) DrawRectangleRec(viewport, LETTERBOX); // around the game-shaped frame
         DrawTexturePro(viewport_texture.texture,
                        {0, 0, static_cast<float>(viewport_texture.texture.width), -static_cast<float>(viewport_texture.texture.height)},
-                       viewport, {0, 0}, 0.0f, WHITE);
+                       scene_rect(viewport), {0, 0}, 0.0f, WHITE);
         label({viewport.x + PAD, viewport.y + viewport.height - ROW - 4, viewport.width - PAD * 2, ROW},
-              tr("editor.viewport_hint"));
+              tr(player_view ? "editor.player_view_hint" : "editor.viewport_hint"));
+        if (player_view) {
+            // What the hand holds in the preview.
+            const Rectangle combo = preview_combo_rect(viewport);
+            label({combo.x, combo.y, 80, ROW}, tr("editor.preview_item"));
+            const std::string items = tr("editor.preview_none") + ";" + tr("editor.preview_block") + ";" +
+                                      tr("editor.preview_tool") + ";" + tr("editor.preview_sprite");
+            GuiComboBox({combo.x + 80, combo.y, combo.width - 80, ROW}, items.c_str(), &preview_item);
+        }
         draw_timeline(timeline_rect());
-        draw_right_panel(right_panel_rect());
-        draw_left_panel(left_panel_rect());
+        if (right_panel_open) draw_right_panel(right_panel_rect());
+        if (left_panel_open) draw_left_panel(left_panel_rect());
+        draw_folded_panels();
         // The one on top last.
         draw_floating_window(top_window == UV_WINDOW ? GRAPH_WINDOW : UV_WINDOW);
         draw_floating_window(top_window);
@@ -175,33 +232,76 @@ Rectangle ModelEditor::top_bar_rect() const
     return {0, 0, static_cast<float>(GetScreenWidth()), TOP_BAR_HEIGHT};
 }
 
+float ModelEditor::left_width() const { return left_panel_open ? LEFT_PANEL_WIDTH : FOLDED_PANEL; }
+float ModelEditor::right_width() const { return right_panel_open ? RIGHT_PANEL_WIDTH : FOLDED_PANEL; }
+
+float ModelEditor::timeline_visible_height() const
+{
+    if (!timeline_open) return FOLDED_TIMELINE;
+    const float most = std::max(TIMELINE_MIN, static_cast<float>(GetScreenHeight()) - TOP_BAR_HEIGHT - 160.0f);
+    return std::clamp(timeline_height, TIMELINE_MIN, most);
+}
+
 Rectangle ModelEditor::right_panel_rect() const
 {
-    return {GetScreenWidth() - RIGHT_PANEL_WIDTH, TOP_BAR_HEIGHT, RIGHT_PANEL_WIDTH,
-            GetScreenHeight() - TOP_BAR_HEIGHT};
+    return {GetScreenWidth() - right_width(), TOP_BAR_HEIGHT, right_width(), GetScreenHeight() - TOP_BAR_HEIGHT};
 }
 
 Rectangle ModelEditor::left_panel_rect() const
 {
-    return {0, TOP_BAR_HEIGHT, LEFT_PANEL_WIDTH, GetScreenHeight() - TOP_BAR_HEIGHT};
+    return {0, TOP_BAR_HEIGHT, left_width(), GetScreenHeight() - TOP_BAR_HEIGHT};
 }
 
 Rectangle ModelEditor::timeline_rect() const
 {
-    return {LEFT_PANEL_WIDTH, GetScreenHeight() - TIMELINE_HEIGHT, GetScreenWidth() - RIGHT_PANEL_WIDTH - LEFT_PANEL_WIDTH,
-            TIMELINE_HEIGHT};
+    const float height = timeline_visible_height();
+    return {left_width(), GetScreenHeight() - height, GetScreenWidth() - right_width() - left_width(), height};
 }
 
 Rectangle ModelEditor::viewport_rect() const
 {
-    return {LEFT_PANEL_WIDTH, TOP_BAR_HEIGHT, GetScreenWidth() - RIGHT_PANEL_WIDTH - LEFT_PANEL_WIDTH,
-            GetScreenHeight() - TOP_BAR_HEIGHT - TIMELINE_HEIGHT};
+    return {left_width(), TOP_BAR_HEIGHT, GetScreenWidth() - right_width() - left_width(),
+            GetScreenHeight() - TOP_BAR_HEIGHT - timeline_visible_height()};
+}
+
+Rectangle ModelEditor::panel_header(Rectangle bounds, const std::string& title, bool& open, bool button_on_right)
+{
+    const Rectangle header = {bounds.x, bounds.y, bounds.width, PANEL_HEADER};
+    DrawRectangleRec(header, gui_color(DEFAULT, BASE_COLOR_NORMAL));
+    DrawLineEx({header.x, header.y + header.height}, {header.x + header.width, header.y + header.height}, 1.0f,
+               gui_color(DEFAULT, LINE_COLOR));
+    const Rectangle button = {button_on_right ? header.x + header.width - 26 : header.x + 4, header.y + 3, 22, 22};
+    const float title_x = button_on_right ? header.x + PAD : header.x + 32;
+    label({title_x, header.y + 1, header.width - 42, header.height - 2}, title);
+    if (GuiButton(button, button_on_right ? "<" : ">")) open = false;
+    return {bounds.x, bounds.y + PANEL_HEADER, bounds.width, bounds.height - PANEL_HEADER};
+}
+
+void ModelEditor::draw_folded_panels()
+{
+    // A folded panel is a strip with the button that unfolds it.
+    auto strip = [&](Rectangle r, const char* text, bool& open) {
+        GuiPanel(r, nullptr);
+        if (GuiButton({r.x + 2, r.y + 3, r.width - 4, 22}, text)) open = true;
+    };
+    if (!left_panel_open) strip(left_panel_rect(), ">", left_panel_open);
+    if (!right_panel_open) strip(right_panel_rect(), "<", right_panel_open);
 }
 
 // ------------------------------------------------------------- Viewport --
 
 Camera3D ModelEditor::camera() const
 {
+    if (player_view) {
+        // Exactly the game's first-person hand camera.
+        Camera3D eye{};
+        eye.position = {0, 0, 0};
+        eye.target = {0, 0, -1};
+        eye.up = {0, 1, 0};
+        eye.fovy = PLAYER_VIEW_FOV;
+        eye.projection = CAMERA_PERSPECTIVE;
+        return eye;
+    }
     Camera3D cam{};
     cam.target = orbit_target;
     cam.position = Vector3Add(orbit_target, {orbit_distance * std::cos(orbit_pitch) * std::sin(orbit_yaw),
@@ -227,7 +327,7 @@ void ModelEditor::update_camera(Rectangle viewport)
         press_position = mouse;
     }
 
-    if (navigating && drag_started_here) {
+    if (navigating && drag_started_here && !player_view) { // the player's view doesn't orbit
         Vector2 delta = GetMouseDelta();
         if (shift) {
             Camera3D cam = camera();
@@ -242,7 +342,7 @@ void ModelEditor::update_camera(Rectangle viewport)
             orbit_pitch = std::clamp(orbit_pitch + delta.y * 0.008f, -1.55f, 1.55f);
         }
     }
-    if (over && !typing()) {
+    if (over && !typing() && !player_view) {
         float wheel = GetMouseWheelMove();
         if (wheel != 0.0f) orbit_distance = std::clamp(orbit_distance * std::pow(0.88f, wheel), 0.5f, 60.0f);
 
@@ -265,17 +365,18 @@ void ModelEditor::update_camera(Rectangle viewport)
 
 void ModelEditor::draw_viewport(Rectangle viewport)
 {
-    const int width = std::max(1, static_cast<int>(viewport.width));
-    const int height = std::max(1, static_cast<int>(viewport.height));
+    const Rectangle scene = scene_rect(viewport);
+    const int width = std::max(1, static_cast<int>(scene.width));
+    const int height = std::max(1, static_cast<int>(scene.height));
     if (viewport_texture.id == 0 || viewport_texture.texture.width != width || viewport_texture.texture.height != height) {
         if (viewport_texture.id != 0) UnloadRenderTexture(viewport_texture);
         viewport_texture = LoadRenderTexture(width, height);
     }
 
     BeginTextureMode(viewport_texture);
-    ClearBackground(VIEWPORT_BACKGROUND);
+    ClearBackground(player_view ? PLAYER_VIEW_SKY : VIEWPORT_BACKGROUND);
     BeginMode3D(camera());
-    draw_grid();
+    if (!player_view) draw_grid();
     rlPushMatrix();
     rlRotatef(displayed_body_yaw(), 0.0f, 1.0f, 0.0f); // the look preview may turn the whole body
     BeginShaderMode(entity_cutout_shader());
@@ -287,11 +388,107 @@ void ModelEditor::draw_viewport(Rectangle viewport)
             draw_entity_model(layer.model, layer.skin, map_pose(model, pose, layer.model), MODEL_SCALE);
         }
     }
+    draw_item_slots(pose);
     EndShaderMode();
     draw_selection();
     rlPopMatrix();
     EndMode3D();
     EndTextureMode();
+}
+
+Rectangle ModelEditor::scene_rect(Rectangle viewport) const
+{
+    if (!player_view || viewport.width <= 0 || viewport.height <= 0) return viewport;
+    float width = viewport.width, height = viewport.width / game_aspect;
+    if (height > viewport.height) {
+        height = viewport.height;
+        width = height * game_aspect;
+    }
+    return {std::floor(viewport.x + (viewport.width - width) * 0.5f), std::floor(viewport.y + (viewport.height - height) * 0.5f),
+            std::floor(width), std::floor(height)};
+}
+
+void ModelEditor::sync_player_view_pose()
+{
+    if (!player_view) {
+        synced_animation = -2;
+        return;
+    }
+    const EntityAnimation* animation = current_animation();
+    const int open_pose = animation ? pose_animation_index(animation->name) : -1;
+    if (animation_index != synced_animation) {
+        if (open_pose >= 0) preview_item = open_pose; // opened a pose: show its item
+    } else if (preview_item != synced_preview && open_pose >= 0) {
+        // Another item while a pose is open: that item's pose instead.
+        int found = -1;
+        for (size_t i = 0; i < model.animations.size(); ++i) {
+            if (model.animations[i].name == POSE_ANIMATIONS[preview_item]) found = static_cast<int>(i);
+        }
+        animation_index = found;
+        time = 0.0f;
+        playing = false;
+        if (found >= 0) std::snprintf(animation_name, sizeof(animation_name), "%s", model.animations[found].name.c_str());
+    }
+    synced_animation = animation_index;
+    synced_preview = preview_item;
+}
+
+Rectangle ModelEditor::preview_combo_rect(Rectangle viewport) const
+{
+    return {viewport.x + PAD, viewport.y + PAD, 300, ROW};
+}
+
+void ModelEditor::draw_item_slots(const ModelPose& pose)
+{
+    // Every slot's box, where the game puts that kind of held item - and in
+    // the player's view the example item picked above it.
+    const char* preview_slot = preview_item == 1 ? "block" : preview_item == 2 ? "tool" : preview_item == 3 ? "item" : "";
+    if (player_view && preview_item != 0 && preview_items_atlas.id == 0) {
+        preview_items_atlas = LoadTexture(ASSETS_PATH "sprites/items.png");
+        preview_blocks_atlas = LoadTexture(ASSETS_PATH "sprites/terrain.png");
+        SetTextureFilter(preview_items_atlas, TEXTURE_FILTER_POINT);
+        SetTextureFilter(preview_blocks_atlas, TEXTURE_FILTER_POINT);
+    }
+    for (const ModelPart& part : model.parts) {
+        if (part.item_slot.empty() || part.cubes.empty()) continue;
+        if (!push_item_slot(model, pose, part.item_slot, MODEL_SCALE)) continue;
+        const bool previewed = player_view && part.item_slot == preview_slot;
+        if (!previewed) {
+            DrawCubeWiresV({0, 0, 0}, {1, 1, 1}, Fade(SLOT_BOX, player_view ? 0.5f : 0.8f));
+        } else if (preview_item == 1) {
+            // A block: dirt from the block atlas, all six sides.
+            const Texture2D& atlas = preview_blocks_atlas;
+            const float u0 = 2 * 16.0f / atlas.width, u1 = 3 * 16.0f / atlas.width, v0 = 0.0f, v1 = 16.0f / atlas.height;
+            static constexpr float SHADE[6] = {1.0f, 0.55f, 0.8f, 0.8f, 0.7f, 0.7f};
+            static constexpr Vector3 N[6] = {{0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}, {1, 0, 0}, {-1, 0, 0}};
+            rlSetTexture(atlas.id);
+            rlBegin(RL_QUADS);
+            for (int f = 0; f < 6; ++f) {
+                const Vector3 n = N[f];
+                // Two axes across the face, so its corners go round it.
+                const Vector3 a = std::fabs(n.y) > 0.5f ? Vector3{1, 0, 0} : Vector3{0, 1, 0};
+                const Vector3 b = Vector3CrossProduct(n, a);
+                const unsigned char shade = static_cast<unsigned char>(255 * SHADE[f]);
+                rlColor4ub(shade, shade, shade, 255);
+                // Counter-clockwise seen from outside, so it isn't culled.
+                const float cu[4] = {u1, u1, u0, u0}, cv[4] = {v1, v0, v0, v1};
+                const float sa[4] = {1, 1, -1, -1}, sb[4] = {-1, 1, 1, -1};
+                for (int i = 0; i < 4; ++i) {
+                    const Vector3 p = Vector3Add(Vector3Scale(n, 0.5f),
+                                                 Vector3Add(Vector3Scale(a, 0.5f * sa[i]), Vector3Scale(b, 0.5f * sb[i])));
+                    rlTexCoord2f(cu[i], cv[i]);
+                    rlVertex3f(p.x, p.y, p.z);
+                }
+            }
+            rlEnd();
+            rlSetTexture(0);
+        } else {
+            // A wooden sword or an apple from the item atlas.
+            const Rectangle sprite = preview_item == 2 ? Rectangle{0, 4 * 16, 16, 16} : Rectangle{10 * 16, 0, 16, 16};
+            draw_extruded_sprite(preview_items_atlas, sprite, WHITE);
+        }
+        rlPopMatrix();
+    }
 }
 
 void ModelEditor::draw_grid() const
@@ -345,8 +542,10 @@ void ModelEditor::draw_selection() const
 
 void ModelEditor::pick_part(Rectangle viewport)
 {
-    Vector2 local = Vector2Subtract(GetMousePosition(), {viewport.x, viewport.y});
-    Ray ray = GetScreenToWorldRayEx(local, camera(), static_cast<int>(viewport.width), static_cast<int>(viewport.height));
+    const Rectangle scene = scene_rect(viewport);
+    if (!CheckCollisionPointRec(GetMousePosition(), scene)) return; // on the letterbox
+    Vector2 local = Vector2Subtract(GetMousePosition(), {scene.x, scene.y});
+    Ray ray = GetScreenToWorldRayEx(local, camera(), static_cast<int>(scene.width), static_cast<int>(scene.height));
     ModelPose pose = displayed_pose();
     const Matrix body_turn = MatrixRotate({0, 1, 0}, displayed_body_yaw() * DEG2RAD);
 
@@ -426,6 +625,65 @@ bool ModelEditor::int_field(Rectangle bounds, int& value, int min_value, int max
     return value != before;
 }
 
+bool ModelEditor::float_field(Rectangle bounds, float& value, float min_value, float max_value)
+{
+    // Like Blender's number fields: drag left/right across it to change the
+    // value (0.1 a step, Shift 0.01), click without dragging to type one in.
+    const int id = widget_counter++;
+    const bool editing = editing_widget == id;
+    const float before = value;
+    auto format = [](char* out, size_t size, float v) {
+        std::snprintf(out, size, "%.3f", v);
+        size_t length = std::strlen(out); // 2.500 -> 2.5, 3.000 -> 3
+        while (length > 0 && out[length - 1] == '0') out[--length] = '\0';
+        if (length > 0 && out[length - 1] == '.') out[--length] = '\0';
+        if (std::strcmp(out, "-0") == 0) std::snprintf(out, size, "0");
+    };
+
+    if (editing) {
+        float typed = value;
+        if (GuiValueBoxFloat(bounds, nullptr, float_edit_buffer, &typed, true)) editing_widget = -1; // Enter or a click elsewhere
+        value = typed;
+    } else {
+        static char shown[sizeof(float_edit_buffer)];
+        format(shown, sizeof(shown), value);
+        const bool was_locked = GuiIsLocked();
+        const Vector2 mouse = GetMousePosition();
+        const bool hovered = CheckCollisionPointRec(mouse, bounds) && !was_locked;
+        GuiLock(); // drawn only - the mouse is handled here
+        float dummy = value;
+        GuiValueBoxFloat(bounds, nullptr, shown, &dummy, false);
+        if (!was_locked) GuiUnlock();
+        if (hovered || float_drag_id == id) SetMouseCursor(MOUSE_CURSOR_RESIZE_EW);
+
+        if (hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            float_drag_id = id;
+            float_drag_start = mouse.x;
+            float_drag_value = value;
+            float_dragged = false;
+        }
+        if (float_drag_id == id) {
+            if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+                const float dx = mouse.x - float_drag_start;
+                if (std::fabs(dx) > 3.0f) float_dragged = true;
+                if (float_dragged) {
+                    const bool fine = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+                    const float step = fine ? 0.01f : 0.1f;
+                    value = std::round((float_drag_value + dx * (fine ? 0.02f : 0.2f)) / step) * step;
+                }
+            } else {
+                if (!float_dragged) {
+                    editing_widget = id; // a plain click: type a value in
+                    format(float_edit_buffer, sizeof(float_edit_buffer), value);
+                }
+                float_drag_id = -1;
+            }
+        }
+    }
+    value = std::clamp(value, min_value, max_value);
+    return value != before;
+}
+
 bool ModelEditor::float_as_int_field(Rectangle bounds, float& value, int min_value, int max_value)
 {
     int whole = static_cast<int>(std::lround(value));
@@ -456,7 +714,9 @@ void ModelEditor::draw_top_bar(Rectangle bounds)
     GuiToggle({x, y, 170, ROW}, tr("editor.graph").c_str(), &graph_open);
     x += 170 + GAP;
     GuiToggle({x, y, 120, ROW}, tr("editor.uv_window").c_str(), &uv_open);
-    x += 120 + GAP * 2;
+    x += 120 + GAP;
+    GuiToggle({x, y, 140, ROW}, tr("editor.player_view").c_str(), &player_view);
+    x += 140 + GAP * 2;
 
     std::string line = dirty ? tr("editor.unsaved") : std::string();
     if (GetTime() - status_time < 4.0) line = status + (dirty ? "   " + line : "");
@@ -497,6 +757,7 @@ void ModelEditor::draw_top_bar(Rectangle bounds)
 
 void ModelEditor::draw_right_panel(Rectangle bounds)
 {
+    bounds = panel_header(bounds, tr("editor.model_panel"), right_panel_open, false);
     const float content_width = bounds.width - 14.0f;
     static float content_height = 800.0f;
     Rectangle view{};
@@ -599,12 +860,12 @@ float ModelEditor::draw_part_properties(float x, float y, float width)
     const float field_w = (width - label_w - GAP * 2) / 3.0f;
 
     // Three spinners on one row after a label.
-    auto vec3_row = [&](const std::string& caption, Vector3& value, int min_value, int max_value) {
+    auto vec3_row = [&](const std::string& caption, Vector3& value, float min_value, float max_value) {
         label({x, y, label_w, ROW}, caption);
         bool changed = false;
-        changed |= float_as_int_field({x + label_w, y, field_w, ROW}, value.x, min_value, max_value);
-        changed |= float_as_int_field({x + label_w + field_w + GAP, y, field_w, ROW}, value.y, min_value, max_value);
-        changed |= float_as_int_field({x + label_w + (field_w + GAP) * 2, y, field_w, ROW}, value.z, min_value, max_value);
+        changed |= float_field({x + label_w, y, field_w, ROW}, value.x, min_value, max_value);
+        changed |= float_field({x + label_w + field_w + GAP, y, field_w, ROW}, value.y, min_value, max_value);
+        changed |= float_field({x + label_w + (field_w + GAP) * 2, y, field_w, ROW}, value.z, min_value, max_value);
         y += ROW + GAP;
         return changed;
     };
@@ -638,6 +899,25 @@ float ModelEditor::draw_part_properties(float x, float y, float width)
     }
 
     if (vec3_row(tr("editor.pivot"), part.pivot, -256, 256)) mark_dirty();
+    if (vec3_row(tr("editor.part_rotation"), part.rotation, -180, 180)) mark_dirty();
+
+    // Item slot - where the first-person hand holds that kind of item.
+    {
+        label({x, y, label_w, ROW}, tr("editor.item_slot"));
+        const std::string items = tr("editor.slot_none") + ";" + tr("editor.slot_block") + ";" + tr("editor.slot_tool") + ";" +
+                                  tr("editor.slot_item");
+        int active = 0;
+        for (int i = 0; i < 3; ++i) {
+            if (part.item_slot == ITEM_SLOT_IDS[i]) active = i + 1;
+        }
+        int chosen = active;
+        GuiComboBox({x + label_w, y, width - label_w, ROW}, items.c_str(), &chosen);
+        if (chosen != active) {
+            part.item_slot = chosen == 0 ? std::string() : ITEM_SLOT_IDS[chosen - 1];
+            mark_dirty();
+        }
+        y += ROW + GAP;
+    }
 
     // Look node - the part that turns toward where the entity looks.
     y += GAP;
@@ -703,7 +983,7 @@ float ModelEditor::draw_part_properties(float x, float y, float width)
         if (!part.cubes.empty()) {
             ModelCube& cube = part.cubes[selected_cube];
             if (vec3_row(tr("editor.origin"), cube.origin, -256, 256)) mark_dirty();
-            if (vec3_row(tr("editor.size"), cube.size, 1, 128)) mark_dirty();
+            if (vec3_row(tr("editor.size"), cube.size, 0.01f, 128)) mark_dirty();
             label({x, y, label_w, ROW}, tr("editor.uv"));
             if (float_as_int_field({x + label_w, y, field_w, ROW}, cube.uv.x, 0, model.skin_width)) mark_dirty();
             if (float_as_int_field({x + label_w + field_w + GAP, y, field_w, ROW}, cube.uv.y, 0, model.skin_height)) mark_dirty();
@@ -809,28 +1089,62 @@ float ModelEditor::draw_part_properties(float x, float y, float width)
 void ModelEditor::draw_timeline(Rectangle bounds)
 {
     GuiPanel(bounds, nullptr);
-    float x = bounds.x + PAD;
-    float y = bounds.y + PAD;
+    const Vector2 mouse = GetMousePosition();
 
-    // Row 1: clip picker and clip settings.
+    // Folded: just a strip to unfold it again.
+    if (!timeline_open) {
+        timeline_resizing = false;
+        SetMouseCursor(MOUSE_CURSOR_DEFAULT);
+        if (GuiButton({bounds.x + PAD, bounds.y + 4, 200, ROW}, tr("editor.timeline_show").c_str())) timeline_open = true;
+        return;
+    }
+
+    // Drag the top edge to make it taller or shorter.
+    const Rectangle edge = {bounds.x, bounds.y, bounds.width, 5};
+    if (!models_dropdown_open && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, edge)) timeline_resizing = true;
+    if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) timeline_resizing = false;
+    if (timeline_resizing) timeline_height = static_cast<float>(GetScreenHeight()) - mouse.y;
+    SetMouseCursor(timeline_resizing || CheckCollisionPointRec(mouse, edge) ? MOUSE_CURSOR_RESIZE_NS : MOUSE_CURSOR_DEFAULT);
+
+    // Controls flow left to right, wrapping onto a new row when out of room.
+    const float left = bounds.x + PAD;
+    const float right = bounds.x + bounds.width - PAD - 30; // the fold button's corner
+    float fx = left, fy = bounds.y + PAD;
+    auto place = [&](float width) {
+        if (fx + width > right && fx > left) {
+            fx = left;
+            fy += ROW + GAP;
+        }
+        const Rectangle r = {fx, fy, width, ROW};
+        fx += width + GAP;
+        return r;
+    };
+    auto next_row = [&] {
+        fx = left;
+        fy += ROW + GAP;
+    };
+    if (GuiButton({bounds.x + bounds.width - PAD - 24, bounds.y + PAD, 24, ROW}, "v")) timeline_open = false;
+
+    // Clip picker and clip settings.
     {
         std::string items = tr("editor.no_animation");
         for (const EntityAnimation& animation : model.animations) items += ";" + animation.name;
         int active = animation_index + 1;
-        label({x, y, 90, ROW}, tr("editor.animation"));
-        x += 90;
+        const Rectangle r = place(260);
+        label({r.x, r.y, 90, ROW}, tr("editor.animation"));
         int chosen = active;
-        GuiComboBox({x, y, 170, ROW}, items.c_str(), &chosen);
+        GuiComboBox({r.x + 90, r.y, 170, ROW}, items.c_str(), &chosen);
         if (chosen != active) {
             animation_index = chosen - 1;
             time = 0.0f;
             playing = false;
+            timeline_zoom = 0.0f;
+            timeline_scroll = 0.0f;
             if (EntityAnimation* animation = current_animation()) {
                 std::snprintf(animation_name, sizeof(animation_name), "%s", animation->name.c_str());
             }
         }
-        x += 170 + GAP;
-        if (GuiButton({x, y, 90, ROW}, tr("editor.new_animation").c_str())) {
+        if (GuiButton(place(90), tr("editor.new_animation").c_str())) {
             EntityAnimation animation;
             animation.name = "animation_" + std::to_string(model.animations.size() + 1);
             model.animations.push_back(animation);
@@ -839,11 +1153,10 @@ void ModelEditor::draw_timeline(Rectangle bounds)
             time = 0.0f;
             mark_dirty();
         }
-        x += 90 + GAP;
 
         EntityAnimation* animation = current_animation();
         GuiSetState(animation ? STATE_NORMAL : STATE_DISABLED);
-        if (GuiButton({x, y, 90, ROW}, tr("editor.delete_animation").c_str()) && animation) {
+        if (GuiButton(place(90), tr("editor.delete_animation").c_str()) && animation) {
             const std::string removed = animation->name;
             model.animations.erase(model.animations.begin() + animation_index);
             for (EntityAnimation& other : model.animations) {
@@ -854,23 +1167,19 @@ void ModelEditor::draw_timeline(Rectangle bounds)
             playing = false;
             mark_dirty();
         }
-        x += 90 + GAP * 2;
         if (animation) {
-            if (text_field({x, y, 150, ROW}, animation_name, sizeof(animation_name))) {
-                rename_animation(*animation, animation_name);
-            }
-            x += 150 + GAP;
-            label({x, y, 80, ROW}, tr("editor.length"));
-            x += 80;
-            int tenths = static_cast<int>(std::lround(animation->length * 10.0f));
-            if (int_field({x, y, 100, ROW}, tenths, 1, 600)) {
-                animation->length = tenths / 10.0f;
+            if (text_field(place(150), animation_name, sizeof(animation_name))) rename_animation(*animation, animation_name);
+            const Rectangle length_box = place(190);
+            label({length_box.x, length_box.y, 90, ROW}, tr("editor.length"));
+            int hundredths = static_cast<int>(std::lround(animation->length * 100.0f));
+            if (int_field({length_box.x + 90, length_box.y, 100, ROW}, hundredths, 1, 6000)) {
+                animation->length = hundredths / 100.0f;
                 time = std::min(time, animation->length);
                 mark_dirty();
             }
-            x += 100 + GAP;
+            const Rectangle loop_box = place(110);
             bool loop = animation->loop;
-            GuiCheckBox({x, y + 4, ROW - 8, ROW - 8}, tr("editor.loop").c_str(), &loop);
+            GuiCheckBox({loop_box.x, loop_box.y + 4, ROW - 8, ROW - 8}, tr("editor.loop").c_str(), &loop);
             if (loop != animation->loop) {
                 animation->loop = loop;
                 mark_dirty();
@@ -879,66 +1188,61 @@ void ModelEditor::draw_timeline(Rectangle bounds)
         GuiSetState(STATE_NORMAL);
     }
 
-    // Row 2: transport and keyframe buttons.
-    x = bounds.x + PAD;
-    y += ROW + GAP;
+    // Transport, keyframes, trigger, view.
+    next_row();
     EntityAnimation* animation = current_animation();
     GuiSetState(animation ? STATE_NORMAL : STATE_DISABLED);
-    if (GuiButton({x, y, 90, ROW}, tr(playing ? "editor.pause" : "editor.play").c_str()) && animation) playing = !playing;
-    x += 90 + GAP;
+    if (GuiButton(place(90), tr(playing ? "editor.pause" : "editor.play").c_str()) && animation) playing = !playing;
     const bool can_key = animation && selected_part >= 0;
     GuiSetState(can_key ? STATE_NORMAL : STATE_DISABLED);
-    if (GuiButton({x, y, 90, ROW}, tr("editor.add_key").c_str()) && can_key) {
+    if (GuiButton(place(90), tr("editor.add_key").c_str()) && can_key) {
         const PartPose pose = current_pose()[selected_part];
         set_keyframe(*find_track(*animation, model.parts[selected_part].name, true), snapped_time(), pose.rotation,
                      pose.offset);
         mark_dirty();
     }
-    x += 90 + GAP;
-    if (GuiButton({x, y, 130, ROW}, tr("editor.delete_key").c_str()) && can_key) {
+    if (GuiButton(place(130), tr("editor.delete_key").c_str()) && can_key) {
         if (ModelTrack* track = find_track(*animation, model.parts[selected_part].name, false)) {
-            int key = keyframe_at(*track, time, TIME_SNAP * 0.5f);
+            int key = keyframe_at(*track, time, std::max(0.0005f, time_snap_step * 0.5f));
             if (key >= 0) {
                 track->keys.erase(track->keys.begin() + key);
                 mark_dirty();
             }
         }
     }
+    GuiSetState(animation ? STATE_NORMAL : STATE_DISABLED);
+    if (GuiButton(place(30), "|<") && animation) jump_to_keyframe(-1);
+    if (GuiButton(place(30), ">|") && animation) jump_to_keyframe(1);
     GuiSetState(STATE_NORMAL);
-    x += 130 + GAP * 2;
-    label({x, y, 150, ROW}, tr_format("editor.time", {format_seconds(time)}));
-    x += 150 + GAP;
-
-    // When the game plays this animation by itself.
+    label(place(140), tr_format("editor.time", {format_seconds(time)}));
     if (animation) {
-        label({x, y, 80, ROW}, tr("editor.trigger"));
-        x += 80;
-        // Same order as AnimationTrigger.
+        // When the game plays this animation by itself.
+        const Rectangle trigger_box = place(250);
+        label({trigger_box.x, trigger_box.y, 80, ROW}, tr("editor.trigger"));
         std::string items = tr("editor.trigger_manual") + ";" + tr("editor.trigger_always") + ";" +
-                            tr("editor.trigger_moving") + ";" + tr("editor.trigger_sneaking");
+                            tr("editor.trigger_moving") + ";" + tr("editor.trigger_sneaking"); // AnimationTrigger order
         int active = static_cast<int>(animation->trigger);
         int chosen = active;
-        GuiComboBox({x, y, 170, ROW}, items.c_str(), &chosen);
+        GuiComboBox({trigger_box.x + 80, trigger_box.y, 170, ROW}, items.c_str(), &chosen);
         if (chosen != active) {
             animation->trigger = static_cast<AnimationTrigger>(chosen);
             mark_dirty();
         }
-        x += 170 + GAP;
         if (animation->trigger == AnimationTrigger::Moving) {
-            label({x, y, 150, ROW}, tr("editor.blocks_per_loop"));
-            x += 150;
+            const Rectangle loop_box = place(250);
+            label({loop_box.x, loop_box.y, 150, ROW}, tr("editor.blocks_per_loop"));
             int tenths = static_cast<int>(std::lround(animation->blocks_per_loop * 10.0f));
-            if (int_field({x, y, 100, ROW}, tenths, 1, 200)) {
+            if (int_field({loop_box.x + 150, loop_box.y, 100, ROW}, tenths, 1, 200)) {
                 animation->blocks_per_loop = tenths / 10.0f;
                 mark_dirty();
             }
         }
     }
+    const Rectangle minus = place(30), plus = place(30), fit = place(90);
 
-    // Row 3: the timeline itself - click or drag to scrub, keyframes as
-    // diamonds (the selected part's bright, the rest dim).
-    y += ROW + GAP;
-    Rectangle bar = {bounds.x + PAD, y, bounds.width - PAD * 2, bounds.y + bounds.height - PAD - y};
+    // The timeline bar itself.
+    const float bar_top = fy + ROW + GAP;
+    Rectangle bar = {left, bar_top, bounds.width - PAD * 2, std::max(30.0f, bounds.y + bounds.height - PAD - bar_top)};
     DrawRectangleRec(bar, Color{32, 32, 36, 255});
     DrawRectangleLinesEx(bar, 1.0f, gui_color(DEFAULT, LINE_COLOR));
     if (!animation) {
@@ -946,36 +1250,158 @@ void ModelEditor::draw_timeline(Rectangle bounds)
         return;
     }
 
-    const float length = std::max(0.05f, animation->length);
-    auto time_to_x = [&](float t) { return bar.x + PAD + (bar.width - PAD * 2) * (t / length); };
-    for (int step = 0; step <= static_cast<int>(length * 10.0f + 0.5f); ++step) {
-        float t = step / 10.0f;
-        bool whole = step % 10 == 0;
-        float tx = time_to_x(t);
-        DrawLineV({tx, bar.y}, {tx, bar.y + (whole ? 14.0f : 7.0f)}, gui_color(DEFAULT, LINE_COLOR));
-        if (whole) DrawTextEx(editor_text::font(), std::to_string(step / 10).c_str(), {tx + 3, bar.y + 2}, 14, 1,
-                              gui_color(DEFAULT, TEXT_COLOR_NORMAL));
+    // View: pixels per second (never zoomed out past the whole clip) and
+    // the time at the left edge.
+    const float length = std::max(0.01f, animation->length);
+    const float usable = std::max(1.0f, bar.width - PAD * 2);
+    const float fit_zoom = usable / length;
+    float zoom = timeline_zoom > 0.0f ? std::clamp(timeline_zoom, fit_zoom, 5000.0f) : fit_zoom;
+    auto clamp_scroll = [&] { timeline_scroll = std::clamp(timeline_scroll, 0.0f, std::max(0.0f, length - usable / zoom)); };
+    auto zoom_about = [&](float factor, float about_x) {
+        const float about_time = timeline_scroll + (about_x - bar.x - PAD) / zoom;
+        zoom = std::clamp(zoom * factor, fit_zoom, 5000.0f);
+        timeline_zoom = zoom;
+        timeline_scroll = about_time - (about_x - bar.x - PAD) / zoom;
+    };
+    if (GuiButton(minus, "-")) zoom_about(1.0f / 1.5f, bar.x + bar.width * 0.5f);
+    if (GuiButton(plus, "+")) zoom_about(1.5f, bar.x + bar.width * 0.5f);
+    if (GuiButton(fit, tr("editor.view_fit").c_str())) {
+        timeline_zoom = 0.0f;
+        timeline_scroll = 0.0f;
+        zoom = fit_zoom;
     }
-    const float selected_row = bar.y + bar.height * 0.45f;
-    const float other_row = bar.y + bar.height * 0.78f;
+    const bool over_bar = CheckCollisionPointRec(mouse, bar) && !models_dropdown_open;
+    const Vector2 wheel = GetMouseWheelMoveV();
+    const bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+    if (over_bar && (wheel.x != 0.0f || wheel.y != 0.0f)) {
+        if (shift || wheel.x != 0.0f) timeline_scroll -= (shift ? wheel.y : wheel.x) * 60.0f / zoom;
+        else zoom_about(std::pow(1.25f, wheel.y), mouse.x);
+    }
+    clamp_scroll();
+
+    auto time_to_x = [&](float t) { return bar.x + PAD + (t - timeline_scroll) * zoom; };
+    auto x_to_time = [&](float x) { return timeline_scroll + (x - bar.x - PAD) / zoom; };
+
+    // Snap step and tick spacing follow the zoom: a step at least 6 pixels
+    // apart, labels at least 60.
+    static constexpr float STEPS[] = {0.001f, 0.002f, 0.005f, 0.01f, 0.02f, 0.05f, 0.1f, 0.2f, 0.5f, 1.0f, 2.0f, 5.0f};
+    auto step_at_least = [&](float pixels) {
+        for (float step : STEPS) {
+            if (step * zoom >= pixels) return step;
+        }
+        return STEPS[sizeof(STEPS) / sizeof(STEPS[0]) - 1];
+    };
+    time_snap_step = step_at_least(6.0f);
+    const float label_step = step_at_least(60.0f);
+
+    BeginScissorMode(static_cast<int>(bar.x), static_cast<int>(bar.y), static_cast<int>(bar.width), static_cast<int>(bar.height));
+    {
+        const Color line = gui_color(DEFAULT, LINE_COLOR);
+        const int first = static_cast<int>(std::floor(timeline_scroll / time_snap_step));
+        const int last = static_cast<int>(std::ceil(std::min(length, x_to_time(bar.x + bar.width)) / time_snap_step));
+        for (int i = std::max(0, first); i <= last; ++i) {
+            const float t = i * time_snap_step;
+            if (t > length + 0.0001f) break;
+            const float tx = time_to_x(t);
+            const bool labeled = std::fabs(std::remainder(t, label_step)) < time_snap_step * 0.25f;
+            DrawLineV({tx, bar.y}, {tx, bar.y + (labeled ? 14.0f : 6.0f)}, line);
+            if (labeled) {
+                char text[16];
+                std::snprintf(text, sizeof(text), label_step < 0.01f ? "%.3f" : label_step < 0.1f ? "%.2f" : label_step < 1.0f ? "%.1f" : "%.0f", t);
+                DrawTextEx(editor_text::font(), text, {tx + 3, bar.y + 2}, 14, 1, gui_color(DEFAULT, TEXT_COLOR_NORMAL));
+            }
+        }
+        // The clip's end.
+        DrawLineEx({time_to_x(length), bar.y}, {time_to_x(length), bar.y + bar.height}, 1.0f, Fade(line, 0.8f));
+
+        const float selected_row = bar.y + bar.height * 0.45f;
+        const float other_row = bar.y + bar.height * 0.75f;
+        for (const ModelTrack& track : animation->tracks) {
+            const bool is_selected = selected_part >= 0 && track.part == model.parts[selected_part].name;
+            for (const ModelKeyframe& key : track.keys) {
+                const Vector2 c = {time_to_x(key.time), is_selected ? selected_row : other_row};
+                const bool on_key = std::fabs(key.time - time) < 0.0005f;
+                DrawPoly(c, 4, is_selected ? 7.0f : 4.0f, 45.0f, is_selected || on_key ? KEY_SELECTED : KEY_OTHER);
+            }
+        }
+        const float head_x = time_to_x(time);
+        DrawLineEx({head_x, bar.y}, {head_x, bar.y + bar.height}, 2.0f, PLAYHEAD);
+    }
+    EndScissorMode();
+
+    // Scrollbar along the bottom, once zoomed in past the whole clip.
+    const float visible = usable / zoom;
+    Rectangle thumb{};
+    if (visible < length - 0.0001f) {
+        const Rectangle track_rect = {bar.x + 2, bar.y + bar.height - 8, bar.width - 4, 6};
+        thumb = {track_rect.x + track_rect.width * (timeline_scroll / length), track_rect.y,
+                 std::max(12.0f, track_rect.width * (visible / length)), track_rect.height};
+        DrawRectangleRec(track_rect, Color{24, 24, 28, 255});
+        DrawRectangleRec(thumb, timeline_thumb_drag ? KEY_SELECTED : Color{110, 110, 120, 255});
+    }
+
+    // Mouse on the bar: drag the scrollbar, pan (middle / Alt+left drag),
+    // or scrub - snapping to a keyframe within a few pixels, else the step.
+    const bool alt = IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT);
+    if (over_bar && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && thumb.width > 0 && CheckCollisionPointRec(mouse, {thumb.x, thumb.y - 3, thumb.width, thumb.height + 6})) {
+        timeline_thumb_drag = true;
+        timeline_pan_grab = mouse.x - thumb.x;
+    } else if (over_bar && (IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE) || (alt && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)))) {
+        timeline_panning = true;
+        timeline_pan_grab = x_to_time(mouse.x);
+    } else if (over_bar && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !timeline_resizing) {
+        scrubbing = true;
+    }
+    if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT) && !IsMouseButtonDown(MOUSE_BUTTON_MIDDLE)) {
+        scrubbing = timeline_panning = timeline_thumb_drag = false;
+    }
+    if (timeline_thumb_drag) {
+        timeline_scroll = (mouse.x - timeline_pan_grab - bar.x - 2) / (bar.width - 4) * length;
+        clamp_scroll();
+    } else if (timeline_panning) {
+        timeline_scroll += timeline_pan_grab - x_to_time(mouse.x);
+        clamp_scroll();
+    } else if (scrubbing) {
+        float t = std::round(x_to_time(mouse.x) / time_snap_step) * time_snap_step;
+        float nearest = 7.0f; // pixels
+        for (const ModelTrack& track : animation->tracks) {
+            for (const ModelKeyframe& key : track.keys) {
+                const float distance = std::fabs(time_to_x(key.time) - mouse.x);
+                if (distance < nearest) {
+                    nearest = distance;
+                    t = key.time;
+                }
+            }
+        }
+        time = std::clamp(t, 0.0f, length);
+        playing = false;
+    }
+}
+
+void ModelEditor::jump_to_keyframe(int direction)
+{
+    const EntityAnimation* animation = current_animation();
+    if (!animation) return;
+    float best = direction < 0 ? -1.0f : animation->length + 1.0f;
+    bool found = false;
     for (const ModelTrack& track : animation->tracks) {
-        bool is_selected = selected_part >= 0 && track.part == model.parts[selected_part].name;
         for (const ModelKeyframe& key : track.keys) {
-            Vector2 c = {time_to_x(key.time), is_selected ? selected_row : other_row};
-            float r = is_selected ? 7.0f : 4.0f;
-            DrawPoly(c, 4, r, 45.0f, is_selected ? KEY_SELECTED : KEY_OTHER);
+            const bool ahead = direction < 0 ? key.time < time - 0.0005f : key.time > time + 0.0005f;
+            if (!ahead) continue;
+            if (direction < 0 ? key.time > best : key.time < best) {
+                best = key.time;
+                found = true;
+            }
         }
     }
-    const float head_x = time_to_x(time);
-    DrawLineEx({head_x, bar.y}, {head_x, bar.y + bar.height}, 2.0f, PLAYHEAD);
-
-    const Vector2 mouse = GetMousePosition();
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, bar)) scrubbing = true;
-    if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) scrubbing = false;
-    if (scrubbing) {
-        float t = (mouse.x - bar.x - PAD) / (bar.width - PAD * 2) * length;
-        time = std::clamp(std::round(t / TIME_SNAP) * TIME_SNAP, 0.0f, length);
-        playing = false;
+    if (!found) return;
+    time = best;
+    playing = false;
+    // Keep it in view.
+    if (timeline_zoom > 0.0f) {
+        const float visible_start = timeline_scroll;
+        const float visible_end = timeline_scroll + std::max(0.01f, (GetScreenWidth() - left_width() - right_width() - PAD * 4) / timeline_zoom);
+        if (time < visible_start || time > visible_end) timeline_scroll = std::max(0.0f, time - (visible_end - visible_start) * 0.5f);
     }
 }
 
@@ -1309,12 +1735,28 @@ ModelPose ModelEditor::current_pose()
 ModelPose ModelEditor::displayed_pose()
 {
     ModelPose pose = current_pose();
+    // The player's view: the arm's pose for the previewed item ("empty",
+    // "hold_tool"...) under whatever other animation is being edited - the
+    // game plays them together just so.
+    if (player_view) {
+        const EntityAnimation* current = current_animation();
+        const std::string pose_name = POSE_ANIMATIONS[std::clamp(preview_item, 0, 3)];
+        for (const EntityAnimation& animation : model.animations) {
+            if (animation.name != pose_name || (current && pose_animation_index(current->name) >= 0)) continue;
+            const ModelPose empty = sample_pose(model, &animation, 0.0f);
+            for (size_t i = 0; i < pose.size() && i < empty.size(); ++i) {
+                pose[i].rotation = Vector3Add(pose[i].rotation, empty[i].rotation);
+                pose[i].offset = Vector3Add(pose[i].offset, empty[i].offset);
+            }
+        }
+    }
     apply_head_look(model, pose, look_yaw - displayed_body_yaw(), look_pitch);
     return pose;
 }
 
 float ModelEditor::displayed_body_yaw() const
 {
+    if (player_view) return 0.0f; // the hand model is in the eye's own space
     // The body starts facing forward and only turns once the look passes
     // the look part's body_turn_angle - same rule the game uses.
     return body_yaw_following_look(model, 0.0f, look_yaw);
@@ -1337,7 +1779,16 @@ void ModelEditor::set_selected_pose(PartPose pose)
 
 float ModelEditor::snapped_time() const
 {
-    return std::round(time / TIME_SNAP) * TIME_SNAP;
+    // Right on a keyframe (scrubbed onto it, jumped to it): exactly its time,
+    // whatever the step - so changing that key never moves it.
+    if (const EntityAnimation* animation = const_cast<ModelEditor*>(this)->current_animation()) {
+        for (const ModelTrack& track : animation->tracks) {
+            for (const ModelKeyframe& key : track.keys) {
+                if (std::fabs(key.time - time) < 0.0005f) return key.time;
+            }
+        }
+    }
+    return std::round(time / time_snap_step) * time_snap_step;
 }
 
 // ------------------------------------------------------ Animation graph --
@@ -1581,6 +2032,7 @@ namespace {
 
 void ModelEditor::draw_left_panel(Rectangle bounds)
 {
+    bounds = panel_header(bounds, tr("editor.entity"), left_panel_open, true);
     EntityInfo& info = model.entity;
     const float content_width = bounds.width - 14.0f;
     static float content_height = 800.0f;
@@ -1842,8 +2294,9 @@ std::string ModelEditor::last_model() const
 
 // ------------------------------------------------------------ UV window --
 
-bool ModelEditor::over_floating_window(Rectangle, Vector2 point) const
+bool ModelEditor::over_floating_window(Rectangle viewport, Vector2 point) const
 {
+    if (player_view && CheckCollisionPointRec(point, preview_combo_rect(viewport))) return true;
     // Mid-move/resize the mouse may run ahead of the window - still its.
     for (int id : {GRAPH_WINDOW, UV_WINDOW}) {
         if (!floating_window_open(id)) continue;

@@ -14,6 +14,7 @@
 #include "entities/Mob.hpp"
 #include "entities/DroppedItem.hpp"
 #include "entities/Player.hpp"
+#include "rendering/FirstPersonHand.hpp"
 #include "effects/ParticleSystem.hpp"
 #include "rendering/PlayerRenderer.hpp"
 #include "audio/AudioSystem.hpp"
@@ -341,6 +342,7 @@ private:
     Camera3D camera;
     Player player;
     PlayerRenderer player_renderer;
+    FirstPersonHand hand; // the arm and held item in first person
 
     // Drowning: seconds of air left, drained while Player reports
     // the eye position submerged and restored otherwise - once it hits 0

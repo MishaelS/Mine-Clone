@@ -36,10 +36,10 @@
       "parent": "body",
       "pivot": [-4, 22, 0],
       "rotation_min": [-180, -30, -90],
-      "rotation_max": [90, 30, 10],
+      "rotation_max": [90, 30, 30],
       "look": false,
       "body_turn_angle": 50,
-      "cubes": [{ "origin": [-8, 12, -2], "size": [4, 12, 4], "uv": [40, 16], "face_uv": { "bottom": [48, 16], "back": [52, 20], "front": [44, 20], "left": [40, 20] } }, { "origin": [-8, 20, -2], "size": [4, 1, 4], "uv": [40, 35], "overlay": true, "face_uv": { "bottom": [48, 35], "back": [52, 39], "front": [44, 39], "right": [48, 39], "left": [40, 39] } }]
+      "cubes": [{ "origin": [-8, 12, -2], "size": [4, 12, 4], "uv": [40, 16], "face_uv": { "bottom": [48, 16], "back": [52, 20], "front": [44, 20], "left": [40, 20] } }, { "origin": [-8, 20, -2], "size": [4, 1, 4], "uv": [40, 35], "overlay": true, "face_uv": { "top": [40, 34], "bottom": [45, 34], "back": [51, 39], "front": [44, 39], "right": [47, 39], "left": [40, 39] } }]
     },
     {
       "name": "left_arm",
@@ -49,7 +49,7 @@
       "rotation_max": [90, 30, 90],
       "look": false,
       "body_turn_angle": 50,
-      "cubes": [{ "origin": [4, 12, -2], "size": [4, 12, 4], "uv": [32, 48] }, { "origin": [4, 20, -2], "size": [4, 1, 4], "uv": [48, 51], "overlay": true, "face_uv": { "left": [48, 55] } }]
+      "cubes": [{ "origin": [4, 12, -2], "size": [4, 12, 4], "uv": [32, 48] }, { "origin": [4, 20, -2], "size": [4, 1, 4], "uv": [48, 51], "overlay": true, "face_uv": { "top": [48, 50], "bottom": [53, 50], "back": [59, 55], "front": [52, 55], "right": [56, 55], "left": [48, 55] } }]
     },
     {
       "name": "right_leg",
@@ -117,6 +117,19 @@
         { "part": "left_arm", "keys": [{ "time": 0, "rotation": [-14.003, 0, 0] }] },
         { "part": "right_leg", "keys": [{ "time": 0, "rotation": [-28, 0, 0], "offset": [0, 2, 0] }] },
         { "part": "left_leg", "keys": [{ "time": 0, "rotation": [-28, 0, 0], "offset": [0, 2, 0] }] }
+      ]
+    },
+    {
+      "name": "swing",
+      "length": 0.3,
+      "loop": false,
+      "trigger": "manual",
+      "blocks_per_loop": 2,
+      "links": [],
+      "graph_position": [20, 268],
+      "tracks": [
+        { "part": "right_arm", "keys": [{ "time": 0, "rotation": [0, 0, 0] }, { "time": 0.015, "rotation": [-42.5, 22.6, 3.6] }, { "time": 0.03, "rotation": [-69.9, 21, 7.1] }, { "time": 0.045, "rotation": [-82.2, 14.9, 10.4] }, { "time": 0.06, "rotation": [-83.7, 7.5, 13.5] }, { "time": 0.075, "rotation": [-78.9, 0, 16.2] }, { "time": 0.09, "rotation": [-71.4, -6.8, 18.5] }, { "time": 0.12, "rotation": [-55.8, -16.9, 21.8] }, { "time": 0.15, "rotation": [-43.5, -22.1, 22.9] }, { "time": 0.18, "rotation": [-34.1, -22.6, 21.8] }, { "time": 0.21, "rotation": [-26.1, -19.6, 18.5] }, { "time": 0.24, "rotation": [-18, -14.1, 13.5] }, { "time": 0.27, "rotation": [-9.3, -7.3, 7.1] }, { "time": 0.3, "rotation": [0, 0, 0] }] },
+        { "part": "body", "keys": [{ "time": 0, "rotation": [0, 0, 0] }, { "time": 0.015, "rotation": [0, 11.3, 0] }, { "time": 0.03, "rotation": [0, 10.5, 0] }, { "time": 0.045, "rotation": [0, 7.5, 0] }, { "time": 0.06, "rotation": [0, 3.7, 0] }, { "time": 0.075, "rotation": [0, 0, 0] }, { "time": 0.09, "rotation": [0, -3.4, 0] }, { "time": 0.12, "rotation": [0, -8.5, 0] }, { "time": 0.15, "rotation": [0, -11, 0] }, { "time": 0.18, "rotation": [0, -11.3, 0] }, { "time": 0.21, "rotation": [0, -9.8, 0] }, { "time": 0.24, "rotation": [0, -7.1, 0] }, { "time": 0.27, "rotation": [0, -3.6, 0] }, { "time": 0.3, "rotation": [0, 0, 0] }] }
       ]
     }
   ]

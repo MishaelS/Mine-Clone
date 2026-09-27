@@ -35,3 +35,16 @@ Matrix cube_rotation_matrix(const ModelCube& cube, float scale);
 // is never stretched) or like `size` for ModelCube::stretch_texture, with
 // any per-side override (ModelCube::face_uv) applied.
 std::array<Rectangle, 6> cube_face_uvs(const ModelPart& part, const ModelCube& cube);
+
+// An item-atlas sprite (`source`, pixels) as Minecraft's extruded
+// "generated" item: front and back faces plus a strip along every pixel
+// column and row edge (see-through pixels leave theirs out - draw it with a
+// cutout shader). Fills the unit box centered on the origin - the picture
+// facing +Z, its top at +Y - so scale z to the thickness wanted.
+void draw_extruded_sprite(const Texture2D& atlas, Rectangle source, Color tint);
+
+// Pushes the current matrix to `model`'s item slot `slot` (ModelPart::
+// item_slot - "block", "tool", "item") in `pose`: the unit box centered on
+// the origin becomes the slot's box. The caller draws the item and pops.
+// False, with nothing pushed, if the model has no such slot.
+bool push_item_slot(const EntityModel& model, const ModelPose& pose, const std::string& slot, float scale);

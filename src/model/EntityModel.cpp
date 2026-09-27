@@ -260,6 +260,8 @@ std::optional<EntityModel> load_entity_model(const std::string& path)
             part.name   = p["name"].as_string();
             part.parent = p["parent"].as_string();
             part.pivot  = read_vec3(p["pivot"], part.pivot);
+            part.rotation = read_vec3(p["rotation"], part.rotation);
+            part.item_slot = p["item_slot"].as_string();
             part.rotation_min = read_vec3(p["rotation_min"], part.rotation_min);
             part.rotation_max = read_vec3(p["rotation_max"], part.rotation_max);
             for (const Json& c : p["cubes"].as_array()) {
@@ -346,6 +348,10 @@ bool save_entity_model(const EntityModel& model, const std::string& path)
         out << "      \"name\": \"" << escape(part.name) << "\",\n";
         out << "      \"parent\": \"" << escape(part.parent) << "\",\n";
         out << "      \"pivot\": " << vec3(part.pivot) << ",\n";
+        if (part.rotation.x != 0.0f || part.rotation.y != 0.0f || part.rotation.z != 0.0f) {
+            out << "      \"rotation\": " << vec3(part.rotation) << ",\n";
+        }
+        if (!part.item_slot.empty()) out << "      \"item_slot\": \"" << escape(part.item_slot) << "\",\n";
         out << "      \"rotation_min\": " << vec3(part.rotation_min) << ",\n";
         out << "      \"rotation_max\": " << vec3(part.rotation_max) << ",\n";
         out << "      \"look\": " << (part.look ? "true" : "false") << ",\n";
@@ -484,8 +490,13 @@ void EntityAnimator::update(float delta_time, float moved, bool sneaking)
 
 void EntityAnimator::set_manual(const std::string& name, float seconds)
 {
-    manual_name = name;
-    manual_time = std::max(0.0f, seconds);
+    manual.clear();
+    if (!name.empty()) add_manual(name, seconds);
+}
+
+void EntityAnimator::add_manual(const std::string& name, float seconds, float weight)
+{
+    manual.push_back({name, std::max(0.0f, seconds), weight});
 }
 
 ModelPose EntityAnimator::pose(const EntityModel& model) const
@@ -522,8 +533,10 @@ ModelPose EntityAnimator::pose(const EntityModel& model) const
                 add_animation(model, animation, time, sneaking_weight, pose);
                 break;
             case AnimationTrigger::Manual:
-                if (animation.name == manual_name && (animation.loop || manual_time <= animation.length)) {
-                    add_animation(model, animation, manual_time, 1.0f, pose);
+                for (const ManualLayer& layer : manual) {
+                    if (animation.name == layer.name && (animation.loop || layer.time <= animation.length)) {
+                        add_animation(model, animation, layer.time, layer.weight, pose);
+                    }
                 }
                 break;
             default:

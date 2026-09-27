@@ -392,7 +392,7 @@
     "editor.no_animation": "(нет)",
     "editor.new_animation": "Новая",
     "editor.delete_animation": "Удалить",
-    "editor.length": "Длина x0.1с",
+    "editor.length": "Длина x0.01с",
     "editor.loop": "Повтор",
     "editor.play": "Играть",
     "editor.pause": "Пауза",
@@ -489,6 +489,21 @@
     "editor.entity_biomes_hint": "Ни один не отмечен - в любом биоме.",
     "editor.entity_spawn_weight": "Шанс (вес)",
     "editor.entity_group": "Группа (от-до)",
-    "editor.entity_spawn_hint": "Каждые 5 секунд, если рядом мало мобов, в 24-48 блоках от игрока появляется группа одного вида: выбирается среди подходящих для биома по весу. Сухопутные - на траве, подводные - в воде от 2 блоков глубиной, небесные - в воздухе."
+    "editor.entity_spawn_hint": "Каждые 5 секунд, если рядом мало мобов, в 24-48 блоках от игрока появляется группа одного вида: выбирается среди подходящих для биома по весу. Сухопутные - на траве, подводные - в воде от 2 блоков глубиной, небесные - в воздухе.",
+    "editor.model_panel": "Модель",
+    "editor.timeline_show": "^ Показать таймлайн",
+    "editor.player_view": "Вид игрока",
+    "editor.player_view_hint": "Вид игрока - кадр как в игре. Поза руки: empty (пусто), hold_block, hold_tool, hold_item - выбери анимацию, предмет в руке переключится сам. Поза покоя (без анимации) - общая для всех.",
+    "editor.preview_item": "В руке",
+    "editor.preview_none": "пусто (empty)",
+    "editor.preview_block": "блок (hold_block)",
+    "editor.preview_tool": "инструмент (hold_tool)",
+    "editor.preview_sprite": "предмет (hold_item)",
+    "editor.part_rotation": "Поворот в покое",
+    "editor.item_slot": "Слот предмета",
+    "editor.slot_none": "нет",
+    "editor.slot_block": "блок",
+    "editor.slot_tool": "инструмент",
+    "editor.slot_item": "предмет"
   }
 }

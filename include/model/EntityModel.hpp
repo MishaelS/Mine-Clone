@@ -71,6 +71,10 @@ struct ModelPart {
     std::string name;
     std::string parent;                        // "" = attached to the model root
     Vector3 pivot = {0.0f, 0.0f, 0.0f};        // rotation point, model pixels
+    // Turned this way at rest (degrees, X then Y then Z, about the pivot) -
+    // animations turn it further from there, in its own turned axes. For a
+    // part that doesn't hang straight, like the first-person arm.
+    Vector3 rotation = {0.0f, 0.0f, 0.0f};
     // Allowed rotation per axis, degrees - every pose is clamped into this.
     Vector3 rotation_min = {-180.0f, -180.0f, -180.0f};
     Vector3 rotation_max = {180.0f, 180.0f, 180.0f};
@@ -83,7 +87,17 @@ struct ModelPart {
     // Only one part per model looks; with several, the first one counts.
     bool look = false;
     float body_turn_angle = 50.0f;
+
+    // Where a held item goes (the first-person hand - see
+    // FirstPersonHand): "block", "tool", "item" or "" for an ordinary part.
+    // Its first cube isn't drawn - it's the box the held item of that kind
+    // fills: a block the whole box, an item's sprite its width x height,
+    // the box's depth its thickness.
+    std::string item_slot;
 };
+
+// ModelPart::item_slot values.
+constexpr const char* ITEM_SLOT_IDS[] = {"block", "tool", "item"};
 
 struct ModelKeyframe {
     float time = 0.0f;                   // seconds
@@ -256,10 +270,18 @@ public:
     // played on top of everything else; a non-looping one ends by itself
     // after its length. Set every frame by whoever draws the entity.
     void set_manual(const std::string& name, float seconds);
+    // Several at once: clear_manual(), then add_manual() each one playing
+    // (`weight` 0..1 fades one in or out).
+    void clear_manual() { manual.clear(); }
+    void add_manual(const std::string& name, float seconds, float weight = 1.0f);
 
 private:
-    std::string manual_name;
-    float manual_time = 0.0f;
+    struct ManualLayer {
+        std::string name;
+        float time;
+        float weight;
+    };
+    std::vector<ManualLayer> manual;
     float time = 0.0f;            // seconds
     float distance = 0.0f;        // blocks walked
     float moving_weight = 0.0f;   // 0 standing .. 1 at full walking speed

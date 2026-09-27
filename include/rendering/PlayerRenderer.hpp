@@ -7,7 +7,8 @@ class World;
 
 // Renders the player from assets/models/player.json (built in the model
 // editor - tools/model_editor), playing its self-triggered animations -
-// "idle" always, "walk" while moving (see EntityAnimator). Falls back to
+// "idle" always, "walk" while moving (see EntityAnimator) - and "swing",
+// the right arm's hit/use, whenever the player swings. Falls back to
 // the built-in player template (make_humanoid_model()) if the file is
 // missing.
 class PlayerRenderer {
@@ -17,8 +18,9 @@ public:
     // while walking (see apply_head_look()/body_yaw_following_look() in
     // model/EntityModel.hpp). The body's yaw carries over between calls.
     // `sneaking` plays the model's sneaking-state animations (see
-    // EntityAnimator).
-    void draw(Vector3 feet_position, Vector3 forward, bool sneaking, const World& world) const;
+    // EntityAnimator). `swing_seconds`: how far into a hit/use swing the
+    // right arm is (-1 = none) - plays the model's "swing" animation.
+    void draw(Vector3 feet_position, Vector3 forward, bool sneaking, const World& world, float swing_seconds = -1.0f) const;
 
     // Same model, but rotated by explicit yaw/pitch (degrees) instead of a
     // world-space forward vector, and lit by a single fixed `tint` instead

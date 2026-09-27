@@ -13,6 +13,7 @@
 
 namespace {
     constexpr const char* PLAYER_MODEL_PATH = ASSETS_PATH "models/player.json";
+    constexpr const char* SWING_ANIMATION = "swing"; // the model's Manual hit/use animation
 
     // The model is 32 pixels tall; scaling those to the controller's
     // 1.8-block standing height keeps the visible body and the gameplay
@@ -52,7 +53,7 @@ namespace {
     }
 }
 
-void PlayerRenderer::draw(Vector3 feet_position, Vector3 forward, bool sneaking, const World& world) const
+void PlayerRenderer::draw(Vector3 feet_position, Vector3 forward, bool sneaking, const World& world, float swing_seconds) const
 {
     if (Vector3LengthSqr(forward) < 0.000001f) forward = {0.0f, 0.0f, 1.0f};
     forward = Vector3Normalize(forward);
@@ -68,6 +69,7 @@ void PlayerRenderer::draw(Vector3 feet_position, Vector3 forward, bool sneaking,
     const bool walking = moved_distance / delta_time > WALKING_SPEED;
     last_feet_position = feet_position;
     animator.update(delta_time, moved_distance, sneaking);
+    animator.set_manual(swing_seconds >= 0.0f ? SWING_ANIMATION : "", swing_seconds);
 
     if (!has_body_yaw) {
         body_yaw = look_yaw;

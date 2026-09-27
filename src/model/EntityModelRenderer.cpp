@@ -3,6 +3,7 @@
 #include "raymath.h"
 #include "rlgl.h"
 
+#include <algorithm>
 #include <array>
 #include <vector>
 
@@ -88,6 +89,11 @@ namespace {
         }
         const Vector3 rotation = pose.rotation;
         rlTranslatef(part.pivot.x * scale, part.pivot.y * scale, part.pivot.z * scale);
+        // Its rest turn first (outermost), the pose's on top in its axes.
+        const Vector3 rest = part.rotation;
+        if (rest.z != 0.0f) rlRotatef(rest.z, 0.0f, 0.0f, 1.0f);
+        if (rest.y != 0.0f) rlRotatef(rest.y, 0.0f, 1.0f, 0.0f);
+        if (rest.x != 0.0f) rlRotatef(rest.x, 1.0f, 0.0f, 0.0f);
         if (rotation.z != 0.0f) rlRotatef(rotation.z, 0.0f, 0.0f, 1.0f);
         if (rotation.y != 0.0f) rlRotatef(rotation.y, 0.0f, 1.0f, 0.0f);
         if (rotation.x != 0.0f) rlRotatef(rotation.x, 1.0f, 0.0f, 0.0f);
@@ -106,7 +112,7 @@ namespace {
         rlSetTexture(skin.id);
         rlBegin(RL_QUADS);
         for (const ModelCube& cube : part.cubes) {
-            if (cube.overlay != overlays) continue;
+            if (cube.overlay != overlays || !part.item_slot.empty()) continue; // a slot's box is where an item goes, not geometry
             draw_cube(part, cube, skin, static_cast<float>(model.skin_width), static_cast<float>(model.skin_height), scale, tint);
         }
         rlEnd();
@@ -208,4 +214,88 @@ std::array<Rectangle, 6> cube_face_uvs(const ModelPart& part, const ModelCube& c
         }
     }
     return faces;
+}
+
+void draw_extruded_sprite(const Texture2D& atlas, Rectangle source, Color tint)
+{
+    const float aw = static_cast<float>(atlas.width), ah = static_cast<float>(atlas.height);
+    const int columns = static_cast<int>(source.width), rows = static_cast<int>(source.height);
+    const float depth = 0.5f; // the unit box's own front/back - scaled to the thickness wanted
+    auto u = [&](float px) { return (source.x + px) / aw; };
+    auto v = [&](float py) { return (source.y + py) / ah; };
+    auto shade = [&](float s) {
+        rlColor4ub(static_cast<unsigned char>(tint.r * s), static_cast<unsigned char>(tint.g * s),
+                   static_cast<unsigned char>(tint.b * s), tint.a);
+    };
+    constexpr float EDGE = 1.0f / 1024.0f; // stay inside a pixel's own texels
+
+    rlSetTexture(atlas.id);
+    rlBegin(RL_QUADS);
+    // Front (+Z) and back (-Z).
+    shade(1.0f);
+    rlNormal3f(0, 0, 1);
+    rlTexCoord2f(u(EDGE), v(EDGE));                         rlVertex3f(-0.5f, 0.5f, depth);
+    rlTexCoord2f(u(EDGE), v(source.height - EDGE));         rlVertex3f(-0.5f, -0.5f, depth);
+    rlTexCoord2f(u(source.width - EDGE), v(source.height - EDGE)); rlVertex3f(0.5f, -0.5f, depth);
+    rlTexCoord2f(u(source.width - EDGE), v(EDGE));          rlVertex3f(0.5f, 0.5f, depth);
+    shade(0.8f);
+    rlNormal3f(0, 0, -1);
+    rlTexCoord2f(u(source.width - EDGE), v(EDGE));          rlVertex3f(0.5f, 0.5f, -depth);
+    rlTexCoord2f(u(source.width - EDGE), v(source.height - EDGE)); rlVertex3f(0.5f, -0.5f, -depth);
+    rlTexCoord2f(u(EDGE), v(source.height - EDGE));         rlVertex3f(-0.5f, -0.5f, -depth);
+    rlTexCoord2f(u(EDGE), v(EDGE));                         rlVertex3f(-0.5f, 0.5f, -depth);
+
+    // Column strips: each pixel column's left and right edge.
+    for (int i = 0; i < columns; ++i) {
+        const float x0 = -0.5f + static_cast<float>(i) / columns, x1 = -0.5f + static_cast<float>(i + 1) / columns;
+        const float cu = u(i + 0.5f);
+        shade(0.7f);
+        rlNormal3f(-1, 0, 0);
+        rlTexCoord2f(cu, v(EDGE));                 rlVertex3f(x0, 0.5f, -depth);
+        rlTexCoord2f(cu, v(source.height - EDGE)); rlVertex3f(x0, -0.5f, -depth);
+        rlTexCoord2f(cu, v(source.height - EDGE)); rlVertex3f(x0, -0.5f, depth);
+        rlTexCoord2f(cu, v(EDGE));                 rlVertex3f(x0, 0.5f, depth);
+        rlNormal3f(1, 0, 0);
+        rlTexCoord2f(cu, v(EDGE));                 rlVertex3f(x1, 0.5f, depth);
+        rlTexCoord2f(cu, v(source.height - EDGE)); rlVertex3f(x1, -0.5f, depth);
+        rlTexCoord2f(cu, v(source.height - EDGE)); rlVertex3f(x1, -0.5f, -depth);
+        rlTexCoord2f(cu, v(EDGE));                 rlVertex3f(x1, 0.5f, -depth);
+    }
+    // Row strips: each pixel row's top and bottom edge.
+    for (int j = 0; j < rows; ++j) {
+        const float y0 = 0.5f - static_cast<float>(j) / rows, y1 = 0.5f - static_cast<float>(j + 1) / rows;
+        const float cv = v(j + 0.5f);
+        shade(1.0f);
+        rlNormal3f(0, 1, 0);
+        rlTexCoord2f(u(EDGE), cv);                rlVertex3f(-0.5f, y0, -depth);
+        rlTexCoord2f(u(EDGE), cv);                rlVertex3f(-0.5f, y0, depth);
+        rlTexCoord2f(u(source.width - EDGE), cv); rlVertex3f(0.5f, y0, depth);
+        rlTexCoord2f(u(source.width - EDGE), cv); rlVertex3f(0.5f, y0, -depth);
+        shade(0.6f);
+        rlNormal3f(0, -1, 0);
+        rlTexCoord2f(u(EDGE), cv);                rlVertex3f(-0.5f, y1, depth);
+        rlTexCoord2f(u(EDGE), cv);                rlVertex3f(-0.5f, y1, -depth);
+        rlTexCoord2f(u(source.width - EDGE), cv); rlVertex3f(0.5f, y1, -depth);
+        rlTexCoord2f(u(source.width - EDGE), cv); rlVertex3f(0.5f, y1, depth);
+    }
+    rlEnd();
+    rlSetTexture(0);
+}
+
+bool push_item_slot(const EntityModel& model, const ModelPose& pose, const std::string& slot, float scale)
+{
+    for (size_t i = 0; i < model.parts.size(); ++i) {
+        const ModelPart& part = model.parts[i];
+        if (part.item_slot != slot || part.cubes.empty()) continue;
+        const ModelCube& box = part.cubes.front();
+        const BoundingBox bounds = cube_draw_bounds(part, box);
+        const Vector3 size = Vector3Scale(Vector3Subtract(bounds.max, bounds.min), scale);
+        const Vector3 center = Vector3Scale(Vector3Lerp(bounds.min, bounds.max, 0.5f), scale);
+        push_part_transform(model, pose, static_cast<int>(i), scale);
+        rlMultMatrixf(MatrixToFloat(cube_rotation_matrix(box, scale)));
+        rlTranslatef(center.x, center.y, center.z);
+        rlScalef(size.x, size.y, size.z);
+        return true;
+    }
+    return false;
 }

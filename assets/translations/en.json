@@ -392,7 +392,7 @@
     "editor.no_animation": "(none)",
     "editor.new_animation": "New",
     "editor.delete_animation": "Delete",
-    "editor.length": "Length x0.1s",
+    "editor.length": "Length x0.01s",
     "editor.loop": "Loop",
     "editor.play": "Play",
     "editor.pause": "Pause",
@@ -489,6 +489,21 @@
     "editor.entity_biomes_hint": "None ticked - any biome.",
     "editor.entity_spawn_weight": "Chance (weight)",
     "editor.entity_group": "Group (min-max)",
-    "editor.entity_spawn_hint": "Every 5 seconds, while few mobs are around, a group of one kind appears 24-48 blocks from the player, picked by weight among those fitting the biome. Land ones on grass, underwater ones in water at least 2 deep, sky ones in the air."
+    "editor.entity_spawn_hint": "Every 5 seconds, while few mobs are around, a group of one kind appears 24-48 blocks from the player, picked by weight among those fitting the biome. Land ones on grass, underwater ones in water at least 2 deep, sky ones in the air.",
+    "editor.model_panel": "Model",
+    "editor.timeline_show": "^ Show timeline",
+    "editor.player_view": "Player's view",
+    "editor.player_view_hint": "Player's view - the game's frame. Arm poses: empty, hold_block, hold_tool, hold_item - pick one and the item in hand follows. The rest pose (no animation) is shared by all.",
+    "editor.preview_item": "In hand",
+    "editor.preview_none": "nothing (empty)",
+    "editor.preview_block": "a block (hold_block)",
+    "editor.preview_tool": "a tool (hold_tool)",
+    "editor.preview_sprite": "an item (hold_item)",
+    "editor.part_rotation": "Rest rotation",
+    "editor.item_slot": "Item slot",
+    "editor.slot_none": "none",
+    "editor.slot_block": "block",
+    "editor.slot_tool": "tool",
+    "editor.slot_item": "item"
   }
 }
