@@ -17,13 +17,13 @@ namespace {
 
     // Day's own look - the flat colors this whole gradient used to be,
     // unconditionally, before day/night existed.
-    constexpr Color DAY_SKY_COLOR = {135, 190, 235, 255};
+    constexpr Color DAY_SKY_COLOR     = {135, 190, 235, 255};
     constexpr Color DAY_HORIZON_COLOR = {215, 235, 245, 255};
 
     // Night's own look - a dark, slightly blue-tinted sky rather than pure
     // black, same "still legible, not a void" spirit as MIN_LIGHT_FRACTION
     // keeps terrain from ever reading as flat black either.
-    constexpr Color NIGHT_SKY_COLOR = {3, 5, 14, 255};
+    constexpr Color NIGHT_SKY_COLOR     = {3, 5, 14, 255};
     constexpr Color NIGHT_HORIZON_COLOR = {7, 9, 22, 255};
 
     // The warm horizon band real Minecraft shows right at sunrise/sunset -
@@ -31,9 +31,9 @@ namespace {
     // calculation), not the whole sky, and only when the sun is actually
     // near the horizon line.
     constexpr Color SUNSET_HORIZON_COLOR = {255, 126, 48, 255};
-    constexpr Color SUNSET_SKY_COLOR = {104, 62, 132, 255};
+    constexpr Color SUNSET_SKY_COLOR     = {104, 62, 132, 255};
     constexpr float SUNSET_HORIZON_STRENGTH = 0.78f; // how much the glow color takes over at its strongest, 0..1
-    constexpr float SUNSET_SKY_STRENGTH = 0.18f;
+    constexpr float SUNSET_SKY_STRENGTH     = 0.18f;
 
     // Current, time-of-day-blended colors - what draw_skybox() actually
     // draws with this frame, recomputed by it every call (see its own
@@ -42,7 +42,7 @@ namespace {
     // own distance fog - see set_chunk_fog/chunk.fs). Initialized to day's
     // own look for the vanishingly unlikely case something reads them
     // before the first draw_skybox() call this session.
-    Color current_sky_color = DAY_SKY_COLOR;
+    Color current_sky_color     = DAY_SKY_COLOR;
     Color current_horizon_color = DAY_HORIZON_COLOR;
 
     void Vertex(Vector3 center, float x, float y, float z, Color color) {
@@ -50,7 +50,7 @@ namespace {
         rlVertex3f(center.x + x, center.y + y, center.z + z);
     }
 
-    const char* SUN_TEXTURE_PATH = "sprites/sky/sun.png";
+    const char* SUN_TEXTURE_PATH  = "sprites/sky/sun.png";
     const char* MOON_TEXTURE_PATH = "sprites/sky/moon.png";
 
     // Comfortably inside SIZE above, so the billboards read as sitting just
@@ -61,18 +61,18 @@ namespace {
     constexpr float SUN_SIZE  = 90.0f * 2.f;
     constexpr float MOON_SIZE = 69.0f * 2.f; // vanilla's own moon reads a bit smaller/dimmer than its sun
 
-    constexpr uint32_t STAR_SALT = 0x53544152u;  // "STAR"
-    constexpr uint32_t CLOUD_SALT = 0x434C4453u; // "CLDS"
+    constexpr uint32_t STAR_SALT  = 0x53544152u;  // "STAR"
+    constexpr uint32_t CLOUD_SALT = 0x434C4453u;  // "CLDS"
     constexpr int STAR_COUNT = 720;
-    constexpr float STAR_DISTANCE = 420.0f;
-    constexpr float CLOUD_Y = 160.0f;
-    constexpr float CLOUD_CELL = 12.0f;
-    constexpr float CLOUD_EXTRA_RANGE = 48.0f;
-    constexpr float CLOUD_MIN_RANGE = 144.0f;
-    constexpr float CLOUD_LAYER_DROP = 1.15f;
+    constexpr float STAR_DISTANCE               = 420.0f;
+    constexpr float CLOUD_Y                     = 160.0f;
+    constexpr float CLOUD_CELL                  = 12.0f;
+    constexpr float CLOUD_EXTRA_RANGE           = 48.0f;
+    constexpr float CLOUD_MIN_RANGE             = 144.0f;
+    constexpr float CLOUD_LAYER_DROP            = 1.15f;
     constexpr float CLOUD_SPEED_BLOCKS_PER_TICK = 0.018f;
-    constexpr float CLOUD_NOISE_SCALE = 0.065f;
-    constexpr float CLOUD_THRESHOLD = 0.56f;
+    constexpr float CLOUD_NOISE_SCALE           = 0.065f;
+    constexpr float CLOUD_THRESHOLD             = 0.56f;
 
     struct Star {
         Vector3 direction{};
@@ -124,12 +124,12 @@ namespace {
 
     float sky_fbm(uint32_t seed, float x, float z, uint32_t salt)
     {
-        float sum = 0.0f;
+        float sum       = 0.0f;
         float amplitude = 0.55f;
-        float total = 0.0f;
+        float total     = 0.0f;
         float frequency = 1.0f;
         for (int octave = 0; octave < 4; ++octave) {
-            sum += value_noise(seed, x * frequency, z * frequency, salt + static_cast<uint32_t>(octave) * 1013u) * amplitude;
+            sum   += value_noise(seed, x * frequency, z * frequency, salt + static_cast<uint32_t>(octave) * 1013u) * amplitude;
             total += amplitude;
             amplitude *= 0.52f;
             frequency *= 2.0f;
@@ -153,16 +153,16 @@ namespace {
         cached_stars.reserve(STAR_COUNT);
 
         for (int i = 0; i < STAR_COUNT; ++i) {
-            float azimuth = sky_noise01(seed, i, 0, STAR_SALT) * 2.0f * PI;
-            float y = 0.10f + sky_noise01(seed, i, 1, STAR_SALT) * 0.88f;
-            float radius = std::sqrt(std::max(0.0f, 1.0f - y * y));
+            float azimuth =         sky_noise01(seed, i, 0, STAR_SALT) * 2.0f * PI;
+            float y       = 0.10f + sky_noise01(seed, i, 1, STAR_SALT) * 0.88f;
+            float radius  = std::sqrt(std::max(0.0f, 1.0f - y * y));
             Vector3 direction{
                 std::cos(azimuth) * radius,
                 y,
                 std::sin(azimuth) * radius,
             };
             float brightness = 0.45f + sky_noise01(seed, i, 2, STAR_SALT) * 0.55f;
-            float size = 0.45f + sky_noise01(seed, i, 3, STAR_SALT) * 0.85f;
+            float size       = 0.45f + sky_noise01(seed, i, 3, STAR_SALT) * 0.85f;
             cached_stars.push_back(Star{
                 direction,
                 size,
@@ -177,7 +177,7 @@ namespace {
         if (alpha == 0) return;
 
         Vector3 center = Vector3Add(camera_position, Vector3Scale(star.direction, STAR_DISTANCE));
-        Vector3 right = Vector3CrossProduct({0.0f, 1.0f, 0.0f}, star.direction);
+        Vector3 right  = Vector3CrossProduct({0.0f, 1.0f, 0.0f}, star.direction);
         if (Vector3LengthSqr(right) < 0.0001f) right = {1.0f, 0.0f, 0.0f};
         right = Vector3Scale(Vector3Normalize(right), star.size * 0.5f);
         Vector3 up = Vector3Scale(Vector3Normalize(Vector3CrossProduct(star.direction, right)), star.size * 0.5f);
@@ -206,7 +206,7 @@ namespace {
         Vector3 center = Vector3Add(camera_position, Vector3Scale(direction, CELESTIAL_DISTANCE));
         constexpr Vector3 WORLD_Z = {0.0f, 0.0f, 1.0f};
         Vector3 right = Vector3Scale(WORLD_Z, size * 0.5f);
-        Vector3 up = Vector3Scale(Vector3Normalize(Vector3CrossProduct(WORLD_Z, direction)), size * 0.5f);
+        Vector3 up    = Vector3Scale(Vector3Normalize(Vector3CrossProduct(WORLD_Z, direction)), size * 0.5f);
 
         Vector3 top_left     = Vector3Subtract(Vector3Add(center, up), right);
         Vector3 top_right    = Vector3Add(Vector3Add(center, up), right);
@@ -216,10 +216,10 @@ namespace {
         rlSetTexture(texture.id);
         rlBegin(RL_QUADS);
             rlColor4ub(255, 255, 255, 255);
-            rlTexCoord2f(0.0f, 1.0f); rlVertex3f(bottom_left.x, bottom_left.y, bottom_left.z);
+            rlTexCoord2f(0.0f, 1.0f); rlVertex3f(bottom_left.x , bottom_left.y , bottom_left.z );
             rlTexCoord2f(1.0f, 1.0f); rlVertex3f(bottom_right.x, bottom_right.y, bottom_right.z);
-            rlTexCoord2f(1.0f, 0.0f); rlVertex3f(top_right.x, top_right.y, top_right.z);
-            rlTexCoord2f(0.0f, 0.0f); rlVertex3f(top_left.x, top_left.y, top_left.z);
+            rlTexCoord2f(1.0f, 0.0f); rlVertex3f(top_right.x   , top_right.y   , top_right.z   );
+            rlTexCoord2f(0.0f, 0.0f); rlVertex3f(top_left.x    , top_left.y    , top_left.z    );
         rlEnd();
         rlSetTexture(0);
     }
@@ -231,7 +231,7 @@ void draw_skybox(Vector3 camera_position, float daylight)
     // the sky stays fully bright all day and darkens exactly while the
     // terrain does.
     float day_factor = std::clamp(daylight, 0.0f, 1.0f);
-    Color sky = ColorLerp(NIGHT_SKY_COLOR, DAY_SKY_COLOR, day_factor);
+    Color sky     = ColorLerp(NIGHT_SKY_COLOR    , DAY_SKY_COLOR    , day_factor);
     Color horizon = ColorLerp(NIGHT_HORIZON_COLOR, DAY_HORIZON_COLOR, day_factor);
 
     // Sunrise/sunset glow: only during the transition itself, strongest
