@@ -268,6 +268,10 @@ private:
     Camera3D make_render_camera() const;
     void draw_player_model() const;
 
+    // F3+B: every entity's physics box - the player's (in third person, with
+    // its eye height in red and look direction in blue) and dropped items'.
+    void draw_hitboxes() const;
+
     // Writes camera position/facing + the current Inventory to
     // saves/<current_world_folder>/player.json (WorldSave::save_player_state)
     // - called from close_world() and, since that's not the only way a
@@ -349,6 +353,8 @@ private:
     std::unique_ptr<World> world;
     bool show_debug_overlay = false; // toggled by F3, Minecraft-style
     bool show_chunk_borders = false; // toggled by F4 - World::draw_chunk_borders()
+    bool show_hitboxes      = false; // toggled by F3+B, like Minecraft - see draw_hitboxes()
+    bool f3_combo_used      = false; // F3 was part of a combo this press - don't toggle the overlay on release
     bool show_wireframe     = false; // toggled by F6; F5 cycles camera views
     float camera_move_speed;         // world units/second; mouse wheel adjusts this
 

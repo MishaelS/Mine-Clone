@@ -1319,7 +1319,28 @@ void GameEngine::draw_player_model() const
     if (camera_view == CameraView::FirstPerson) return;
     Vector3 feet = player.feet_position();
     Vector3 look = Vector3Subtract(camera.target, camera.position);
-    if (world) player_renderer.draw(feet, look, *world);
+    if (world) player_renderer.draw(feet, look, player.is_sneaking(), *world);
+}
+
+void GameEngine::draw_hitboxes() const
+{
+    if (camera_view != CameraView::FirstPerson) {
+        const Vector3 feet = player.feet_position();
+        const float half = Player::WIDTH * 0.5f;
+        DrawBoundingBox({{feet.x - half, feet.y, feet.z - half}, {feet.x + half, feet.y + player.height(), feet.z + half}}, WHITE);
+        // Eye height as a thin red square, the look direction as a blue line.
+        const float eye_y = feet.y + player.eye_height();
+        DrawBoundingBox({{feet.x - half, eye_y - 0.005f, feet.z - half}, {feet.x + half, eye_y + 0.005f, feet.z + half}}, RED);
+        const Vector3 eye = {feet.x, eye_y, feet.z};
+        const Vector3 look = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
+        DrawLine3D(eye, Vector3Add(eye, Vector3Scale(look, 2.0f)), BLUE);
+    }
+    for (const auto& item : dropped_items) {
+        if (!item->is_active()) continue;
+        const Vector3 p = item->get_position();
+        const float h = DroppedItem::HITBOX_HALF_SIZE;
+        DrawBoundingBox({{p.x - h, p.y - h, p.z - h}, {p.x + h, p.y + h, p.z + h}}, WHITE);
+    }
 }
 
 void GameEngine::update(float delta_time)
@@ -1412,7 +1433,14 @@ void GameEngine::update(float delta_time)
         }
     }
 
-    if (IsKeyPressed(KEY_F3)) {
+    // F3 alone toggles the debug overlay on release; held with B it toggles
+    // hitboxes instead, same as Minecraft's own F3 combos.
+    if (IsKeyPressed(KEY_F3)) f3_combo_used = false;
+    if (IsKeyDown(KEY_F3) && IsKeyPressed(KEY_B)) {
+        show_hitboxes = !show_hitboxes;
+        f3_combo_used = true;
+    }
+    if (IsKeyReleased(KEY_F3) && !f3_combo_used) {
         show_debug_overlay = !show_debug_overlay;
     }
     if (IsKeyPressed(KEY_F4)) {
@@ -1936,6 +1964,7 @@ void GameEngine::draw()
             if (show_chunk_borders) {
                 world->draw_chunk_borders();
             }
+            if (show_hitboxes) draw_hitboxes();
         }
         if (world) begin_dynamic_entity_shader();
         for (auto& object : objects) {

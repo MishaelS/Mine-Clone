@@ -40,7 +40,7 @@ namespace {
 
     constexpr float INITIAL_POP_VELOCITY = 0.11f; // blocks/tick, ~2.2 blocks/s - the old straight-up-pop speed
 
-    constexpr float ITEM_HALF_SIZE       = 0.14f;
+    constexpr float ITEM_HALF_SIZE       = DroppedItem::HITBOX_HALF_SIZE;
     constexpr float SPRITE_SIZE          = ITEM_HALF_SIZE * 3.0f; // flat item icons draw larger than the physics box
     constexpr float BOB_HEIGHT           = 0.04f;
     constexpr float BOB_SPEED            = 3.0f;

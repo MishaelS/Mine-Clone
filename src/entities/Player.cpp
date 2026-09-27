@@ -26,6 +26,8 @@ namespace {
     constexpr float WATER_FLOW_ACCELERATION    = 8.0f;
     constexpr float WATER_FLOW_MAX_SPEED       = 8.45f;
     constexpr float NORMAL_STEP_HEIGHT         = 0.6f;
+    // How fast the eyes sink/rise when sneaking starts/stops, blocks/second.
+    constexpr float EYE_HEIGHT_SPEED           = 4.0f;
     constexpr float STEP_SMOOTH_SPEED          = 7.0f;
     // Vanilla applies a distinct upward impulse when a swimming entity is
     // horizontally blocked at a ledge.  It is intentionally stronger than
@@ -56,11 +58,11 @@ namespace {
     // which is what lets the player stand on a stair's step at the right
     // height or walk under an open trapdoor instead of the whole cell
     // blocking/passing as one unit.
-    bool box_blocked(const World& world, Vector3 feet)
+    bool box_blocked(const World& world, Vector3 feet, float box_height)
     {
         BoundingBox player_box{
             {feet.x - HALF_WIDTH + COLLISION_EPSILON, feet.y + COLLISION_EPSILON, feet.z - HALF_WIDTH + COLLISION_EPSILON},
-            {feet.x + HALF_WIDTH - COLLISION_EPSILON, feet.y + Player::HEIGHT - COLLISION_EPSILON, feet.z + HALF_WIDTH - COLLISION_EPSILON},
+            {feet.x + HALF_WIDTH - COLLISION_EPSILON, feet.y + box_height - COLLISION_EPSILON, feet.z + HALF_WIDTH - COLLISION_EPSILON},
         };
         int min_x = static_cast<int>(std::floor(player_box.min.x));
         int max_x = static_cast<int>(std::floor(player_box.max.x));
@@ -81,12 +83,12 @@ namespace {
         return false;
     }
 
-    bool box_touches_water(const World& world, Vector3 feet)
+    bool box_touches_water(const World& world, Vector3 feet, float box_height)
     {
         const int min_x = static_cast<int>(std::floor(feet.x - HALF_WIDTH + COLLISION_EPSILON));
         const int max_x = static_cast<int>(std::floor(feet.x + HALF_WIDTH - COLLISION_EPSILON));
         const int min_y = static_cast<int>(std::floor(feet.y + COLLISION_EPSILON));
-        const int max_y = static_cast<int>(std::floor(feet.y + Player::HEIGHT - COLLISION_EPSILON));
+        const int max_y = static_cast<int>(std::floor(feet.y + box_height - COLLISION_EPSILON));
         const int min_z = static_cast<int>(std::floor(feet.z - HALF_WIDTH + COLLISION_EPSILON));
         const int max_z = static_cast<int>(std::floor(feet.z + HALF_WIDTH - COLLISION_EPSILON));
         for (int x = min_x; x <= max_x; ++x) {
@@ -94,7 +96,7 @@ namespace {
                 for (int z = min_z; z <= max_z; ++z) {
                     if (world.get_block(x, y, z) == BlockType::Water &&
                         feet.y < y + WATER_SURFACE_HEIGHT &&
-                        feet.y + Player::HEIGHT > y) {
+                        feet.y + box_height > y) {
                         return true;
                     }
                 }
@@ -103,12 +105,12 @@ namespace {
         return false;
     }
 
-    Vector3 box_water_flow(const World& world, Vector3 feet)
+    Vector3 box_water_flow(const World& world, Vector3 feet, float box_height)
     {
         const int min_x = static_cast<int>(std::floor(feet.x - HALF_WIDTH + COLLISION_EPSILON));
         const int max_x = static_cast<int>(std::floor(feet.x + HALF_WIDTH - COLLISION_EPSILON));
         const int min_y = static_cast<int>(std::floor(feet.y + COLLISION_EPSILON));
-        const int max_y = static_cast<int>(std::floor(feet.y + Player::HEIGHT - COLLISION_EPSILON));
+        const int max_y = static_cast<int>(std::floor(feet.y + box_height - COLLISION_EPSILON));
         const int min_z = static_cast<int>(std::floor(feet.z - HALF_WIDTH + COLLISION_EPSILON));
         const int max_z = static_cast<int>(std::floor(feet.z + HALF_WIDTH - COLLISION_EPSILON));
 
@@ -119,7 +121,7 @@ namespace {
                 for (int z = min_z; z <= max_z; ++z) {
                     if (world.get_block(x, y, z) != BlockType::Water ||
                         feet.y >= y + WATER_SURFACE_HEIGHT ||
-                        feet.y + Player::HEIGHT <= y) {
+                        feet.y + box_height <= y) {
                         continue;
                     }
 
@@ -138,12 +140,12 @@ namespace {
     // check (lava has no equivalent "floating on the surface" case that
     // matters for damage - any overlap with the cell counts) - used for
     // lava-contact damage/catching fire.
-    bool box_touches_lava(const World& world, Vector3 feet)
+    bool box_touches_lava(const World& world, Vector3 feet, float box_height)
     {
         const int min_x = static_cast<int>(std::floor(feet.x - HALF_WIDTH + COLLISION_EPSILON));
         const int max_x = static_cast<int>(std::floor(feet.x + HALF_WIDTH - COLLISION_EPSILON));
         const int min_y = static_cast<int>(std::floor(feet.y + COLLISION_EPSILON));
-        const int max_y = static_cast<int>(std::floor(feet.y + Player::HEIGHT - COLLISION_EPSILON));
+        const int max_y = static_cast<int>(std::floor(feet.y + box_height - COLLISION_EPSILON));
         const int min_z = static_cast<int>(std::floor(feet.z - HALF_WIDTH + COLLISION_EPSILON));
         const int max_z = static_cast<int>(std::floor(feet.z + HALF_WIDTH - COLLISION_EPSILON));
         for (int x = min_x; x <= max_x; ++x) {
@@ -165,13 +167,13 @@ namespace {
     // margin instead means standing flush against one still counts as
     // contact, the same way vanilla's inset hitbox lets a flush-pressed
     // player take damage without ever being "inside" it.
-    bool box_touches_damaging_block(const World& world, Vector3 feet)
+    bool box_touches_damaging_block(const World& world, Vector3 feet, float box_height)
     {
         constexpr float MARGIN = 0.1f;
         const int min_x = static_cast<int>(std::floor(feet.x - HALF_WIDTH - MARGIN + COLLISION_EPSILON));
         const int max_x = static_cast<int>(std::floor(feet.x + HALF_WIDTH + MARGIN - COLLISION_EPSILON));
         const int min_y = static_cast<int>(std::floor(feet.y + COLLISION_EPSILON));
-        const int max_y = static_cast<int>(std::floor(feet.y + Player::HEIGHT - COLLISION_EPSILON));
+        const int max_y = static_cast<int>(std::floor(feet.y + box_height - COLLISION_EPSILON));
         const int min_z = static_cast<int>(std::floor(feet.z - HALF_WIDTH - MARGIN + COLLISION_EPSILON));
         const int max_z = static_cast<int>(std::floor(feet.z + HALF_WIDTH + MARGIN - COLLISION_EPSILON));
         for (int x = min_x; x <= max_x; ++x) {
@@ -184,7 +186,7 @@ namespace {
         return false;
     }
 
-    bool move_axis(const World& world, Vector3& feet, float delta, int axis)
+    bool move_axis(const World& world, Vector3& feet, float delta, int axis, float box_height)
     {
         if (std::fabs(delta) <= 0.000001f) return false;
         float* component = axis == 0 ? &feet.x : axis == 1 ? &feet.y : &feet.z;
@@ -194,7 +196,7 @@ namespace {
             Vector3 test = feet;
             float* test_component = axis == 0 ? &test.x : axis == 1 ? &test.y : &test.z;
             *test_component += step;
-            if (box_blocked(world, test)) return true;
+            if (box_blocked(world, test, box_height)) return true;
             *component += step;
         }
         return false;
@@ -206,7 +208,7 @@ namespace {
     // the horizontal solver cancel velocity and produces visible jitter.
     // Water-bank exits use their own impulse below.
     float rise_towards_step(const World& world, Vector3& feet, float horizontal_delta,
-                            int axis, float maximum_height)
+                            int axis, float maximum_height, float box_height)
     {
         constexpr float SEARCH_INCREMENT = 0.05f;
         float required_height = 0.0f;
@@ -216,7 +218,7 @@ namespace {
             raised.y += height;
             Vector3 moved = raised;
             (axis == 0 ? moved.x : moved.z) += horizontal_delta;
-            if (!box_blocked(world, raised) && !box_blocked(world, moved)) {
+            if (!box_blocked(world, raised, box_height) && !box_blocked(world, moved, box_height)) {
                 required_height = height;
                 break;
             }
@@ -225,7 +227,7 @@ namespace {
 
         Vector3 raised = feet;
         raised.y += required_height;
-        if (box_blocked(world, raised)) return 0.0f;
+        if (box_blocked(world, raised, box_height)) return 0.0f;
         feet.y = raised.y;
         return required_height;
     }
@@ -242,6 +244,8 @@ void Player::reset(const Camera3D& eyes)
 {
     velocity = {0.0f, 0.0f, 0.0f};
     step_visual_offset = 0.0f;
+    sneaking = false;
+    current_eye_height = EYE_HEIGHT;
     position = feet_under(eyes);
     grounded = false;
     touching_water = false;
@@ -268,10 +272,25 @@ void Player::update_movement(Camera3D& eyes, const World& world, GameMode mode,
     // it since the last frame (a teleport not followed by reset()) is
     // picked up here rather than snapping back.
     Vector3 feet = feet_under(eyes);
-    touching_water = box_touches_water(world, feet);
-    touching_lava = box_touches_lava(world, feet);
-    touching_cactus = box_touches_damaging_block(world, feet);
+
+    // Sneaking (Survival only - in Creative the same key flies down): the
+    // hitbox shrinks at once; standing back up needs room overhead, so
+    // letting go of the key under a low ceiling keeps the player crouched.
+    if (mode == GameMode::Survival && input.sneak) {
+        sneaking = true;
+    } else if (sneaking && (mode == GameMode::Creative || !box_blocked(world, feet, HEIGHT))) {
+        sneaking = false;
+    }
+    const float box_height = height();
+
+    touching_water = box_touches_water(world, feet, box_height);
+    touching_lava = box_touches_lava(world, feet, box_height);
+    touching_cactus = box_touches_damaging_block(world, feet, box_height);
     if (mode == GameMode::Creative) {
+        // Back to standing eye height right away, keeping the feet in place.
+        eyes.position.y += EYE_HEIGHT - current_eye_height;
+        eyes.target.y += EYE_HEIGHT - current_eye_height;
+        current_eye_height = EYE_HEIGHT;
         float speed = CREATIVE_SPEED * (input.sprint ? CREATIVE_SPRINT_MULTIPLIER : 1.0f);
         Vector3 delta = Vector3Scale(wish, speed * delta_time);
         delta.y = ((input.jump ? 1.0f : 0.0f) - (input.sneak ? 1.0f : 0.0f)) * speed * delta_time;
@@ -292,13 +311,13 @@ void Player::update_movement(Camera3D& eyes, const World& world, GameMode mode,
     }
 
     bool prev_grounded = grounded; // for the landing edge below - see just_landed
-    grounded = box_blocked(world, {feet.x, feet.y - GROUND_PROBE, feet.z});
+    grounded = box_blocked(world, {feet.x, feet.y - GROUND_PROBE, feet.z}, box_height);
     // Fluid contact is an AABB-volume query, not one sample at the player's
     // centre.  Keeping water physics active while any part of the 0.6-wide
     // hitbox still intersects the bank-side water cell is essential for
     // climbing out instead of losing buoyancy halfway over the edge.
     bool in_water = touching_water;
-    float desired_speed = input.sneak ? SNEAK_SPEED : input.sprint ? SPRINT_SPEED : WALK_SPEED;
+    float desired_speed = sneaking ? SNEAK_SPEED : input.sprint ? SPRINT_SPEED : WALK_SPEED;
     if (in_water) desired_speed = WATER_SPEED;
     Vector3 desired = Vector3Scale(wish, desired_speed);
     float acceleration = grounded ? GROUND_ACCELERATION : AIR_ACCELERATION;
@@ -306,7 +325,7 @@ void Player::update_movement(Camera3D& eyes, const World& world, GameMode mode,
     velocity.x = move_towards(velocity.x, desired.x, acceleration * delta_time);
     velocity.z = move_towards(velocity.z, desired.z, acceleration * delta_time);
     if (in_water) {
-        Vector3 flow = box_water_flow(world, feet);
+        Vector3 flow = box_water_flow(world, feet, box_height);
         if (Vector3LengthSqr(flow) > 0.000001f) {
             Vector3 flow_target = Vector3Scale(flow, WATER_FLOW_MAX_SPEED);
             velocity.x = move_towards(velocity.x, desired.x + flow_target.x,
@@ -327,8 +346,8 @@ void Player::update_movement(Camera3D& eyes, const World& world, GameMode mode,
         velocity.y *= std::pow(VERTICAL_DRAG_PER_TICK, delta_time * TICKS_PER_SECOND);
     }
 
-    bool blocked_x = move_axis(world, feet, velocity.x * delta_time, 0);
-    bool blocked_z = move_axis(world, feet, velocity.z * delta_time, 2);
+    bool blocked_x = move_axis(world, feet, velocity.x * delta_time, 0, box_height);
+    bool blocked_z = move_axis(world, feet, velocity.z * delta_time, 2, box_height);
     // Dry-land stepping and water-bank climbing are deliberately separate:
     // applying both the positional step and the fluid exit impulse in one
     // frame would double the vertical motion and visibly pop the player.
@@ -336,16 +355,16 @@ void Player::update_movement(Camera3D& eyes, const World& world, GameMode mode,
     const float step_height = NORMAL_STEP_HEIGHT;
     float feet_y_before_step = feet.y;
     float step_x = blocked_x && may_step
-        ? rise_towards_step(world, feet, velocity.x * delta_time, 0, step_height)
+        ? rise_towards_step(world, feet, velocity.x * delta_time, 0, step_height, box_height)
         : 0.0f;
     if (step_x > 0.0f) {
-        blocked_x = move_axis(world, feet, velocity.x * delta_time, 0);
+        blocked_x = move_axis(world, feet, velocity.x * delta_time, 0, box_height);
     }
     float step_z = blocked_z && may_step
-        ? rise_towards_step(world, feet, velocity.z * delta_time, 2, step_height)
+        ? rise_towards_step(world, feet, velocity.z * delta_time, 2, step_height, box_height)
         : 0.0f;
     if (step_z > 0.0f) {
-        blocked_z = move_axis(world, feet, velocity.z * delta_time, 2);
+        blocked_z = move_axis(world, feet, velocity.z * delta_time, 2, box_height);
     }
     float stepped_height = feet.y - feet_y_before_step;
     if (stepped_height > 0.0f) {
@@ -355,7 +374,7 @@ void Player::update_movement(Camera3D& eyes, const World& world, GameMode mode,
         velocity.y = std::max(velocity.y, WATER_EXIT_VELOCITY);
     }
     float feet_y_before_vertical = feet.y;
-    bool blocked_y = move_axis(world, feet, velocity.y * delta_time, 1);
+    bool blocked_y = move_axis(world, feet, velocity.y * delta_time, 1, box_height);
     if (blocked_x) velocity.x = 0.0f;
     if (blocked_z) velocity.z = 0.0f;
     if (blocked_y) {
@@ -386,7 +405,9 @@ void Player::update_movement(Camera3D& eyes, const World& world, GameMode mode,
 
     step_visual_offset = std::max(0.0f, step_visual_offset - STEP_SMOOTH_SPEED * delta_time);
     position = feet;
-    eyes.position = {feet.x, feet.y + EYE_HEIGHT - step_visual_offset, feet.z};
+    const float target_eye_height = sneaking ? SNEAK_EYE_HEIGHT : EYE_HEIGHT;
+    current_eye_height = move_towards(current_eye_height, target_eye_height, EYE_HEIGHT_SPEED * delta_time);
+    eyes.position = {feet.x, feet.y + current_eye_height - step_visual_offset, feet.z};
     Vector3 shift = Vector3Subtract(eyes.position, previous);
     eyes.target = Vector3Add(eyes.target, shift);
 
@@ -416,14 +437,14 @@ float Player::consume_landing_fall_distance()
 
 Vector3 Player::feet_under(const Camera3D& eyes) const
 {
-    return {eyes.position.x, eyes.position.y - EYE_HEIGHT + step_visual_offset, eyes.position.z};
+    return {eyes.position.x, eyes.position.y - current_eye_height + step_visual_offset, eyes.position.z};
 }
 
 Vector3 Player::closest_hitbox_point(Vector3 point) const
 {
     return {
         std::clamp(point.x, position.x - HALF_WIDTH, position.x + HALF_WIDTH),
-        std::clamp(point.y, position.y, position.y + HEIGHT),
+        std::clamp(point.y, position.y, position.y + height()),
         std::clamp(point.z, position.z - HALF_WIDTH, position.z + HALF_WIDTH),
     };
 }
@@ -431,7 +452,7 @@ Vector3 Player::closest_hitbox_point(Vector3 point) const
 bool Player::intersects_block(int x, int y, int z) const
 {
     return position.x + HALF_WIDTH > x && position.x - HALF_WIDTH < x + 1.0f &&
-           position.y + HEIGHT > y && position.y < y + 1.0f &&
+           position.y + height() > y && position.y < y + 1.0f &&
            position.z + HALF_WIDTH > z && position.z - HALF_WIDTH < z + 1.0f;
 }
 

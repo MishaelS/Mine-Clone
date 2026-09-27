@@ -25,6 +25,10 @@ enum class DroppedItemOrigin {
 // rendering at, instead of visibly stepping at 20Hz.
 class DroppedItem : public Entity {
 public:
+    // Half the physics box's size, blocks - what rests on the ground and
+    // what F3+B's hitbox view draws.
+    static constexpr float HITBOX_HALF_SIZE = 0.14f;
+
     // `launch_velocity` (blocks/tick) is added to the initial upward pop -
     // both a just-broken block (a small kick in whichever direction it was
     // struck from) and a Q-dropped item (thrown out in front of the

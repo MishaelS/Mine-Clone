@@ -7,11 +7,12 @@ BUILD_TYPE="Release"
 JOBS="$(sysctl -n hw.ncpu 2>/dev/null || nproc)"
 
 usage() {
-    echo "Usage: $0 [build|clean|rebuild|run] [Debug|Release]"
+    echo "Usage: $0 [build|clean|rebuild|run|editor] [Debug|Release]"
     echo "  build    - configure (if needed) and compile"
     echo "  clean    - remove the build directory"
     echo "  rebuild  - clean, then build"
     echo "  run      - build, then launch the game"
+    echo "  editor   - build, then launch the entity model editor"
 }
 
 do_build() {
@@ -40,6 +41,10 @@ case "$CMD" in
     run)
         do_build
         "$BUILD_DIR/MineToo"
+        ;;
+    editor)
+        do_build
+        "$BUILD_DIR/MineTooModelEditor"
         ;;
     *)
         usage

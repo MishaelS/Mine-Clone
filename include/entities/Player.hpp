@@ -29,6 +29,9 @@ public:
     static constexpr float WIDTH      = 0.6f;
     static constexpr float HEIGHT     = 1.8f;
     static constexpr float EYE_HEIGHT = 1.62f;
+    // Sneaking (Survival, the Sneak key): half a block lower, eyes too.
+    static constexpr float SNEAK_HEIGHT     = HEIGHT - 0.5f;
+    static constexpr float SNEAK_EYE_HEIGHT = EYE_HEIGHT - 0.5f;
 
     // Clears all motion and contact state and puts the hitbox under
     // `eyes` - call after anything teleports the eye camera (spawn,
@@ -47,6 +50,10 @@ public:
     const PlayerHealth& health() const { return health_state; }
 
     Vector3 feet_position() const { return position; }
+    bool is_sneaking() const { return sneaking; }
+    // The hitbox's current height - SNEAK_HEIGHT while sneaking.
+    float height() const { return sneaking ? SNEAK_HEIGHT : HEIGHT; }
+    float eye_height() const { return current_eye_height; }
     Vector3 closest_hitbox_point(Vector3 point) const;
     bool intersects_block(int x, int y, int z) const;
     bool is_grounded()        const { return grounded; }
@@ -73,6 +80,10 @@ private:
     PlayerHealth health_state; // Survival only - see GameEngine::update_player_damage()
 
     float step_visual_offset = 0.0f;
+    bool sneaking        = false;
+    // Eyes above the feet right now - eases between EYE_HEIGHT and
+    // SNEAK_EYE_HEIGHT so the view sinks/rises instead of snapping.
+    float current_eye_height = EYE_HEIGHT;
     bool grounded        = false;
     bool touching_water  = false;
     bool touching_lava   = false;

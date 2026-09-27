@@ -76,6 +76,8 @@ add_executable(${PROJECT_NAME}
     src/rendering/Skybox.cpp
     src/rendering/BlockMesh.cpp
     src/rendering/PlayerRenderer.cpp
+    src/model/EntityModel.cpp
+    src/model/EntityModelRenderer.cpp
     src/worldgen/Structure.cpp
     src/worldgen/StructureGenerator.cpp
     src/worldgen/CustomWorld.cpp
@@ -119,4 +121,31 @@ endif()
 
 if(APPLE)
     target_link_libraries(${PROJECT_NAME} PRIVATE "-framework IOKit" "-framework Cocoa" "-framework OpenGL")
+endif()
+
+# Developer tool: the entity model & animation editor (tools/model_editor -
+# see ModelEditor.hpp). Its own executable, never shipped inside the game;
+# shares the model format/renderer (src/model) the game will draw with.
+add_executable(MineTooModelEditor
+    tools/model_editor/main.cpp
+    tools/model_editor/ModelEditor.cpp
+    tools/model_editor/EditorText.cpp
+    tools/model_editor/RayGuiImpl.cpp
+    src/model/EntityModel.cpp
+    src/model/EntityModelRenderer.cpp
+    src/core/Json.cpp
+)
+target_include_directories(MineTooModelEditor PRIVATE include tools/model_editor external/raygui/styles)
+target_link_libraries(MineTooModelEditor PRIVATE raylib raygui)
+target_compile_definitions(MineTooModelEditor PRIVATE
+    ASSETS_PATH="${CMAKE_SOURCE_DIR}/assets/"
+    SAVE_DATA_PATH="${CMAKE_SOURCE_DIR}/"
+)
+if(MSVC)
+    target_compile_options(MineTooModelEditor PRIVATE /W4)
+else()
+    target_compile_options(MineTooModelEditor PRIVATE -Wall -Wextra -Wpedantic -Wno-missing-field-initializers)
+endif()
+if(APPLE)
+    target_link_libraries(MineTooModelEditor PRIVATE "-framework IOKit" "-framework Cocoa" "-framework OpenGL")
 endif()
