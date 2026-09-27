@@ -34,9 +34,15 @@ public:
 
     bool is_open() const { return open; }
 
-    // E-key toggle - always the plain survival inventory.
-    void toggle(Inventory& inventory);
-    void close(Inventory& inventory);
+    // E-key toggle - always the plain survival inventory. When this closes
+    // it, returns what close() returns.
+    [[nodiscard]] std::vector<ItemStack> toggle(Inventory& inventory);
+
+    // The crafting grids (2x2 and the workbench's 3x3) aren't storage:
+    // closing empties them and returns their contents for the caller to
+    // throw out into the world, same as Minecraft. A stack still carried
+    // on the cursor goes back into `inventory` instead.
+    [[nodiscard]] std::vector<ItemStack> close(Inventory& inventory);
 
     // Right-click-on-block interaction (GameEngine::update()): opens the
     // given container. Only meant to be called while nothing is open yet -

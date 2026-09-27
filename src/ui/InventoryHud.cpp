@@ -257,13 +257,12 @@ namespace {
 
 }
 
-void InventoryHud::toggle(Inventory& inventory)
+std::vector<ItemStack> InventoryHud::toggle(Inventory& inventory)
 {
-    if (open) close(inventory);
-    else {
-        kind = ContainerKind::Inventory;
-        open = true;
-    }
+    if (open) return close(inventory);
+    kind = ContainerKind::Inventory;
+    open = true;
+    return {};
 }
 
 void InventoryHud::open_container(ContainerKind new_kind, int x, int y, int z)
@@ -277,16 +276,26 @@ void InventoryHud::open_container(ContainerKind new_kind, int x, int y, int z)
     open = true;
 }
 
-void InventoryHud::close(Inventory& inventory)
+std::vector<ItemStack> InventoryHud::close(Inventory& inventory)
 {
     if (!carried_stack.empty()) {
         inventory.put_back(carried_stack);
         carried_stack.clear();
     }
+    std::vector<ItemStack> leftovers;
+    for (ItemStack& cell : inventory_craft_grid) {
+        if (!cell.empty()) leftovers.push_back(cell);
+        cell.clear();
+    }
+    for (ItemStack& cell : workbench_craft_grid) {
+        if (!cell.empty()) leftovers.push_back(cell);
+        cell.clear();
+    }
     last_clicked_slot = nullptr;
     drag_button = -1;
     drag_slots.clear();
     open = false;
+    return leftovers;
 }
 
 void InventoryHud::draw_hotbar(const Inventory& inventory) const

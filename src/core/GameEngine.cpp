@@ -387,7 +387,9 @@ GameEngine::~GameEngine()
     // window-close control, or force-quit) - close_world() covers the
     // other exit path (the pause menu), but this one has no earlier hook
     // to call it from.
-    if (inventory_hud.is_open()) inventory_hud.close(inventory);
+    // Before saving, so crafting-grid leftovers thrown out here are saved
+    // as dropped items instead of vanishing.
+    if (inventory_hud.is_open()) close_inventory_screen();
     save_player_state();
     world.reset(); // while the GL context still exists - ~World() frees chunk meshes
 
@@ -529,6 +531,11 @@ void GameEngine::spawn_dropped_item(const ItemStack& stack)
 
     dropped_items.push_back(std::make_unique<DroppedItem>(
         spawn_position, stack, launch_velocity, DroppedItemOrigin::PlayerThrown));
+}
+
+void GameEngine::close_inventory_screen()
+{
+    for (const ItemStack& leftover : inventory_hud.close(inventory)) spawn_dropped_item(leftover);
 }
 
 void GameEngine::check_leaf_decay_near(int log_x, int log_y, int log_z)
@@ -935,7 +942,7 @@ void GameEngine::start_sleeping(const World::RaycastHit& bed_hit)
     is_breaking = false;
     breaking_progress = 0.0f;
     targeted_block = std::nullopt;
-    inventory_hud.close(inventory);
+    close_inventory_screen();
     chat_hud.close();
     EnableCursor();
 }
@@ -1335,7 +1342,7 @@ void GameEngine::update(float delta_time)
     // skips while the grid itself is open.
     bool chat_open = chat_hud.is_open();
     if (world && !chat_open && binding_pressed(settings.keybindings[static_cast<size_t>(GameAction::ToggleInventory)])) {
-        inventory_hud.toggle(inventory);
+        for (const ItemStack& leftover : inventory_hud.toggle(inventory)) spawn_dropped_item(leftover);
         if (inventory_hud.is_open()) EnableCursor(); else DisableCursor();
     }
     // Chat: default T (GameAction::OpenChat, rebindable) opens it empty;
@@ -1353,7 +1360,7 @@ void GameEngine::update(float delta_time)
     } else if (world && !chat_open && !inventory_hud.is_open() && IsKeyPressed(KEY_SLASH)) {
         chat_hud.open_command();
     } else if (inventory_hud.is_open() && IsKeyPressed(KEY_ESCAPE)) {
-        inventory_hud.close(inventory);
+        close_inventory_screen();
         DisableCursor();
     } else if (world && !chat_open && IsKeyPressed(KEY_ESCAPE)) {
         pause_requested = true;
@@ -2260,6 +2267,9 @@ void GameEngine::save_player_state()
 
 void GameEngine::close_world()
 {
+    // First, while the world still exists: crafting-grid leftovers are
+    // thrown out and saved along with every other dropped item.
+    close_inventory_screen();
     save_player_state();
     world.reset(); // ~World() flushes any modified chunks still resident - same guarantee quitting the app outright already relies on
     dropped_items.clear();
@@ -2268,7 +2278,6 @@ void GameEngine::close_world()
     current_world_folder.clear();
     current_world_info = {};
     current_world_allows_commands = true;
-    inventory_hud.close(inventory);
     chat_hud.close(); // otherwise its is_open() would leak into the next world's very first frame
     world_spawn_override.reset(); // session-only override - see its own comment
     pause_requested = false;

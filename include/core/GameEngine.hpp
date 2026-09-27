@@ -130,6 +130,10 @@ private:
     // empty (take_one_item() on an already-empty slot returns one).
     void spawn_dropped_item(const ItemStack& stack);
 
+    // Closes the inventory/container screen, throwing whatever was left in
+    // a crafting grid out in front of the player (see InventoryHud::close()).
+    void close_inventory_screen();
+
     // Called right after a Log block is removed (natural or creative
     // break) - scans for leaves now out of reach of every remaining log and
     // queues each one into pending_leaf_decay (see update_leaf_decay())
