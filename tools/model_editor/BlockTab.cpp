@@ -3,8 +3,10 @@
 // left, turned about in the middle, its properties, faces and textures on
 // the right.
 #include "ModelEditor.hpp"
+#include "BlockDraw.hpp"
 #include "EditorStyle.hpp"
 #include "EditorText.hpp"
+#include "EditorWidgets.hpp"
 #include "model/EntityModelRenderer.hpp"
 #include "rendering/BlockIcon.hpp"
 #include "core/BlockShape.hpp"
@@ -17,16 +19,20 @@
 #include <cctype>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <optional>
+#include <unordered_map>
 
 namespace {
 
     using editor_text::tr;
     using editor_text::tr_format;
+    using editor_ui::block_display_name;
+    using editor_ui::draw_hint;
     using namespace editor_style;
 
     constexpr float BLOCK_LIST_WIDTH  = 290.0f;
-    constexpr float BLOCK_PANEL_WIDTH = 390.0f;
+    constexpr float BLOCK_PANEL_WIDTH = 430.0f;
     constexpr float LIST_ROW          = 30.0f;
 
     // Each face's brightness in the preview, like the game's own face shading.
@@ -54,12 +60,6 @@ namespace {
         return GetColor(static_cast<unsigned int>(GuiGetStyle(control, property)));
     }
 
-    // The game's own name for a block ("block.<name>"), or its id.
-    std::string display_name(const std::string& name) {
-        const std::string key = "block." + name;
-        const std::string& text = tr(key);
-        return text == key ? name : text;
-    }
 
     std::string lower(std::string text) {
         for (char& c : text) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -76,34 +76,6 @@ namespace {
     constexpr Color HITBOX_COLOR = {90, 220, 255, 255};
     constexpr Color PIVOT_COLOR  = {255, 80, 200, 255};
 
-    // A few lines of small grey (or red, when something's wrong) text,
-    // wrapped to `width`; returns the y under them.
-    float draw_hint(float x, float y, float width, const std::string& text, bool error)
-    {
-        const Color color = error ? Color{230, 90, 80, 255} : Fade(gui_color(DEFAULT, TEXT_COLOR_NORMAL), 0.7f);
-        std::string line, word;
-        auto flush = [&] {
-            DrawTextEx(editor_text::font(), line.c_str(), {x, y + 2}, 14, 1, color);
-            y += 18;
-            line.clear();
-        };
-        for (size_t i = 0; i <= text.size(); ++i) {
-            if (i < text.size() && text[i] != ' ') {
-                word += text[i];
-                continue;
-            }
-            const std::string candidate = line.empty() ? word : line + " " + word;
-            if (!line.empty() && MeasureTextEx(editor_text::font(), candidate.c_str(), 14, 1).x > width) {
-                flush();
-                line = word;
-            } else {
-                line = candidate;
-            }
-            word.clear();
-        }
-        if (!line.empty()) flush();
-        return y + 2;
-    }
 
     // Its shape - a fluid drawn here as the plain cube it is out of the
     // game's own fluid code.
@@ -209,9 +181,25 @@ namespace {
             int joined = 0; // see emit_block()
         };
         std::vector<Cell> cells;
+        // Cells by position, for a big scene (a structure) - see build_index().
+        std::unordered_map<long long, const block_file::BlockFile*> index;
 
+        static long long key(int x, int y, int z)
+        {
+            return (static_cast<long long>(x + 0x100000) << 42) | (static_cast<long long>(y + 0x100000) << 21) |
+                   static_cast<long long>(z + 0x100000);
+        }
+        void build_index()
+        {
+            index.clear();
+            for (const Cell& cell : cells) index[key(cell.x, cell.y, cell.z)] = cell.block;
+        }
         const block_file::BlockFile* at(int x, int y, int z) const
         {
+            if (!index.empty()) {
+                const auto found = index.find(key(x, y, z));
+                return found == index.end() ? nullptr : found->second;
+            }
             for (const Cell& cell : cells) {
                 if (cell.x == x && cell.y == y && cell.z == z) return cell.block;
             }
@@ -624,6 +612,8 @@ void ModelEditor::load_blocks()
 {
     blocks = block_file::load_all();
     block_dirty.assign(blocks.size(), false);
+    block_file_names.clear();
+    for (const block_file::BlockFile& block : blocks) block_file_names.push_back(block.name);
     blocks_loaded = true;
     block_undo_stack.clear();
     block_redo_stack.clear();
@@ -634,6 +624,7 @@ void ModelEditor::select_block(int index)
 {
     commit_block_history(true);
     selected_block = index;
+    pending_block_delete = -1;
     editing_widget = -1;
     if (index >= 0) {
         block_committed = blocks[static_cast<size_t>(index)];
@@ -648,12 +639,23 @@ void ModelEditor::save_block(int index)
     if (index < 0 || index >= static_cast<int>(blocks.size())) return;
     const block_file::BlockFile& block = blocks[static_cast<size_t>(index)];
     const std::string path = block_file::directory() + block.name + ".json";
-    if (block_file::save(block, path)) {
-        block_dirty[static_cast<size_t>(index)] = false;
-        set_status(tr_format("editor.block_saved", {display_name(block.name)}));
-    } else {
+    if (!block_file::save(block, path)) {
         set_status(tr_format("editor.block_save_failed", {path}));
+        return;
     }
+    // Renamed: its old file goes - unless another block is called that now.
+    std::string& file_name = block_file_names[static_cast<size_t>(index)];
+    const bool old_taken = std::any_of(blocks.begin(), blocks.end(), [&](const block_file::BlockFile& other) { return other.name == file_name; });
+    if (!file_name.empty() && file_name != block.name && !old_taken) {
+        std::error_code error;
+        std::filesystem::remove(block_file::directory() + file_name + ".json", error);
+    }
+    for (size_t i = 0; i < blocks.size(); ++i) {
+        if (static_cast<int>(i) != index && block_file_names[i] == block.name) block_file_names[i].clear();
+    }
+    file_name = block.name;
+    block_dirty[static_cast<size_t>(index)] = false;
+    set_status(tr_format("editor.block_saved", {block_display_name(block.name)}));
 }
 
 void ModelEditor::save_all_blocks()
@@ -661,10 +663,8 @@ void ModelEditor::save_all_blocks()
     int saved = 0;
     for (size_t i = 0; i < blocks.size(); ++i) {
         if (!block_dirty[i]) continue;
-        if (block_file::save(blocks[i], block_file::directory() + blocks[i].name + ".json")) {
-            block_dirty[i] = false;
-            ++saved;
-        }
+        save_block(static_cast<int>(i));
+        if (!block_dirty[i]) ++saved;
     }
     set_status(tr_format("editor.blocks_saved_all", {std::to_string(saved)}));
 }
@@ -831,7 +831,7 @@ void ModelEditor::run_blocks_frame()
     if (selected_block >= 0) {
         const block_file::BlockFile& block = blocks[static_cast<size_t>(selected_block)];
         label({view.x + PAD, view.y + PAD, view.width - PAD * 2, ROW},
-              display_name(block.name) + "  (" + block.name + ", id " + std::to_string(block.id) + ")   " +
+              block_display_name(block.name) + "  (" + block.name + ", id " + std::to_string(block.id) + ")   " +
                   slot_name(block, selected_face));
         // Which of its states is shown (a torch: on the floor, on a wall).
         const int states = shape_state_count(kind_of(block));
@@ -866,16 +866,18 @@ void ModelEditor::run_blocks_frame()
     if (block_panel_tab == 0) draw_block_properties(panel_body);
     else if (block_panel_tab == 1) draw_block_model_panel(panel_body);
     else if (block_panel_tab == 2) draw_block_hitbox_panel(panel_body);
-    else draw_block_particles_panel(panel_body);
+    else if (block_panel_tab == 3) draw_block_particles_panel(panel_body);
+    else draw_block_behavior_panel(panel_body);
     GuiPanel(panel_tabs, nullptr);
     {
-        const char* tab_keys[4] = {"editor.block_tab_properties", "editor.block_tab_model", "editor.block_tab_hitbox",
-                                   "editor.block_tab_particles"};
-        const float tab_width = (panel_tabs.width - PAD * 2 - GAP * 3) / 4.0f;
-        // Four across: a size smaller, so each name fits.
+        constexpr int TABS = 5;
+        const char* tab_keys[TABS] = {"editor.block_tab_properties", "editor.block_tab_model", "editor.block_tab_hitbox",
+                                      "editor.block_tab_particles", "editor.block_tab_behavior"};
+        const float tab_width = (panel_tabs.width - PAD * 2 - GAP * (TABS - 1)) / static_cast<float>(TABS);
+        // Five across: a size smaller, so each name fits.
         const int text_size = GuiGetStyle(DEFAULT, TEXT_SIZE);
         GuiSetStyle(DEFAULT, TEXT_SIZE, text_size * 13 / 16);
-        for (int t = 0; t < 4; ++t) {
+        for (int t = 0; t < TABS; ++t) {
             bool open = block_panel_tab == t;
             GuiToggle({panel_tabs.x + PAD + t * (tab_width + GAP), panel_tabs.y + PAD * 0.5f, tab_width, ROW}, tr(tab_keys[t]).c_str(), &open);
             if (open) block_panel_tab = t;
@@ -912,27 +914,45 @@ void ModelEditor::draw_blocks_top_bar(Rectangle bounds)
 void ModelEditor::draw_block_list(Rectangle bounds)
 {
     GuiPanel(bounds, nullptr);
+    // New (from a template), a copy of the picked one, delete it.
+    const float button_w = (bounds.width - PAD * 2 - GAP * 2) / 3.0f;
+    const Rectangle new_button = {bounds.x + PAD, bounds.y + PAD, button_w, ROW};
+    if (GuiButton(new_button, tr("editor.block_new").c_str())) block_templates_open = !block_templates_open;
+    GuiSetState(selected_block >= 0 ? STATE_NORMAL : STATE_DISABLED);
+    if (GuiButton({new_button.x + button_w + GAP, new_button.y, button_w, ROW}, tr("editor.block_copy").c_str())) duplicate_block();
+    GuiSetState(selected_block >= 0 && !block_is_builtin(selected_block) ? STATE_NORMAL : STATE_DISABLED);
+    const bool confirming = pending_block_delete >= 0 && pending_block_delete == selected_block;
+    if (GuiButton({new_button.x + (button_w + GAP) * 2, new_button.y, button_w, ROW},
+                  tr(confirming ? "editor.block_delete_sure" : "editor.block_delete").c_str())) {
+        delete_block();
+    }
+    GuiSetState(STATE_NORMAL);
     // Search by the game's name or the id.
-    label({bounds.x + PAD, bounds.y + PAD, 70, ROW}, tr("editor.blocks_search"));
-    string_field({bounds.x + PAD + 70, bounds.y + PAD, bounds.width - PAD * 2 - 70, ROW}, block_search);
+    const float search_y = bounds.y + PAD + ROW + GAP;
+    label({bounds.x + PAD, search_y, 70, ROW}, tr("editor.blocks_search"));
+    string_field({bounds.x + PAD + 70, search_y, bounds.width - PAD * 2 - 70, ROW}, block_search);
 
     std::vector<int> shown;
     const std::string needle = lower(block_search);
     for (size_t i = 0; i < blocks.size(); ++i) {
         if (needle.empty() || lower(blocks[i].name).find(needle) != std::string::npos ||
-            lower(display_name(blocks[i].name)).find(needle) != std::string::npos) {
+            lower(block_display_name(blocks[i].name)).find(needle) != std::string::npos) {
             shown.push_back(static_cast<int>(i));
         }
     }
 
-    const Rectangle area = {bounds.x, bounds.y + PAD * 2 + ROW, bounds.width, bounds.height - PAD * 2 - ROW};
+    const float list_top = search_y + ROW + PAD;
+    const Rectangle area = {bounds.x, list_top, bounds.width, bounds.y + bounds.height - list_top};
     Rectangle view{};
     const float content_height = static_cast<float>(shown.size()) * LIST_ROW + PAD;
+    // The templates' list hangs over the top of this one - the mouse is its.
+    const bool templates_have_mouse = block_templates_open && CheckCollisionPointRec(GetMousePosition(), {bounds.x, bounds.y, bounds.width + 240, bounds.height});
+    if (templates_have_mouse) GuiLock();
     GuiScrollPanel(area, nullptr, {0, 0, area.width - 14, content_height}, &block_list_scroll, &view);
     BeginScissorMode(static_cast<int>(view.x), static_cast<int>(view.y), static_cast<int>(view.width), static_cast<int>(view.height));
     const Texture2D& atlas = terrain_atlas();
     const Vector2 mouse = GetMousePosition();
-    const bool mouse_inside = CheckCollisionPointRec(mouse, view);
+    const bool mouse_inside = CheckCollisionPointRec(mouse, view) && !templates_have_mouse;
     for (size_t row = 0; row < shown.size(); ++row) {
         const int index = shown[row];
         const block_file::BlockFile& block = blocks[static_cast<size_t>(index)];
@@ -944,11 +964,13 @@ void ModelEditor::draw_block_list(Rectangle bounds)
         // Its top face as an icon.
         const block_file::Face& top = block.faces[0];
         DrawTexturePro(atlas, tile_source(top.tile_x, top.tile_y), {r.x + 6, r.y + 3, 24, 24}, {0, 0}, 0.0f, top.tint);
-        const std::string text = display_name(block.name) + (block_dirty[static_cast<size_t>(index)] ? " *" : "");
+        const std::string text = block_display_name(block.name) + (block_dirty[static_cast<size_t>(index)] ? " *" : "");
         label({r.x + 34, r.y, r.width - 40, r.height}, text);
         if (hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && index != selected_block) select_block(index);
     }
     EndScissorMode();
+    if (templates_have_mouse) GuiUnlock();
+    draw_block_templates(new_button);
 }
 
 // ----------------------------------------------------------- Properties --
@@ -970,10 +992,7 @@ void ModelEditor::draw_block_properties(Rectangle bounds)
     const float label_w = 200.0f;
     float y = view.y + block_panel_scroll.y + PAD;
 
-    auto section = [&](const std::string& title) {
-        GuiLine({x, y, width, ROW}, title.c_str());
-        y += ROW;
-    };
+    auto fold = [&](const std::string& title) { return editor_ui::fold_header(x, y, width, title, folded_sections); };
     auto combo = [&](const std::string& caption, int& value, const char* const* ids, int count, const char* key_prefix) {
         label({x, y, label_w, ROW}, caption);
         std::string items;
@@ -1007,251 +1026,62 @@ void ModelEditor::draw_block_properties(Rectangle bounds)
         y += ROW + 2;
     };
 
-    // What it is and how it behaves.
-    section(tr("editor.block_properties"));
-    combo(tr("editor.block_sound"), block.sound, block_file::SOUND_IDS, block_file::SOUND_COUNT, "editor.sound.");
-    combo(tr("editor.block_tool"), block.tool, block_file::TOOL_IDS, block_file::TOOL_COUNT, "editor.tool.");
-    number(tr("editor.block_hardness"), block.hardness, 0.0f, 1000.0f);
-    number(tr("editor.block_density"), block.density, 0.0f, 50.0f);
-    whole(tr("editor.block_luminance"), block.luminance, 0, 15);
-    whole(tr("editor.block_side_inset"), block.side_inset, 0, 8);
-    y += GAP;
-    flag(tr("editor.block_solid"), block.solid);
-    flag(tr("editor.block_selectable"), block.selectable);
-    flag(tr("editor.block_replaceable"), block.replaceable);
-    flag(tr("editor.block_transparent"), block.transparent);
-    flag(tr("editor.block_translucent"), block.translucent);
-    flag(tr("editor.block_cutout"), block.cutout);
-    flag(tr("editor.block_keep_same_faces"), block.keep_same_faces);
-    flag(tr("editor.block_damages_on_touch"), block.damages_on_touch);
-    flag(tr("editor.block_directional"), block.directional);
-
-    // Its shape, and what that shape needs.
-    y += GAP;
-    section(tr("editor.block_shape_section"));
-    {
-        if (block.shape >= block_file::FILE_SHAPE_COUNT) block.shape = 0;
-        std::string items;
-        for (int i = 0; i < block_file::FILE_SHAPE_COUNT; ++i) items += (i ? ";" : "") + tr(std::string("editor.shape.") + block_file::SHAPE_IDS[i]);
-        label({x, y, label_w, ROW}, tr("editor.block_shape"));
-        int chosen = block.shape;
-        GuiComboBox({x + label_w, y, width - label_w, ROW}, items.c_str(), &chosen);
-        if (chosen != block.shape) {
-            block.shape = chosen;
-            if (selected_face >= 6) selected_face = 0;
-            for (int s = 0; s < MAX_BLOCK_STATES; ++s) block.states[static_cast<size_t>(s)] = block_file::default_state(block.shape, s);
-            block.elements = block_file::default_elements(block.shape);
-            block_state_view = 0;
-            selected_element = 0;
-            mark_block_dirty();
+    // Who it is: its id, the name everything refers to it by, and what the
+    // player reads in each language.
+    if (fold(tr("editor.block_identity"))) {
+        label({x, y, label_w, ROW}, tr("editor.block_name"));
+        if (block_is_builtin(selected_block)) {
+            label({x + label_w, y, width - label_w, ROW}, block.name);
+            y += ROW + 2;
+            small_hint(tr("editor.block_builtin_hint"));
+        } else {
+            std::string name = block.name;
+            if (string_field({x + label_w, y, width - label_w, ROW}, name)) rename_block(name);
+            y += ROW + 2;
+            small_hint(tr("editor.block_name_hint"));
         }
+        label({x, y, label_w, ROW}, tr("editor.block_id"));
+        label({x + label_w, y, width - label_w, ROW}, std::to_string(block.id));
         y += ROW + GAP;
-        small_hint(tr(std::string("editor.shape_hint.") + block_file::SHAPE_IDS[block.shape]));
-    }
-    {
-        // Its soil: the blocks it can stand on, by name, comma separated.
-        std::string soil;
-        for (size_t i = 0; i < block.placed_on.size(); ++i) soil += (i ? ", " : "") + block.placed_on[i];
-        label({x, y, label_w, ROW}, tr("editor.block_placed_on"));
-        if (string_field({x + label_w, y, width - label_w, ROW}, soil)) {
-            block.placed_on.clear();
-            std::string name;
-            for (size_t i = 0; i <= soil.size(); ++i) {
-                const char c = i < soil.size() ? soil[i] : ',';
-                if (c == ',' || c == ' ' || c == ';') {
-                    if (!name.empty()) block.placed_on.push_back(name);
-                    name.clear();
+        for (const std::string& language : editor_text::languages()) {
+            label({x, y, label_w, ROW}, tr_format("editor.block_title_in", {language}));
+            std::string title = editor_text::translation(language, "block." + block.name);
+            if (string_field({x + label_w, y, width - label_w, ROW}, title)) {
+                if (editor_text::set_translation(language, "block." + block.name, title)) {
+                    set_status(tr_format("editor.block_title_saved", {language}));
                 } else {
-                    name += c;
+                    set_status(tr_format("editor.block_title_failed", {language}));
                 }
             }
-            mark_block_dirty();
+            y += ROW + GAP;
         }
-        y += ROW + 2;
-        std::string unknown;
-        for (const std::string& name : block.placed_on) {
-            bool found = false;
-            for (const block_file::BlockFile& other : blocks) found = found || other.name == name;
-            if (!found) unknown += (unknown.empty() ? "" : ", ") + name;
-        }
-        if (!unknown.empty()) small_hint(tr_format("editor.block_placed_on_unknown", {unknown}), true);
-        else small_hint(tr(block.placed_on.empty() ? "editor.block_placed_on_anywhere" : "editor.block_placed_on_hint"));
-    }
-    if (kind_of(block) == BlockShapeKind::Slab) {
-        // What two halves in one cell become - another block, by name.
-        label({x, y, label_w, ROW}, tr("editor.block_double"));
-        if (string_field({x + label_w, y, width - label_w, ROW}, block.double_block)) mark_block_dirty();
-        y += ROW + 2;
-        std::string found;
-        for (const block_file::BlockFile& other : blocks) {
-            if (other.name == block.double_block) found = display_name(other.name);
-        }
-        small_hint(block.double_block.empty() ? tr("editor.block_double_none")
-                   : found.empty()            ? tr("editor.block_double_missing")
-                                              : "= " + found,
-                   !block.double_block.empty() && found.empty());
-    }
-    if (is_pair_kind(kind_of(block))) {
-        // Which half this is, and its other half - by name.
-        label({x, y, label_w, ROW}, tr("editor.block_half"));
-        const std::string halves = tr(std::string("editor.half.") + block_file::half_id(block.shape, 0)) + ";" +
-                                   tr(std::string("editor.half.") + block_file::half_id(block.shape, 1));
-        int chosen_half = block.half;
-        GuiComboBox({x + label_w, y, width - label_w, ROW}, halves.c_str(), &chosen_half);
-        if (chosen_half != block.half) {
-            block.half = chosen_half;
-            mark_block_dirty();
-        }
-        y += ROW + GAP;
-        label({x, y, label_w, ROW}, tr("editor.block_partner"));
-        if (string_field({x + label_w, y, width - label_w, ROW}, block.partner)) mark_block_dirty();
-        y += ROW + 2;
-        const block_file::BlockFile* partner = nullptr;
-        for (const block_file::BlockFile& other : blocks) {
-            if (other.name == block.partner && &other != &block) partner = &other;
-        }
-        if (!partner) small_hint(tr("editor.block_partner_missing"), true);
-        else if (partner->partner != block.name) small_hint(tr_format("editor.block_partner_mismatch", {display_name(partner->name)}), true);
-        else if (partner->half == block.half) small_hint(tr("editor.block_partner_same_half"), true);
-        else small_hint("= " + display_name(partner->name));
-        flag(tr("editor.block_pair_item"), block.item);
-        small_hint(tr(block.item ? "editor.block_pair_item_hint" : "editor.block_pair_not_item_hint"));
-    }
-    if (kind_of(block) == BlockShapeKind::Cube && block.directional) {
-        // Two of it side by side, facing the same way, become one wide block.
-        flag(tr("editor.block_joins"), block.joins);
-        if (block.joins) small_hint(tr("editor.block_joins_hint"));
-    }
-
-    // Its six faces and any extra tiles (a cake's cut, a bed's end, a large
-    // chest's halves): pick one, then its tile below.
-    y += GAP;
-    section(tr("editor.block_faces"));
-    const Texture2D& atlas = terrain_atlas();
-    const std::vector<TileSlot> extras = extra_slots(block);
-    const int face_rows = 6 + static_cast<int>(extras.size());
-    if (selected_face >= face_rows) selected_face = 0;
-    const bool extra_picked = selected_face >= 6;
-    constexpr float ROW_LABEL = 205.0f;
-    for (int f = 0; f < face_rows; ++f) {
-        const TileSlot* slot = f >= 6 ? &extras[static_cast<size_t>(f - 6)] : nullptr;
-        const int tile_x = slot ? *slot->x : block.faces[f].tile_x;
-        const int tile_y = slot ? *slot->y : block.faces[f].tile_y;
-        const Color tint = slot ? block.faces[3].tint : block.faces[f].tint; // an extra tile takes its side's tint
-        bool picked = f == selected_face;
-        GuiToggle({x, y, ROW_LABEL, ROW}, (slot ? tr(slot->key) : tr(FACE_KEYS[f])).c_str(), &picked);
-        if (picked) selected_face = f;
-        if (!slot || !slot->has || *slot->has) {
-            DrawTexturePro(atlas, tile_source(tile_x, tile_y), {x + ROW_LABEL + 8, y + 1, ROW - 2, ROW - 2}, {0, 0}, 0.0f, tint);
-            label({x + ROW_LABEL + 8 + ROW + 4, y, 90, ROW}, std::to_string(tile_x) + ", " + std::to_string(tile_y));
-        } else {
-            label({x + ROW_LABEL + 8, y, width - ROW_LABEL - 8, ROW}, tr("editor.block_cut_none"));
-        }
-        y += ROW + 2;
-    }
-    y += GAP;
-    const float half = (width - GAP) * 0.5f;
-    GuiSetState(extra_picked ? STATE_DISABLED : STATE_NORMAL);
-    if (GuiButton({x, y, half, ROW}, tr("editor.block_to_all").c_str()) && !extra_picked) {
-        for (int f = 0; f < 6; ++f) block.faces[f] = block.faces[selected_face];
-        mark_block_dirty();
-    }
-    if (GuiButton({x + half + GAP, y, half, ROW}, tr("editor.block_to_sides").c_str()) && !extra_picked) {
-        for (int f = 2; f < 6; ++f) block.faces[f] = block.faces[selected_face];
-        mark_block_dirty();
-    }
-    GuiSetState(STATE_NORMAL);
-    y += ROW + GAP;
-
-    // The picked face's tint: its swatch, then red, green, blue, alpha (an
-    // extra tile has none of its own - it takes its side's).
-    if (!extra_picked) {
-        block_file::Face& face = block.faces[selected_face];
-        label({x, y, width - ROW - GAP, ROW}, tr("editor.block_tint"));
-        DrawRectangleRec({x + width - ROW, y, ROW, ROW}, face.tint);
-        DrawRectangleLinesEx({x + width - ROW, y, ROW, ROW}, 1.0f, gui_color(DEFAULT, LINE_COLOR));
-        y += ROW + GAP;
-        const float field = (width - GAP * 3) / 4.0f;
-        unsigned char* channels[4] = {&face.tint.r, &face.tint.g, &face.tint.b, &face.tint.a};
-        for (int c = 0; c < 4; ++c) {
-            float value = *channels[c];
-            if (float_field({x + c * (field + GAP), y, field, ROW}, value, 0.0f, 255.0f)) {
-                *channels[c] = static_cast<unsigned char>(std::lround(value));
-                mark_block_dirty();
-            }
-        }
-        y += ROW + GAP;
-        // Recolored per biome in the world (the tint above is then its color
-        // in the inventory and here).
-        combo(tr("editor.block_biome"), face.biome, block_file::BIOME_IDS, block_file::BIOME_COUNT, "editor.biome.");
+        small_hint(tr("editor.block_title_hint"));
         y += GAP;
     }
 
-    // A tile picker over a whole 16x16 atlas; `picked` outlines the current
-    // tile, `used` (optional) the other ones; returns a clicked tile.
-    auto atlas_picker = [&](const Texture2D& texture, int picked_x, int picked_y, bool show_picked,
-                            const std::vector<std::pair<int, int>>& used) -> std::optional<std::pair<int, int>> {
-        const float cell = std::floor(width / block_file::ATLAS_TILES);
-        const Rectangle grid = {x, y, cell * block_file::ATLAS_TILES, cell * block_file::ATLAS_TILES};
-        DrawRectangleRec(grid, Color{30, 30, 34, 255});
-        DrawTexturePro(texture, {0, 0, static_cast<float>(texture.width), static_cast<float>(texture.height)}, grid, {0, 0}, 0.0f, WHITE);
-        for (const auto& [ux, uy] : used) {
-            DrawRectangleLinesEx({grid.x + ux * cell, grid.y + uy * cell, cell, cell}, 1.0f, Fade(WHITE, 0.5f));
-        }
-        if (show_picked) {
-            DrawRectangleLinesEx({grid.x + picked_x * cell - 1, grid.y + picked_y * cell - 1, cell + 2, cell + 2}, 2.0f, SELECTION);
-        }
-        std::optional<std::pair<int, int>> clicked;
-        const Vector2 mouse = GetMousePosition();
-        if (mouse_inside && CheckCollisionPointRec(mouse, grid)) {
-            const int tx = std::clamp(static_cast<int>((mouse.x - grid.x) / cell), 0, block_file::ATLAS_TILES - 1);
-            const int ty = std::clamp(static_cast<int>((mouse.y - grid.y) / cell), 0, block_file::ATLAS_TILES - 1);
-            DrawRectangleLinesEx({grid.x + tx * cell, grid.y + ty * cell, cell, cell}, 1.0f, YELLOW);
-            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) clicked = std::make_pair(tx, ty);
-        }
-        y += grid.height + PAD;
-        return clicked;
-    };
-
-    // The terrain atlas: click a tile to put it on the picked face.
-    section(tr("editor.block_atlas"));
-    {
-        std::vector<std::pair<int, int>> used;
-        for (int f = 0; f < 6; ++f) used.push_back({block.faces[f].tile_x, block.faces[f].tile_y});
-        const TileSlot* slot = extra_picked ? &extras[static_cast<size_t>(selected_face - 6)] : nullptr;
-        const int px = slot ? *slot->x : block.faces[selected_face].tile_x;
-        const int py = slot ? *slot->y : block.faces[selected_face].tile_y;
-        if (auto clicked = atlas_picker(atlas, px, py, !slot || !slot->has || *slot->has, used)) {
-            if (slot) {
-                if (slot->has) *slot->has = true;
-                *slot->x = clicked->first;
-                *slot->y = clicked->second;
-            } else {
-                block.faces[selected_face].tile_x = clicked->first;
-                block.faces[selected_face].tile_y = clicked->second;
-            }
-            mark_block_dirty();
-        }
+    // How it breaks, sounds and lights up.
+    if (fold(tr("editor.block_properties"))) {
+        combo(tr("editor.block_sound"), block.sound, block_file::SOUND_IDS, block_file::SOUND_COUNT, "editor.sound.");
+        combo(tr("editor.block_tool"), block.tool, block_file::TOOL_IDS, block_file::TOOL_COUNT, "editor.tool.");
+        number(tr("editor.block_hardness"), block.hardness, 0.0f, 1000.0f);
+        number(tr("editor.block_density"), block.density, 0.0f, 50.0f);
+        whole(tr("editor.block_luminance"), block.luminance, 0, 15);
+        whole(tr("editor.block_side_inset"), block.side_inset, 0, 8);
+        y += GAP;
     }
 
-    // In the inventory: its 3D look, or a flat sprite picked off items.png.
-    section(tr("editor.block_icon_section"));
-    {
-        bool flat = block.item_sprite_x >= 0;
-        GuiCheckBox({x, y + 4, ROW - 8, ROW - 8}, tr("editor.block_flat_icon").c_str(), &flat);
-        if (flat != (block.item_sprite_x >= 0)) {
-            block.item_sprite_x = flat ? 0 : -1;
-            block.item_sprite_y = flat ? 0 : -1;
-            mark_block_dirty();
-        }
-        y += ROW + GAP;
-        if (flat) {
-            if (auto clicked = atlas_picker(items_atlas(), block.item_sprite_x, block.item_sprite_y, true, {})) {
-                block.item_sprite_x = clicked->first;
-                block.item_sprite_y = clicked->second;
-                mark_block_dirty();
-            }
-        }
+    // How the world treats it.
+    if (fold(tr("editor.block_flags"))) {
+        flag(tr("editor.block_solid"), block.solid);
+        flag(tr("editor.block_selectable"), block.selectable);
+        flag(tr("editor.block_replaceable"), block.replaceable);
+        flag(tr("editor.block_transparent"), block.transparent);
+        flag(tr("editor.block_translucent"), block.translucent);
+        flag(tr("editor.block_cutout"), block.cutout);
+        flag(tr("editor.block_keep_same_faces"), block.keep_same_faces);
+        flag(tr("editor.block_damages_on_touch"), block.damages_on_touch);
+        flag(tr("editor.block_directional"), block.directional);
+        y += GAP;
     }
 
     content_height = y - (view.y + block_panel_scroll.y) + PAD;
@@ -1435,161 +1265,398 @@ void ModelEditor::draw_block_model_panel(Rectangle bounds)
         return true;
     };
 
-    section(tr("editor.model_section"));
-    if (!block_file::elements_allowed(block.shape)) {
-        hint(tr("editor.model_kind_only"));
-    } else {
-        // A cube may be drawn from parts instead - starting from one whole
-        // cube; a torch always is.
-        if (kind_of(block) == BlockShapeKind::Cube) {
-            bool own = !block.elements.empty();
-            if (check(tr("editor.model_own"), own)) {
-                block.elements.clear();
-                if (own) {
-                    block_file::Element whole;
-                    whole.name = "cube";
-                    block.elements.push_back(whole);
-                }
-                selected_element = 0;
-            }
+    const float label_w = 200.0f;
+    auto fold = [&](const std::string& title) { return editor_ui::fold_header(x, y, width, title, folded_sections); };
+    auto small_hint = [&](const std::string& text, bool error = false) { y = draw_hint(x, y, width, text, error); };
+    auto flag = [&](const std::string& caption, bool& value) {
+        bool checked = value;
+        GuiCheckBox({x, y + 4, ROW - 8, ROW - 8}, caption.c_str(), &checked);
+        if (checked != value) {
+            value = checked;
+            mark_block_dirty();
         }
-        if (block.elements.empty()) hint(tr("editor.model_none"));
+        y += ROW + 2;
+    };
+    auto combo = [&](const std::string& caption, int& value, const char* const* ids, int count, const char* key_prefix) {
+        label({x, y, label_w, ROW}, caption);
+        std::string items;
+        for (int i = 0; i < count; ++i) items += (i ? ";" : "") + tr(std::string(key_prefix) + ids[i]);
+        int chosen = value;
+        GuiComboBox({x + label_w, y, width - label_w, ROW}, items.c_str(), &chosen);
+        if (chosen != value) {
+            value = chosen;
+            mark_block_dirty();
+        }
+        y += ROW + GAP;
+    };
+
+    // Its shape, and what that shape needs.
+    if (fold(tr("editor.block_shape_section"))) {
+        {
+            if (block.shape >= block_file::FILE_SHAPE_COUNT) block.shape = 0;
+            std::string items;
+            for (int i = 0; i < block_file::FILE_SHAPE_COUNT; ++i) items += (i ? ";" : "") + tr(std::string("editor.shape.") + block_file::SHAPE_IDS[i]);
+            label({x, y, label_w, ROW}, tr("editor.block_shape"));
+            int chosen = block.shape;
+            GuiComboBox({x + label_w, y, width - label_w, ROW}, items.c_str(), &chosen);
+            if (chosen != block.shape) {
+                block.shape = chosen;
+                if (selected_face >= 6) selected_face = 0;
+                for (int s = 0; s < MAX_BLOCK_STATES; ++s) block.states[static_cast<size_t>(s)] = block_file::default_state(block.shape, s);
+                block.elements = block_file::default_elements(block.shape);
+                block_state_view = 0;
+                selected_element = 0;
+                mark_block_dirty();
+            }
+            y += ROW + GAP;
+            small_hint(tr(std::string("editor.shape_hint.") + block_file::SHAPE_IDS[block.shape]));
+        }
+        if (kind_of(block) == BlockShapeKind::Slab) {
+            // What two halves in one cell become - another block, by name.
+            label({x, y, label_w, ROW}, tr("editor.block_double"));
+            if (string_field({x + label_w, y, width - label_w, ROW}, block.double_block)) mark_block_dirty();
+            y += ROW + 2;
+            std::string found;
+            for (const block_file::BlockFile& other : blocks) {
+                if (other.name == block.double_block) found = block_display_name(other.name);
+            }
+            small_hint(block.double_block.empty() ? tr("editor.block_double_none")
+                       : found.empty()            ? tr("editor.block_double_missing")
+                                                  : "= " + found,
+                       !block.double_block.empty() && found.empty());
+        }
+        if (is_pair_kind(kind_of(block))) {
+            // Which half this is, and its other half - by name.
+            label({x, y, label_w, ROW}, tr("editor.block_half"));
+            const std::string halves = tr(std::string("editor.half.") + block_file::half_id(block.shape, 0)) + ";" +
+                                       tr(std::string("editor.half.") + block_file::half_id(block.shape, 1));
+            int chosen_half = block.half;
+            GuiComboBox({x + label_w, y, width - label_w, ROW}, halves.c_str(), &chosen_half);
+            if (chosen_half != block.half) {
+                block.half = chosen_half;
+                mark_block_dirty();
+            }
+            y += ROW + GAP;
+            label({x, y, label_w, ROW}, tr("editor.block_partner"));
+            if (string_field({x + label_w, y, width - label_w, ROW}, block.partner)) mark_block_dirty();
+            y += ROW + 2;
+            const block_file::BlockFile* partner = nullptr;
+            for (const block_file::BlockFile& other : blocks) {
+                if (other.name == block.partner && &other != &block) partner = &other;
+            }
+            if (!partner) small_hint(tr("editor.block_partner_missing"), true);
+            else if (partner->partner != block.name) small_hint(tr_format("editor.block_partner_mismatch", {block_display_name(partner->name)}), true);
+            else if (partner->half == block.half) small_hint(tr("editor.block_partner_same_half"), true);
+            else small_hint("= " + block_display_name(partner->name));
+            flag(tr("editor.block_pair_item"), block.item);
+            small_hint(tr(block.item ? "editor.block_pair_item_hint" : "editor.block_pair_not_item_hint"));
+        }
+        if (kind_of(block) == BlockShapeKind::Cube && block.directional) {
+            // Two of it side by side, facing the same way, become one wide block.
+            flag(tr("editor.block_joins"), block.joins);
+            if (block.joins) small_hint(tr("editor.block_joins_hint"));
+        }
+
+        y += GAP;
     }
 
-    if (has_elements(block)) {
-        selected_element = std::clamp(selected_element, 0, static_cast<int>(block.elements.size()) - 1);
-        hint(tr("editor.model_parts_hint"));
+    const Texture2D& atlas = terrain_atlas();
+    const std::vector<TileSlot> extras = extra_slots(block);
+    const int face_rows = 6 + static_cast<int>(extras.size());
+    if (selected_face >= face_rows) selected_face = 0;
+    const bool extra_picked = selected_face >= 6;
+    constexpr float ROW_LABEL = 205.0f;
 
-        // Its parts - pick one to edit.
-        for (size_t i = 0; i < block.elements.size(); ++i) {
-            const block_file::Element& element = block.elements[i];
-            const std::string caption = element.name.empty() ? tr_format("editor.model_part", {std::to_string(i + 1)}) : element.name;
-            bool picked = static_cast<int>(i) == selected_element;
-            GuiToggle({x, y, width, ROW}, caption.c_str(), &picked);
-            if (picked) selected_element = static_cast<int>(i);
+    if (fold(tr("editor.block_faces"))) {
+        // Its six faces and any extra tiles (a cake's cut, a bed's end, a large
+        // chest's halves): pick one, then its tile below.
+        for (int f = 0; f < face_rows; ++f) {
+            const TileSlot* slot = f >= 6 ? &extras[static_cast<size_t>(f - 6)] : nullptr;
+            const int tile_x = slot ? *slot->x : block.faces[f].tile_x;
+            const int tile_y = slot ? *slot->y : block.faces[f].tile_y;
+            const Color tint = slot ? block.faces[3].tint : block.faces[f].tint; // an extra tile takes its side's tint
+            bool picked = f == selected_face;
+            GuiToggle({x, y, ROW_LABEL, ROW}, (slot ? tr(slot->key) : tr(FACE_KEYS[f])).c_str(), &picked);
+            if (picked) selected_face = f;
+            if (!slot || !slot->has || *slot->has) {
+                DrawTexturePro(atlas, tile_source(tile_x, tile_y), {x + ROW_LABEL + 8, y + 1, ROW - 2, ROW - 2}, {0, 0}, 0.0f, tint);
+                label({x + ROW_LABEL + 8 + ROW + 4, y, 90, ROW}, std::to_string(tile_x) + ", " + std::to_string(tile_y));
+            } else {
+                label({x + ROW_LABEL + 8, y, width - ROW_LABEL - 8, ROW}, tr("editor.block_cut_none"));
+            }
             y += ROW + 2;
         }
         y += GAP;
-        const float third = (width - GAP * 2) / 3.0f;
-        if (GuiButton({x, y, third, ROW}, tr("editor.model_add").c_str())) {
-            block_file::Element part;
-            part.from = {6, 0, 6};
-            part.to = {10, 8, 10};
-            block.elements.push_back(part);
-            selected_element = static_cast<int>(block.elements.size()) - 1;
+        const float half = (width - GAP) * 0.5f;
+        GuiSetState(extra_picked ? STATE_DISABLED : STATE_NORMAL);
+        if (GuiButton({x, y, half, ROW}, tr("editor.block_to_all").c_str()) && !extra_picked) {
+            for (int f = 0; f < 6; ++f) block.faces[f] = block.faces[selected_face];
             mark_block_dirty();
         }
-        if (GuiButton({x + third + GAP, y, third, ROW}, tr("editor.model_copy").c_str())) {
-            block_file::Element copy = block.elements[static_cast<size_t>(selected_element)];
-            if (!copy.name.empty()) copy.name += "_copy";
-            block.elements.insert(block.elements.begin() + selected_element + 1, copy);
-            ++selected_element;
-            mark_block_dirty();
-        }
-        GuiSetState(block.elements.size() > 1 ? STATE_NORMAL : STATE_DISABLED);
-        if (GuiButton({x + (third + GAP) * 2, y, third, ROW}, tr("editor.model_delete").c_str()) && block.elements.size() > 1) {
-            block.elements.erase(block.elements.begin() + selected_element);
-            selected_element = std::min(selected_element, static_cast<int>(block.elements.size()) - 1);
+        if (GuiButton({x + half + GAP, y, half, ROW}, tr("editor.block_to_sides").c_str()) && !extra_picked) {
+            for (int f = 2; f < 6; ++f) block.faces[f] = block.faces[selected_face];
             mark_block_dirty();
         }
         GuiSetState(STATE_NORMAL);
-        y += ROW + GAP * 2;
-
-        // The picked part: its name, its box, its shading.
-        block_file::Element& element = block.elements[static_cast<size_t>(selected_element)];
-        section(tr("editor.model_part_section"));
-        label({x, y, 110, ROW}, tr("editor.model_name"));
-        if (string_field({x + 110, y, width - 110, ROW}, element.name)) mark_block_dirty();
         y += ROW + GAP;
-        const char* xyz[3] = {"X", "Y", "Z"};
-        float* from[3] = {&element.from.x, &element.from.y, &element.from.z};
-        float* to[3] = {&element.to.x, &element.to.y, &element.to.z};
-        if (fields_row(tr("editor.model_from"), from, xyz, 3, -16.0f, 32.0f)) mark_block_dirty();
-        if (fields_row(tr("editor.model_to"), to, xyz, 3, -16.0f, 32.0f)) mark_block_dirty();
-        check(tr("editor.model_shade"), element.shade);
-        hint(tr("editor.model_shade_hint"));
 
-        // Its faces: which are drawn and which way each looks.
-        y += GAP;
-        section(tr("editor.model_faces_section"));
-        if (selected_face >= 6) selected_face = 0;
-        std::string normals;
-        for (int n = 0; n < block_file::NORMAL_COUNT; ++n) normals += (n ? ";" : "") + tr(std::string("editor.normal.") + block_file::NORMAL_IDS[n]);
-        for (int f = 0; f < 6; ++f) {
-            block_file::ElementFace& face = element.faces[static_cast<size_t>(f)];
-            bool enabled = face.enabled;
-            GuiCheckBox({x, y + 4, ROW - 8, ROW - 8}, nullptr, &enabled);
-            if (enabled != face.enabled) {
-                face.enabled = enabled;
+        // The picked face's tint: its swatch, then red, green, blue, alpha (an
+        // extra tile has none of its own - it takes its side's).
+        if (!extra_picked) {
+            block_file::Face& face = block.faces[selected_face];
+            label({x, y, width - ROW - GAP, ROW}, tr("editor.block_tint"));
+            DrawRectangleRec({x + width - ROW, y, ROW, ROW}, face.tint);
+            DrawRectangleLinesEx({x + width - ROW, y, ROW, ROW}, 1.0f, gui_color(DEFAULT, LINE_COLOR));
+            y += ROW + GAP;
+            const float field = (width - GAP * 3) / 4.0f;
+            unsigned char* channels[4] = {&face.tint.r, &face.tint.g, &face.tint.b, &face.tint.a};
+            for (int c = 0; c < 4; ++c) {
+                float value = *channels[c];
+                if (float_field({x + c * (field + GAP), y, field, ROW}, value, 0.0f, 255.0f)) {
+                    *channels[c] = static_cast<unsigned char>(std::lround(value));
+                    mark_block_dirty();
+                }
+            }
+            y += ROW + GAP;
+            // Recolored per biome in the world (the tint above is then its color
+            // in the inventory and here).
+            combo(tr("editor.block_biome"), face.biome, block_file::BIOME_IDS, block_file::BIOME_COUNT, "editor.biome.");
+            y += GAP;
+        }
+
+    }
+
+    // A tile picker over a whole 16x16 atlas; `picked` outlines the current
+    // tile, `used` (optional) the other ones; returns a clicked tile.
+    auto atlas_picker = [&](const Texture2D& texture, int picked_x, int picked_y, bool show_picked,
+                            const std::vector<std::pair<int, int>>& used) -> std::optional<std::pair<int, int>> {
+        const float cell = std::floor(width / block_file::ATLAS_TILES);
+        const Rectangle grid = {x, y, cell * block_file::ATLAS_TILES, cell * block_file::ATLAS_TILES};
+        DrawRectangleRec(grid, Color{30, 30, 34, 255});
+        DrawTexturePro(texture, {0, 0, static_cast<float>(texture.width), static_cast<float>(texture.height)}, grid, {0, 0}, 0.0f, WHITE);
+        for (const auto& [ux, uy] : used) {
+            DrawRectangleLinesEx({grid.x + ux * cell, grid.y + uy * cell, cell, cell}, 1.0f, Fade(WHITE, 0.5f));
+        }
+        if (show_picked) {
+            DrawRectangleLinesEx({grid.x + picked_x * cell - 1, grid.y + picked_y * cell - 1, cell + 2, cell + 2}, 2.0f, SELECTION);
+        }
+        std::optional<std::pair<int, int>> clicked;
+        const Vector2 mouse = GetMousePosition();
+        if (mouse_inside && CheckCollisionPointRec(mouse, grid)) {
+            const int tx = std::clamp(static_cast<int>((mouse.x - grid.x) / cell), 0, block_file::ATLAS_TILES - 1);
+            const int ty = std::clamp(static_cast<int>((mouse.y - grid.y) / cell), 0, block_file::ATLAS_TILES - 1);
+            DrawRectangleLinesEx({grid.x + tx * cell, grid.y + ty * cell, cell, cell}, 1.0f, YELLOW);
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) clicked = std::make_pair(tx, ty);
+        }
+        y += grid.height + PAD;
+        return clicked;
+    };
+
+
+    if (fold(tr("editor.block_atlas"))) {
+        // The terrain atlas: click a tile to put it on the picked face.
+        {
+            std::vector<std::pair<int, int>> used;
+            for (int f = 0; f < 6; ++f) used.push_back({block.faces[f].tile_x, block.faces[f].tile_y});
+            const TileSlot* slot = extra_picked ? &extras[static_cast<size_t>(selected_face - 6)] : nullptr;
+            const int px = slot ? *slot->x : block.faces[selected_face].tile_x;
+            const int py = slot ? *slot->y : block.faces[selected_face].tile_y;
+            if (auto clicked = atlas_picker(atlas, px, py, !slot || !slot->has || *slot->has, used)) {
+                if (slot) {
+                    if (slot->has) *slot->has = true;
+                    *slot->x = clicked->first;
+                    *slot->y = clicked->second;
+                } else {
+                    block.faces[selected_face].tile_x = clicked->first;
+                    block.faces[selected_face].tile_y = clicked->second;
+                }
                 mark_block_dirty();
             }
-            bool picked = f == selected_face;
-            GuiToggle({x + ROW, y, 150, ROW}, tr(FACE_KEYS[f]).c_str(), &picked);
-            if (picked) selected_face = f;
-            GuiSetState(face.enabled ? STATE_NORMAL : STATE_DISABLED);
-            int normal = face.normal;
-            GuiComboBox({x + ROW + 150 + GAP, y, width - ROW - 150 - GAP, ROW}, normals.c_str(), &normal);
-            if (normal != face.normal && face.enabled) {
-                face.normal = normal;
+        }
+
+    }
+
+    // Drawn from its own parts instead of its shape's boxes.
+    if (fold(tr("editor.model_section"))) {
+        if (!block_file::elements_allowed(block.shape)) {
+            hint(tr("editor.model_kind_only"));
+        } else {
+            // A cube may be drawn from parts instead - starting from one whole
+            // cube; a torch always is.
+            if (kind_of(block) == BlockShapeKind::Cube) {
+                bool own = !block.elements.empty();
+                if (check(tr("editor.model_own"), own)) {
+                    block.elements.clear();
+                    if (own) {
+                        block_file::Element whole;
+                        whole.name = "cube";
+                        block.elements.push_back(whole);
+                    }
+                    selected_element = 0;
+                }
+            }
+            if (block.elements.empty()) hint(tr("editor.model_none"));
+        }
+
+        if (has_elements(block)) {
+            selected_element = std::clamp(selected_element, 0, static_cast<int>(block.elements.size()) - 1);
+            hint(tr("editor.model_parts_hint"));
+
+            // Its parts - pick one to edit.
+            for (size_t i = 0; i < block.elements.size(); ++i) {
+                const block_file::Element& element = block.elements[i];
+                const std::string caption = element.name.empty() ? tr_format("editor.model_part", {std::to_string(i + 1)}) : element.name;
+                bool picked = static_cast<int>(i) == selected_element;
+                GuiToggle({x, y, width, ROW}, caption.c_str(), &picked);
+                if (picked) selected_element = static_cast<int>(i);
+                y += ROW + 2;
+            }
+            y += GAP;
+            const float third = (width - GAP * 2) / 3.0f;
+            if (GuiButton({x, y, third, ROW}, tr("editor.model_add").c_str())) {
+                block_file::Element part;
+                part.from = {6, 0, 6};
+                part.to = {10, 8, 10};
+                block.elements.push_back(part);
+                selected_element = static_cast<int>(block.elements.size()) - 1;
+                mark_block_dirty();
+            }
+            if (GuiButton({x + third + GAP, y, third, ROW}, tr("editor.model_copy").c_str())) {
+                block_file::Element copy = block.elements[static_cast<size_t>(selected_element)];
+                if (!copy.name.empty()) copy.name += "_copy";
+                block.elements.insert(block.elements.begin() + selected_element + 1, copy);
+                ++selected_element;
+                mark_block_dirty();
+            }
+            GuiSetState(block.elements.size() > 1 ? STATE_NORMAL : STATE_DISABLED);
+            if (GuiButton({x + (third + GAP) * 2, y, third, ROW}, tr("editor.model_delete").c_str()) && block.elements.size() > 1) {
+                block.elements.erase(block.elements.begin() + selected_element);
+                selected_element = std::min(selected_element, static_cast<int>(block.elements.size()) - 1);
                 mark_block_dirty();
             }
             GuiSetState(STATE_NORMAL);
-            y += ROW + 2;
-        }
-        hint(tr("editor.model_normals_hint"));
+            y += ROW + GAP * 2;
 
-        // The picked face's piece of its side's tile.
-        y += GAP;
-        section(tr_format("editor.model_uv_section", {tr(FACE_KEYS[selected_face])}));
-        block_file::ElementFace& face = element.faces[static_cast<size_t>(selected_face)];
-        bool automatic = face.auto_uv;
-        if (check(tr("editor.model_auto_uv"), automatic)) {
-            if (!automatic) face.uv = block_file::face_uv(element, selected_face); // start from what it shows now
-            face.auto_uv = automatic;
-        }
-        std::array<float, 4> uv = block_file::face_uv(element, selected_face);
-        const char* uv_names[4] = {"U1", "V1", "U2", "V2"};
-        float* uv_values[4] = {&uv[0], &uv[1], &uv[2], &uv[3]};
-        if (fields_row(tr("editor.model_uv"), uv_values, uv_names, 4, 0.0f, 16.0f)) {
-            face.auto_uv = false;
-            face.uv = uv;
-            mark_block_dirty();
-        }
+            // The picked part: its name, its box, its shading.
+            block_file::Element& element = block.elements[static_cast<size_t>(selected_element)];
+            section(tr("editor.model_part_section"));
+            label({x, y, 110, ROW}, tr("editor.model_name"));
+            if (string_field({x + 110, y, width - 110, ROW}, element.name)) mark_block_dirty();
+            y += ROW + GAP;
+            const char* xyz[3] = {"X", "Y", "Z"};
+            float* from[3] = {&element.from.x, &element.from.y, &element.from.z};
+            float* to[3] = {&element.to.x, &element.to.y, &element.to.z};
+            if (fields_row(tr("editor.model_from"), from, xyz, 3, -16.0f, 32.0f)) mark_block_dirty();
+            if (fields_row(tr("editor.model_to"), to, xyz, 3, -16.0f, 32.0f)) mark_block_dirty();
+            check(tr("editor.model_shade"), element.shade);
+            hint(tr("editor.model_shade_hint"));
 
-        // The side's tile, big: drag over it to pick the piece, a pixel at a time.
-        const block_file::Face& side = block.faces[static_cast<size_t>(selected_face)];
-        const float cell = std::floor(std::min(width, 256.0f) / 16.0f);
-        const Rectangle tile = {x, y, cell * 16.0f, cell * 16.0f};
-        DrawRectangleRec(tile, Color{30, 30, 34, 255});
-        DrawTexturePro(terrain_atlas(), tile_source(side.tile_x, side.tile_y), tile, {0, 0}, 0.0f, side.tint);
-        for (int i = 1; i < 16; ++i) {
-            DrawLineV({tile.x + i * cell, tile.y}, {tile.x + i * cell, tile.y + tile.height}, Fade(WHITE, 0.06f));
-            DrawLineV({tile.x, tile.y + i * cell}, {tile.x + tile.width, tile.y + i * cell}, Fade(WHITE, 0.06f));
-        }
-        const Rectangle piece = {tile.x + std::min(uv[0], uv[2]) * cell, tile.y + std::min(uv[1], uv[3]) * cell,
-                                 std::fabs(uv[2] - uv[0]) * cell, std::fabs(uv[3] - uv[1]) * cell};
-        DrawRectangleLinesEx(piece, 2.0f, SELECTION);
-        const Vector2 mouse = GetMousePosition();
-        auto pixel_at = [&](Vector2 point) {
-            return Vector2{std::clamp(std::floor((point.x - tile.x) / cell), 0.0f, 15.0f), std::clamp(std::floor((point.y - tile.y) / cell), 0.0f, 15.0f)};
-        };
-        if (mouse_inside && CheckCollisionPointRec(mouse, tile) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            uv_dragging = true;
-            uv_drag_from = pixel_at(mouse);
-        }
-        if (uv_dragging) {
-            if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-                const Vector2 here = pixel_at(mouse);
+            // Its faces: which are drawn and which way each looks.
+            y += GAP;
+            section(tr("editor.model_faces_section"));
+            const int part_face = selected_face < 6 ? selected_face : 0;
+            std::string normals;
+            for (int n = 0; n < block_file::NORMAL_COUNT; ++n) normals += (n ? ";" : "") + tr(std::string("editor.normal.") + block_file::NORMAL_IDS[n]);
+            for (int f = 0; f < 6; ++f) {
+                block_file::ElementFace& face = element.faces[static_cast<size_t>(f)];
+                bool enabled = face.enabled;
+                GuiCheckBox({x, y + 4, ROW - 8, ROW - 8}, nullptr, &enabled);
+                if (enabled != face.enabled) {
+                    face.enabled = enabled;
+                    mark_block_dirty();
+                }
+                bool picked = f == selected_face;
+                GuiToggle({x + ROW, y, 150, ROW}, tr(FACE_KEYS[f]).c_str(), &picked);
+                if (picked) selected_face = f;
+                GuiSetState(face.enabled ? STATE_NORMAL : STATE_DISABLED);
+                int normal = face.normal;
+                GuiComboBox({x + ROW + 150 + GAP, y, width - ROW - 150 - GAP, ROW}, normals.c_str(), &normal);
+                if (normal != face.normal && face.enabled) {
+                    face.normal = normal;
+                    mark_block_dirty();
+                }
+                GuiSetState(STATE_NORMAL);
+                y += ROW + 2;
+            }
+            hint(tr("editor.model_normals_hint"));
+
+            // The picked face's piece of its side's tile.
+            y += GAP;
+            section(tr_format("editor.model_uv_section", {tr(FACE_KEYS[part_face])}));
+            block_file::ElementFace& face = element.faces[static_cast<size_t>(part_face)];
+            bool automatic = face.auto_uv;
+            if (check(tr("editor.model_auto_uv"), automatic)) {
+                if (!automatic) face.uv = block_file::face_uv(element, part_face); // start from what it shows now
+                face.auto_uv = automatic;
+            }
+            std::array<float, 4> uv = block_file::face_uv(element, part_face);
+            const char* uv_names[4] = {"U1", "V1", "U2", "V2"};
+            float* uv_values[4] = {&uv[0], &uv[1], &uv[2], &uv[3]};
+            if (fields_row(tr("editor.model_uv"), uv_values, uv_names, 4, 0.0f, 16.0f)) {
                 face.auto_uv = false;
-                face.uv = {std::min(uv_drag_from.x, here.x), std::min(uv_drag_from.y, here.y), std::max(uv_drag_from.x, here.x) + 1.0f,
-                           std::max(uv_drag_from.y, here.y) + 1.0f};
+                face.uv = uv;
                 mark_block_dirty();
-            } else {
-                uv_dragging = false;
+            }
+
+            // The side's tile, big: drag over it to pick the piece, a pixel at a time.
+            const block_file::Face& side = block.faces[static_cast<size_t>(part_face)];
+            const float cell = std::floor(std::min(width, 256.0f) / 16.0f);
+            const Rectangle tile = {x, y, cell * 16.0f, cell * 16.0f};
+            DrawRectangleRec(tile, Color{30, 30, 34, 255});
+            DrawTexturePro(terrain_atlas(), tile_source(side.tile_x, side.tile_y), tile, {0, 0}, 0.0f, side.tint);
+            for (int i = 1; i < 16; ++i) {
+                DrawLineV({tile.x + i * cell, tile.y}, {tile.x + i * cell, tile.y + tile.height}, Fade(WHITE, 0.06f));
+                DrawLineV({tile.x, tile.y + i * cell}, {tile.x + tile.width, tile.y + i * cell}, Fade(WHITE, 0.06f));
+            }
+            const Rectangle piece = {tile.x + std::min(uv[0], uv[2]) * cell, tile.y + std::min(uv[1], uv[3]) * cell,
+                                     std::fabs(uv[2] - uv[0]) * cell, std::fabs(uv[3] - uv[1]) * cell};
+            DrawRectangleLinesEx(piece, 2.0f, SELECTION);
+            const Vector2 mouse = GetMousePosition();
+            auto pixel_at = [&](Vector2 point) {
+                return Vector2{std::clamp(std::floor((point.x - tile.x) / cell), 0.0f, 15.0f), std::clamp(std::floor((point.y - tile.y) / cell), 0.0f, 15.0f)};
+            };
+            if (mouse_inside && CheckCollisionPointRec(mouse, tile) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                uv_dragging = true;
+                uv_drag_from = pixel_at(mouse);
+            }
+            if (uv_dragging) {
+                if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+                    const Vector2 here = pixel_at(mouse);
+                    face.auto_uv = false;
+                    face.uv = {std::min(uv_drag_from.x, here.x), std::min(uv_drag_from.y, here.y), std::max(uv_drag_from.x, here.x) + 1.0f,
+                               std::max(uv_drag_from.y, here.y) + 1.0f};
+                    mark_block_dirty();
+                } else {
+                    uv_dragging = false;
+                }
+            }
+            y += tile.height + GAP;
+            hint(tr("editor.model_uv_hint"));
+        }
+
+        y += GAP;
+    }
+
+    if (fold(tr("editor.block_icon_section"))) {
+        // In the inventory: its 3D look, or a flat sprite picked off items.png.
+        {
+            bool flat = block.item_sprite_x >= 0;
+            GuiCheckBox({x, y + 4, ROW - 8, ROW - 8}, tr("editor.block_flat_icon").c_str(), &flat);
+            if (flat != (block.item_sprite_x >= 0)) {
+                block.item_sprite_x = flat ? 0 : -1;
+                block.item_sprite_y = flat ? 0 : -1;
+                mark_block_dirty();
+            }
+            y += ROW + GAP;
+            if (flat) {
+                if (auto clicked = atlas_picker(items_atlas(), block.item_sprite_x, block.item_sprite_y, true, {})) {
+                    block.item_sprite_x = clicked->first;
+                    block.item_sprite_y = clicked->second;
+                    mark_block_dirty();
+                }
             }
         }
-        y += tile.height + GAP;
-        hint(tr("editor.model_uv_hint"));
+
     }
 
     content_height = y - (view.y + block_model_scroll.y) + PAD;
@@ -1983,6 +2050,33 @@ namespace {
     }
 }
 
+void block_draw::draw_cells(const std::vector<Cell>& cells, const Texture2D& atlas)
+{
+    // draw_scene() puts a cell's min corner half a block below its (x, y, z).
+    Scene scene;
+    scene.cells.reserve(cells.size());
+    for (const Cell& cell : cells) scene.cells.push_back({cell.x, cell.y, cell.z, cell.block, {}, 0});
+    scene.build_index();
+    BeginShaderMode(entity_cutout_shader());
+    draw_scene(scene, atlas, false);
+    rlDrawRenderBatchActive();
+    rlDisableDepthMask();
+    draw_scene(scene, atlas, true);
+    rlDrawRenderBatchActive();
+    rlEnableDepthMask();
+    EndShaderMode();
+}
+
+void block_draw::draw_icon(Rectangle bounds, const block_file::BlockFile& block, const Texture2D& terrain, const Texture2D& items)
+{
+    if (block.item_sprite_x >= 0) {
+        DrawTexturePro(items, tile_source(block.item_sprite_x, block.item_sprite_y), bounds, {0, 0}, 0.0f, WHITE);
+        return;
+    }
+    const block_file::Face& face = block.faces[kind_of(block) == BlockShapeKind::Cross ? 2 : 0];
+    DrawTexturePro(terrain, tile_source(face.tile_x, face.tile_y), bounds, {0, 0}, 0.0f, face.tint);
+}
+
 void ModelEditor::draw_block_game_view(Rectangle bounds)
 {
     const Rectangle inside = preview_box(bounds, tr("editor.block_in_game"));
@@ -2091,7 +2185,7 @@ void ModelEditor::draw_block_inventory_icon(Rectangle bounds)
     // The half of a two-cell block that isn't an item never shows up there.
     if (is_pair_kind(kind_of(block)) && !block.item) {
         draw_hint(cell.x + cell.width + PAD, cell.y, inside.width - cell.width - PAD * 2,
-                  tr_format("editor.block_not_item", {display_name(block.partner)}), false);
+                  tr_format("editor.block_not_item", {block_display_name(block.partner)}), false);
         return;
     }
     const Texture2D& atlas = terrain_atlas();
@@ -2114,5 +2208,5 @@ void ModelEditor::draw_block_inventory_icon(Rectangle bounds)
     } else {
         draw_cube_icon(icon, atlas, face(0), face(3), face(4), block.side_inset / 16.0f);
     }
-    label({cell.x + cell.width + PAD, inside.y, inside.width - cell.width - PAD * 2, inside.height}, display_name(block.name));
+    label({cell.x + cell.width + PAD, inside.y, inside.width - cell.width - PAD * 2, inside.height}, block_display_name(block.name));
 }

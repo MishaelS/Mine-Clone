@@ -144,6 +144,7 @@ ModelEditor::~ModelEditor()
     if (preview_blocks_atlas.id != 0) UnloadTexture(preview_blocks_atlas);
     if (block_view_texture.id != 0) UnloadRenderTexture(block_view_texture);
     if (block_game_texture.id != 0) UnloadRenderTexture(block_game_texture);
+    if (structure_view_texture.id != 0) UnloadRenderTexture(structure_view_texture);
     unload_layer_previews();
     if (viewport_texture.id != 0) UnloadRenderTexture(viewport_texture);
     editor_text::unload();
@@ -156,6 +157,10 @@ void ModelEditor::run()
         widget_counter = 0;
         if (tab == Tab::Blocks) {
             run_blocks_frame(); // BlockTab.cpp
+            continue;
+        }
+        if (tab == Tab::Structures) {
+            run_structures_frame(); // StructureTab.cpp
             continue;
         }
         const Rectangle viewport = viewport_rect();
@@ -747,14 +752,17 @@ void ModelEditor::draw_tabs()
             // still being typed in.
             editing_widget = -1;
             if (tab == Tab::Entities) commit_history(true);
-            else commit_block_history(true);
+            else if (tab == Tab::Blocks) commit_block_history(true);
+            else commit_structure_history(true);
             tab = which;
             if (tab == Tab::Blocks && !blocks_loaded) load_blocks();
+            if (tab == Tab::Structures && !structures_loaded) load_structures();
         }
         x += WIDTH + 4;
     };
     tab_button(Tab::Entities, tr("editor.tab_entities"));
     tab_button(Tab::Blocks, tr("editor.tab_blocks"));
+    tab_button(Tab::Structures, tr("editor.tab_structures"));
 }
 
 void ModelEditor::draw_top_bar(Rectangle bounds)

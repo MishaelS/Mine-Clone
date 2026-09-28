@@ -27,11 +27,35 @@ add_subdirectory(external/FastNoise2)
 add_library(raygui INTERFACE)
 target_include_directories(raygui INTERFACE external/raygui/src)
 
+# Lua 5.4: block behaviors written as scripts (assets/scripts - see
+# include/scripting/LuaScripting.hpp). Built from its sources as C++, not C,
+# so a script error unwinds as a C++ exception - destructors of the game's
+# code it passes through still run (Lua's C build uses longjmp). Only the
+# library: not its standalone interpreter/compiler (lua.c, luac.c), its
+# single-file build (onelua.c) or its internal tests (ltests.c).
+set(LUA_SOURCES
+    lapi.c lauxlib.c lbaselib.c lcode.c lcorolib.c lctype.c ldblib.c ldebug.c
+    ldo.c ldump.c lfunc.c lgc.c linit.c liolib.c llex.c lmathlib.c lmem.c
+    loadlib.c lobject.c lopcodes.c loslib.c lparser.c lstate.c lstring.c
+    lstrlib.c ltable.c ltablib.c ltm.c lundump.c lutf8lib.c lvm.c lzio.c)
+list(TRANSFORM LUA_SOURCES PREPEND external/lua/)
+set_source_files_properties(${LUA_SOURCES} PROPERTIES LANGUAGE CXX)
+add_library(lua STATIC ${LUA_SOURCES})
+target_include_directories(lua PUBLIC external/lua)
+if(NOT MSVC)
+    # The .c files compiled as C++ on purpose (see above).
+    target_compile_options(lua PRIVATE -x c++)
+endif()
+if(NOT WIN32)
+    target_compile_definitions(lua PRIVATE LUA_USE_POSIX)
+endif()
+
 add_executable(${PROJECT_NAME}
     # Application and reusable core services
     src/main.cpp
     src/app/Application.cpp
     src/core/GameEngine.cpp
+    src/core/BlockEvents.cpp
     src/core/Json.cpp
     src/core/Block.cpp
     src/core/BlockShape.cpp
@@ -78,15 +102,19 @@ add_executable(${PROJECT_NAME}
     # (see include/content/Content.hpp)
     src/content/Blocks.cpp
     src/content/BlockFile.cpp
+    src/content/StructureFile.cpp
     src/content/Items.cpp
     src/content/Drops.cpp
     src/content/Recipes.cpp
     src/content/Smelting.cpp
+    src/content/Behaviors.cpp
+    src/scripting/LuaScripting.cpp
 
     # World, generation, and rendering
     src/world/Chunk.cpp
     src/world/ChunkWorkerPool.cpp
     src/world/World.cpp
+    src/world/BlockBehavior.cpp
     src/rendering/Skybox.cpp
     src/rendering/BlockMesh.cpp
     src/rendering/PlayerRenderer.cpp
@@ -123,7 +151,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE include)
 # actual thread library linked in, unlike raylib/FastNoise2 which don't
 # require this on their own.
 find_package(Threads REQUIRED)
-target_link_libraries(${PROJECT_NAME} PRIVATE raylib FastNoise Threads::Threads raygui)
+target_link_libraries(${PROJECT_NAME} PRIVATE raylib FastNoise Threads::Threads raygui lua)
 target_compile_definitions(${PROJECT_NAME} PRIVATE
     ASSETS_PATH="${CMAKE_SOURCE_DIR}/assets/"
     SAVE_DATA_PATH="${CMAKE_SOURCE_DIR}/"
@@ -150,10 +178,14 @@ add_executable(MineTooModelEditor
     tools/model_editor/EditorText.cpp
     tools/model_editor/RayGuiImpl.cpp
     tools/model_editor/BlockTab.cpp
+    tools/model_editor/StructureTab.cpp
+    tools/model_editor/EditorWidgets.cpp
+    tools/model_editor/BlockTabBehavior.cpp
     src/rendering/BlockIcon.cpp
     src/core/BlockShapeKinds.cpp
     src/effects/BlockParticles.cpp
     src/content/BlockFile.cpp
+    src/content/StructureFile.cpp
     src/model/EntityModel.cpp
     src/model/EntityModelRenderer.cpp
     src/core/Json.cpp

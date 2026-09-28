@@ -6,6 +6,7 @@
   "tool": "shovel",
   "density": 1.4,
   "luminance": 0,
+  "script": "test",
   "faces": {
     "top": { "tile": [0, 3] },
     "bottom": { "tile": [0, 3] },

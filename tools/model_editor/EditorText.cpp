@@ -1,6 +1,8 @@
 #include "EditorText.hpp"
 #include "core/Json.hpp"
 
+#include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <set>
 #include <sstream>
@@ -9,6 +11,7 @@
 
 namespace {
 
+    std::string selected_language = "ru";
     std::unordered_map<std::string, std::string> strings;  // selected language
     std::unordered_map<std::string, std::string> fallback; // English
     std::unordered_map<std::string, std::string> missing;  // keys shown as themselves
@@ -46,6 +49,7 @@ namespace editor_text {
             } catch (const std::exception&) {
             }
         }
+        selected_language = language;
         load_language("en", fallback);
         load_language(language, strings);
 
@@ -85,6 +89,104 @@ namespace editor_text {
             }
         }
         return text;
+    }
+
+    namespace {
+        std::string translations_path(const std::string& language) {
+            return std::string(ASSETS_PATH) + "translations/" + language + ".json";
+        }
+
+        // Every language's strings as its file has them - read once, kept
+        // in step by set_translation().
+        std::unordered_map<std::string, std::unordered_map<std::string, std::string>>& file_strings() {
+            static std::unordered_map<std::string, std::unordered_map<std::string, std::string>> tables;
+            return tables;
+        }
+
+        std::string json_string(const std::string& text) {
+            std::string out = "\"";
+            for (char c : text) {
+                if (c == '"' || c == '\\') out += '\\';
+                if (c == '\n') { out += "\\n"; continue; }
+                out += c;
+            }
+            return out + "\"";
+        }
+    }
+
+    const std::vector<std::string>& languages() {
+        static std::vector<std::string> found;
+        if (!found.empty()) return found;
+        std::error_code error;
+        for (const auto& entry : std::filesystem::directory_iterator(std::string(ASSETS_PATH) + "translations", error)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".json") found.push_back(entry.path().stem().string());
+        }
+        std::sort(found.begin(), found.end());
+        return found;
+    }
+
+    std::string translation(const std::string& language, const std::string& key) {
+        auto& tables = file_strings();
+        auto table = tables.find(language);
+        if (table == tables.end()) {
+            table = tables.emplace(language, std::unordered_map<std::string, std::string>{}).first;
+            load_language(language, table->second);
+        }
+        const auto found = table->second.find(key);
+        return found == table->second.end() ? std::string() : found->second;
+    }
+
+    bool set_translation(const std::string& language, const std::string& key, const std::string& value) {
+        const std::string path = translations_path(language);
+        std::vector<std::string> lines;
+        {
+            std::istringstream text(read_file(path));
+            for (std::string line; std::getline(text, line);) lines.push_back(line);
+        }
+        if (lines.empty()) return false;
+        // One "key": "value" a line - the files' own layout.
+        const std::string quoted = "\"" + key + "\":";
+        const std::string prefix = "\"" + key.substr(0, key.find('.') + 1);
+        auto key_line = [&](const std::string& line) {
+            const size_t start = line.find_first_not_of(' ');
+            return start == std::string::npos ? std::string() : line.substr(start);
+        };
+        int existing = -1, last_prefixed = -1, strings_open = -1, last_entry = -1;
+        for (int i = 0; i < static_cast<int>(lines.size()); ++i) {
+            const std::string trimmed = key_line(lines[static_cast<size_t>(i)]);
+            if (trimmed.rfind(quoted, 0) == 0) existing = i;
+            if (trimmed.rfind(prefix, 0) == 0) last_prefixed = i;
+            if (trimmed.rfind("\"strings\":", 0) == 0) strings_open = i;
+            if (strings_open >= 0 && i > strings_open && trimmed.rfind("\"", 0) == 0) last_entry = i;
+        }
+        const std::string entry = "    " + json_string(key) + ": " + json_string(value);
+        if (existing >= 0) {
+            std::string& line = lines[static_cast<size_t>(existing)];
+            const bool comma = !line.empty() && line.back() == ',';
+            line = entry + (comma ? "," : "");
+        } else {
+            const int after = last_prefixed >= 0 ? last_prefixed : strings_open;
+            if (after < 0) return false;
+            std::string& previous = lines[static_cast<size_t>(after)];
+            // After the last entry: that one gets the comma, this one none.
+            const bool previous_is_last = after == last_entry;
+            if (after == strings_open) {
+                lines.insert(lines.begin() + after + 1, entry + (last_entry >= 0 ? "," : ""));
+            } else {
+                if (previous_is_last && previous.back() != ',') previous += ",";
+                lines.insert(lines.begin() + after + 1, entry + (previous_is_last ? "" : ","));
+            }
+        }
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        if (!out) return false;
+        for (const std::string& line : lines) out << line << "\n";
+        if (!out) return false;
+
+        translation(language, key); // makes sure the table is loaded
+        file_strings()[language][key] = value;
+        if (language == selected_language) strings[key] = value;
+        if (language == "en") fallback[key] = value;
+        return true;
     }
 
     const Font& font() { return loaded_font; }

@@ -95,6 +95,14 @@ namespace block_file {
         bool only_above_air = false;
     };
 
+    // A value each placed one carries (BlockStateProperty) - a crop's
+    // "age" 0..7, farmland's "moist" 0..1.
+    struct StateProperty {
+        std::string name;
+        int max = 1;           // values 0..max (1: yes/no)
+        int default_value = 0;
+    };
+
     struct BlockFile {
         int id = 0;       // BlockType value: stable - chunks are saved by it
         std::string name; // stable id: saves, translations ("block.<name>"), commands
@@ -146,6 +154,12 @@ namespace block_file {
         std::vector<Element> elements;
         // What it gives off now and then (a torch's flame and smoke).
         std::vector<ParticleEmitter> particles;
+        // The values a placed one carries, for its behaviors - at most 32
+        // bits between them all.
+        std::vector<StateProperty> properties;
+        // What it does: assets/scripts/<script>.lua (scripting/
+        // LuaScripting.hpp) - "" none.
+        std::string script;
     };
 
     // Whether a block of `shape` can be drawn from parts: a cube or a torch

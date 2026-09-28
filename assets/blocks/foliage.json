@@ -10,7 +10,7 @@
   "cutout": true,
   "keep_same_faces": true,
   "particles": [
-    { "type": "leaf", "at": [8, -0.5, 8], "spread": [8, 0, 8], "chance": 0.05, "only_above_air": true }
+    { "type": "leaf", "at": [8, 1, 8], "spread": [8, 0, 8], "chance": 0.15, "count": 2, "only_above_air": true }
   ],
   "faces": {
     "top": { "tile": [4, 3], "tint": [82, 180, 82, 255], "biome": "foliage" },

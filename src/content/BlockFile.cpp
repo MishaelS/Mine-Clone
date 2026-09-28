@@ -195,6 +195,7 @@ namespace block_file {
             block.directional = root["directional"].as_bool(false);
             block.shape = index_of(SHAPE_IDS, root["shape"].as_string("cube"), 0);
             block.double_block = root["double_block"].as_string();
+            block.script = root["script"].as_string();
             const std::vector<Json>& cut = root["cut"].as_array();
             if (cut.size() >= 2) {
                 block.has_cut = true;
@@ -278,6 +279,14 @@ namespace block_file {
                 emitter.only_above_air = saved["only_above_air"].as_bool(false);
                 block.particles.push_back(emitter);
             }
+            for (const Json& saved : root["properties"].as_array()) {
+                StateProperty property;
+                property.name = saved["name"].as_string();
+                if (property.name.empty()) continue;
+                property.max = std::clamp(static_cast<int>(saved["max"].as_number(1)), 1, 65535);
+                property.default_value = std::clamp(static_cast<int>(saved["default"].as_number(0)), 0, property.max);
+                block.properties.push_back(property);
+            }
             // Each state over its shape's defaults.
             for (int s = 0; s < MAX_BLOCK_STATES; ++s) {
                 StateModel& state = block.states[static_cast<size_t>(s)];
@@ -332,6 +341,7 @@ namespace block_file {
         out << "  \"luminance\": " << block.luminance << ",\n";
         if (block.shape != 0) out << "  \"shape\": \"" << SHAPE_IDS[std::clamp(block.shape, 0, SHAPE_COUNT - 1)] << "\",\n";
         if (!block.double_block.empty()) out << "  \"double_block\": \"" << escape(block.double_block) << "\",\n";
+        if (!block.script.empty()) out << "  \"script\": \"" << escape(block.script) << "\",\n";
         if (block.has_cut) out << "  \"cut\": [" << block.cut_x << ", " << block.cut_y << "],\n";
         if (block.item_sprite_x >= 0) out << "  \"item_sprite\": [" << block.item_sprite_x << ", " << block.item_sprite_y << "],\n";
         // Only what differs from an ordinary solid cube.
@@ -407,6 +417,16 @@ namespace block_file {
                 }
                 if (emitter.only_above_air) out << ", \"only_above_air\": true";
                 out << " }" << (i + 1 < block.particles.size() ? "," : "") << "\n";
+            }
+            out << "  ],\n";
+        }
+        if (!block.properties.empty()) {
+            out << "  \"properties\": [\n";
+            for (size_t i = 0; i < block.properties.size(); ++i) {
+                const StateProperty& property = block.properties[i];
+                out << "    { \"name\": \"" << escape(property.name) << "\", \"max\": " << property.max;
+                if (property.default_value != 0) out << ", \"default\": " << property.default_value;
+                out << " }" << (i + 1 < block.properties.size() ? "," : "") << "\n";
             }
             out << "  ],\n";
         }

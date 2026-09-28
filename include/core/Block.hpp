@@ -91,8 +91,8 @@ enum class BlockType : uint8_t {
     ShortGrass,
     // Only oak has a sapling block yet (spruce/birch leaves drop the
     // ItemType::Sapling item instead). Plantable on Grass/Dirt only
-    // (World::place_block) - see GameEngine::update_random_ticks()/
-    // update_sapling_growth() for the random-tick grow-into-a-tree roll.
+    // (World::place_block) - grows into the structure whose file says it
+    // "grows_from" it (content/Behaviors.cpp's GrowsIntoStructure).
     OakSapling,
 
     // Light sources. RedstoneTorch is the unlit state (see World::place_block - only
@@ -280,6 +280,25 @@ struct BlockElement {
 // Everything Mesh Generation needs to know about a BlockType, looked up once
 // per face while building a chunk's mesh (not stored per-block). Loaded from
 // src/content/Blocks.cpp by Load_block_definitions().
+// One value a placed block of some type carries besides its type - a
+// crop's growth stage ("age", 0..7), wet farmland ("moist", 0..1). Declared
+// per block (its file's "properties" - content/BlockFile.hpp), read and
+// written by its behaviors (world/BlockBehavior.hpp). All of a block's
+// values are packed into one 32-bit word per cell (Chunk::
+// get_state_values()): this one's `bits` bits from `shift`, stored XORed
+// with its default so a cell never written reads back every default.
+struct BlockStateProperty {
+    std::string name;
+    int max = 1;           // values 0..max (1: a yes/no)
+    int default_value = 0;
+    int shift = 0;
+    int bits = 1;
+};
+
+// Its value out of a cell's packed values, and `packed` with it set.
+int read_state_property(const BlockStateProperty& property, uint32_t packed);
+uint32_t write_state_property(const BlockStateProperty& property, uint32_t packed, int value);
+
 struct BlockProperties {
     bool solid;        // occludes neighbor faces, blocks movement
     bool transparent;  // doesn't block light or occlude neighbors (air, later: glass/water)
@@ -346,7 +365,10 @@ struct BlockProperties {
     // Where this block may be mounted, vanilla's own AttachFace idea: on
     // the floor (support below), on a wall (support to the side), on the
     // ceiling (support above) - BlockDef::attach_floor()/attach_wall()/
-    // attach_ceiling(). All false for an ordinary block, which needs no support at
+    // attach_ceiling(). The floor and the ceiling need a box under/over
+    // the cell's middle; a wall needs a whole face - a full block's side,
+    // not a slab's or a door's (see World.cpp's has_full_side_support()).
+    // All false for an ordinary block, which needs no support at
     // all. A block with any of these placed by the player stores which
     // face it actually ended up on (BlockInstanceState::attachment) and is
     // broken off automatically once that support goes away (World::
@@ -403,6 +425,8 @@ struct BlockProperties {
     std::vector<BlockType> placed_on;
     // What it gives off on its animate ticks (BlockParticleEmitter).
     std::vector<BlockParticleEmitter> particles;
+    // The values a placed one carries (BlockStateProperty) - none for most.
+    std::vector<BlockStateProperty> state_properties;
     // Its own model from parts (a torch's stick and flame) - drawn instead
     // of its shape's boxes when not empty. Rendering only: collision and
     // the hitbox stay its shape's / its state's.
@@ -472,6 +496,9 @@ bool block_needs_facing(BlockType type);
 // Whether `type` may stand on `below` - a plant on its soil (BlockProperties::
 // placed_on); true for any block that doesn't care.
 bool block_can_stay_on(BlockType type, BlockType below);
+
+// Its state property called `name`, or nullptr.
+const BlockStateProperty* find_state_property(BlockType type, const std::string& name);
 
 // True for a block that mounts onto something (see BlockProperties::
 // attach_*) - placed through World::place_attached_block() rather than the

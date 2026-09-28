@@ -1,11 +1,13 @@
 #pragma once
 
 #include "content/BlockFile.hpp"
+#include "content/StructureFile.hpp"
 #include "effects/BlockParticles.hpp"
 #include "model/EntityModel.hpp"
 
 #include "raylib.h"
 
+#include <set>
 #include <string>
 #include <vector>
 
@@ -31,8 +33,8 @@ public:
 
 private:
     // Tabs, top left: entity models (everything below up to "Blocks tab"),
-    // and blocks (BlockTab.cpp).
-    enum class Tab { Entities, Blocks };
+    // blocks (BlockTab.cpp) and structures (StructureTab.cpp).
+    enum class Tab { Entities, Blocks, Structures };
     Tab tab = Tab::Entities;
     void draw_tabs();
 
@@ -58,6 +60,28 @@ private:
     const Texture2D& items_atlas();
     const Texture2D& particle_sheet();
     void draw_block_particles_panel(Rectangle bounds);
+    // What it does: its Lua script, the values each placed one carries
+    // (state properties), what it can stand on, what it grows into.
+    void draw_block_behavior_panel(Rectangle bounds);
+    // New blocks: from a template (a copy of an existing block of that
+    // kind - a two-cell one both halves), a copy of the selected one; and
+    // deleting one the player-made (never a built-in, which the game needs).
+    void add_block_from_template(int template_index);
+    void duplicate_block();
+    // A copy of blocks[index] (both halves of a two-cell one), named from
+    // `base` ("" - its own name + "_copy"), selected. False if no id is free.
+    bool copy_block(int index, std::string base);
+    void delete_block();
+    // Renames the selected block (its file, and its other half's
+    // "partner"); false with the reason in the status line.
+    bool rename_block(const std::string& new_name);
+    std::string free_block_name(const std::string& base) const;
+    bool block_is_builtin(int index) const; // a BlockType the game's code names
+    // The scripts in assets/scripts (names without ".lua"), for the behavior tab.
+    void refresh_script_list();
+    // The "New" button's list of templates, hanging under `button`; true
+    // while it's open (and has the mouse).
+    bool draw_block_templates(Rectangle button);
     void update_block_particles(float dt);
     void mark_block_dirty();
     void commit_block_history(bool force = false);
@@ -66,6 +90,17 @@ private:
 
     std::vector<block_file::BlockFile> blocks;
     std::vector<bool> block_dirty; // edited since last saved
+    std::vector<std::string> block_file_names; // the name each was loaded/saved as - "" never saved
+    bool block_templates_open = false;     // the "New" button's list of templates
+    int pending_block_delete = -1;          // "Delete" clicked once for it - a second click deletes
+    std::set<std::string> folded_sections;  // the block panels' sections folded shut, by title
+    Vector2 block_behavior_scroll = {0, 0};
+    std::vector<std::string> script_names;
+    bool script_list_loaded = false;
+    // The structures that grow from the selected block (the behavior tab) -
+    // read when another block is picked.
+    std::vector<std::string> grows_into;
+    int grows_into_for = -2;
     bool blocks_loaded = false;
     int selected_block = -1;
     int selected_face = 0;         // BlockFace order - the face the atlas and tint edit
@@ -73,7 +108,7 @@ private:
     Vector2 block_list_scroll = {0, 0};
     Vector2 block_panel_scroll = {0, 0};
     Vector2 block_hitbox_scroll = {0, 0};
-    int block_panel_tab = 0;   // the right panel: 0 properties, 1 model (its parts), 2 hitbox, 3 particles
+    int block_panel_tab = 0;   // the right panel: 0 main, 1 model (shape, faces, parts), 2 hitbox, 3 particles, 4 behavior
     Vector2 block_particles_scroll = {0, 0};
     int selected_emitter = 0;  // the particle emitter being edited
     // What the selected block gives off, live: around it in the preview and
@@ -102,6 +137,76 @@ private:
     block_file::BlockFile block_committed;
     int block_committed_index = -1;
     bool block_uncommitted = false;
+
+    // --- Structures tab (StructureTab.cpp): every structure's file,
+    // assets/structures/<name>.json - see content/StructureFile.hpp. Built
+    // block by block in a 3D grid from the blocks tab's blocks. ---
+    void run_structures_frame();
+    void load_structures();
+    void select_structure(int index);
+    void save_structure(int index);
+    void save_all_structures();
+    void add_structure(bool copy_selected); // a new empty one, or a copy of the selected one
+    void delete_structure();                // the selected one, its file too
+    void rename_structure(const std::string& new_name);
+    void draw_structures_top_bar(Rectangle bounds);
+    void draw_structure_list(Rectangle bounds);
+    void draw_structure_palette(Rectangle bounds);
+    void draw_structure_panel(Rectangle bounds);
+    void update_structure_view(Rectangle view);
+    void draw_structure_view(Rectangle view);
+    void frame_structure();
+    structure_file::StructureFile* current_structure();
+    structure_file::Variant* current_variant();
+    const block_file::BlockFile* block_named(const std::string& name) const;
+    void mark_structure_dirty();
+    void commit_structure_history(bool force = false);
+    void structure_undo();
+    void structure_redo();
+
+    std::vector<structure_file::StructureFile> structures;
+    std::vector<std::string> structure_file_names; // the name each was loaded/saved as - "" never saved
+    std::vector<bool> structure_dirty;
+    bool structures_loaded = false;
+    int selected_structure = -1;
+    int structure_variant = 0;
+    int pending_structure_delete = -1; // "Delete" clicked once for it - a second click deletes
+    Vector2 structure_list_scroll = {0, 0};
+    Vector2 structure_palette_scroll = {0, 0};
+    Vector2 structure_panel_scroll = {0, 0};
+    std::string structure_palette_search;
+    // What a click puts in: this block, placed over what its rule allows,
+    // required or not. Tools: 0 place, 1 paint (an existing block becomes
+    // the brush's), 2 remove, 3 pick (the brush becomes that block's).
+    std::string brush_block = "cobblestone";
+    int brush_replace = 0;
+    bool brush_required = false;
+    int structure_tool = 0;
+    bool structure_show_ground = true;
+    bool structure_show_rules = true;
+    bool structure_cut = false; // only the layers up to structure_cut_y shown (and edited)
+    int structure_cut_y = 0;
+    // The cell under the mouse: the block there (on_block) and the empty
+    // cell next to the face it's aimed at - or on the ground, the cell above.
+    struct StructureHover {
+        bool valid = false;
+        bool on_block = false;
+        int x = 0, y = 0, z = 0;
+        int place_x = 0, place_y = 0, place_z = 0;
+    } structure_hover;
+    Vector3 structure_target = {0.0f, 2.0f, 0.0f};
+    float structure_yaw = 0.8f, structure_pitch = 0.5f, structure_distance = 14.0f;
+    bool structure_view_dragging = false;
+    bool structure_view_panning = false;
+    bool structure_clicked = false; // the left button went down in the view to use a tool
+    RenderTexture2D structure_view_texture{};
+    Camera3D structure_camera() const;
+    // Undo for the structures tab: (structure index, its state before) steps.
+    std::vector<std::pair<int, structure_file::StructureFile>> structure_undo_stack;
+    std::vector<std::pair<int, structure_file::StructureFile>> structure_redo_stack;
+    structure_file::StructureFile structure_committed;
+    int structure_committed_index = -1;
+    bool structure_uncommitted = false;
 
     // Layout
     Rectangle top_bar_rect() const;

@@ -264,6 +264,25 @@ namespace content {
         return *this;
     }
 
+    BlockDef& BlockDef::state_property(const std::string& name, int max, int default_value) {
+        std::vector<BlockStateProperty>& properties = block_table[static_cast<size_t>(type_)].state_properties;
+        BlockStateProperty property;
+        property.name = name;
+        property.max = std::max(1, max);
+        property.default_value = std::clamp(default_value, 0, property.max);
+        property.bits = 1;
+        while ((1 << property.bits) <= property.max) ++property.bits;
+        property.shift = properties.empty() ? 0 : properties.back().shift + properties.back().bits;
+        if (property.shift + property.bits > 32) {
+            throw std::runtime_error("block '" + get_block_name(type_) + "': its state properties need more than 32 bits");
+        }
+        for (BlockStateProperty& existing : properties) {
+            if (existing.name == name) throw std::runtime_error("block '" + get_block_name(type_) + "': two state properties called '" + name + "'");
+        }
+        properties.push_back(property);
+        return *this;
+    }
+
     BlockDef& BlockDef::directional() {
         block_table[static_cast<size_t>(type_)].directional = true;
         return *this;
@@ -434,6 +453,28 @@ FaceOffset block_face_offset(BlockFace face)
         case BlockFace::West:   return {-1,  0,  0};
     }
     return {0, -1, 0};
+}
+
+int read_state_property(const BlockStateProperty& property, uint32_t packed)
+{
+    const uint32_t mask = (property.bits >= 32 ? 0xFFFFFFFFu : ((1u << property.bits) - 1u));
+    const int value = static_cast<int>(((packed >> property.shift) & mask) ^ static_cast<uint32_t>(property.default_value));
+    return std::clamp(value, 0, property.max);
+}
+
+uint32_t write_state_property(const BlockStateProperty& property, uint32_t packed, int value)
+{
+    const uint32_t mask = (property.bits >= 32 ? 0xFFFFFFFFu : ((1u << property.bits) - 1u));
+    const uint32_t stored = (static_cast<uint32_t>(std::clamp(value, 0, property.max)) ^ static_cast<uint32_t>(property.default_value)) & mask;
+    return (packed & ~(mask << property.shift)) | (stored << property.shift);
+}
+
+const BlockStateProperty* find_state_property(BlockType type, const std::string& name)
+{
+    for (const BlockStateProperty& property : get_block_properties(type).state_properties) {
+        if (property.name == name) return &property;
+    }
+    return nullptr;
 }
 
 bool block_is_attachable(BlockType type)

@@ -22,6 +22,7 @@
 #include "ui/ChatHud.hpp"
 #include "world/World.hpp"
 
+#include <array>
 #include <functional>
 
 // A leaf block found disconnected from every nearby log (see
@@ -50,6 +51,8 @@ using GameLoadProgress = std::function<void(bool generating, WorldLoadStage stag
 // the world (hotbar, inventory, chat, death/sleep overlays). Knows nothing
 // about the window or the menus around it - Application owns those, and
 // drives this one frame at a time while a world is being played.
+class EngineBlockApi;
+
 class GameEngine {
 public:
     // Loads the block/item/recipe content and the chunk shader - needs a
@@ -209,28 +212,37 @@ private:
     void animate_blocks();
     void emit_block_particles(int x, int y, int z, BlockType type);
 
-    // One random-tick hit on an OakSapling at (x, y, z) (see
-    // update_random_ticks()) - rolls a 1-in-7 chance (real Minecraft's own
-    // sapling growth odds) to grow it into an oak tree right now. On a
-    // successful roll, still backs off harmlessly if the trunk's own
-    // column isn't clear (something built overhead since it was planted):
-    // there's no explicit retry to schedule the way the old per-sapling
-    // timer needed, since a blocked sapling simply gets another
-    // independent 1-in-7 roll on some future random tick for free. Grows
-    // via make_oak_tree()'s own template (see StructureGenerator, which
-    // places the exact same shape at world-generation time), placed here
-    // through World::place_structure_block() instead of Chunk::set_block()
-    // since this runs at an arbitrary world position at runtime, not
-    // bounded to one already-open Chunk.
-    void update_sapling_growth(int x, int y, int z);
-    // Grass under something that covers it (see grass_can_live()) dies back
-    // to dirt; uncovered, well-lit grass spreads onto uncovered dirt next to
-    // it - Minecraft's own grass random tick.
-    void update_grass(int x, int y, int z);
-    // Nothing on top of block (x, y, z) that keeps grass from living there:
-    // no water/lava, no full opaque block, no slab/stairs - plants, torches,
-    // glass and leaves are fine.
-    bool grass_can_live(int x, int y, int z) const;
+    // --- Block behaviors (world/BlockBehavior.hpp) - BlockEvents.cpp. ---
+    // The engine's side of the block API: the world, drops, sounds and
+    // particles a behavior acts through.
+    friend class EngineBlockApi;
+    std::unique_ptr<EngineBlockApi> block_api;
+    // A random tick landed on (x, y, z): its behaviors' on_random_tick()
+    // (grass spreading, a sapling growing).
+    void random_tick_block(int x, int y, int z, BlockType type);
+    // Whether every behavior of `type` lets a player place it at (x, y, z).
+    bool behaviors_allow_placement(BlockType type, int x, int y, int z);
+    // A player just put the block at (x, y, z) / broke `broken` there:
+    // its behaviors hear it, then its neighbors.
+    void block_placed_by_player(int x, int y, int z);
+    void block_broken_by_player(int x, int y, int z, BlockType broken);
+    // A right click on the block at `hit`: true if one of its behaviors
+    // used the click up.
+    bool use_block(const World::RaycastHit& hit, ItemStack& held);
+    // Tells the six blocks round (x, y, z) that it changed: each one that
+    // can't stay any more breaks, the rest hear on_neighbor_changed().
+    // Chained changes queue up and run in order, not recursively.
+    void notify_block_neighbors(int x, int y, int z);
+    // Runs every schedule_tick() that has come due - once a game tick.
+    void run_scheduled_block_ticks();
+    struct ScheduledBlockTick {
+        uint64_t due;
+        int x, y, z;
+        BlockType type; // skipped if the block there has changed since
+    };
+    std::vector<ScheduledBlockTick> scheduled_block_ticks; // a min-heap by `due`
+    std::vector<std::array<int, 3>> pending_neighbor_updates;
+    bool updating_neighbors = false;
 
     // Called right after any block is removed - a plant (anything with a
     // soil list, BlockProperties::placed_on) can't stay floating in place

@@ -20,6 +20,9 @@
 #include "core/DayNightCycle.hpp"
 #include "ui/DebugOverlay.hpp"
 #include "worldgen/Structure.hpp"
+#include "core/EngineBlockApi.hpp"
+#include "content/Content.hpp"
+#include "scripting/LuaScripting.hpp"
 
 #include "raymath.h"
 #include "rlgl.h"
@@ -449,6 +452,7 @@ namespace {
         "command.help.kill",
         "command.help.say",
         "command.help.summon",
+        "command.help.reload",
     };
 
     std::vector<std::string> chat_command_suggestion_keys() {
@@ -464,6 +468,11 @@ GameEngine::GameEngine(const Settings& settings, AudioSystem& audio)
     Load_drop_table(); // needs both name tables above ready to resolve against
     Load_recipes();
     Load_smelting(); // same name tables as recipes
+    Load_structures(); // assets/structures - by block name too
+    // Script errors and print() show in the chat.
+    scripting::set_message_handler([this](const std::string& text) { chat_hud.push_message(text); });
+    content::register_behaviors(); // what blocks do - after the structures a sapling grows into
+    block_api = std::make_unique<EngineBlockApi>(*this);
     chat_hud.set_command_suggestions(chat_command_suggestion_keys());
     SetTextureFilter(get_block_atlas_texture(),
                       settings.texture_filter == TextureFilterMode::Bilinear ? TEXTURE_FILTER_BILINEAR : TEXTURE_FILTER_POINT);
@@ -490,6 +499,8 @@ GameEngine::~GameEngine()
     if (inventory_hud.is_open()) close_inventory_screen();
     save_player_state();
     world.reset(); // while the GL context still exists - ~World() frees chunk meshes
+    block_behaviors::clear(); // the scripts' behaviors, before the Lua they live in closes
+    scripting::stop();
 
     if (IsTextureValid(pause_snapshot)) UnloadTexture(pause_snapshot);
     unload_chunk_fog_shader();
@@ -502,6 +513,7 @@ void GameEngine::add_object(std::unique_ptr<GameObject> object)
 
 void GameEngine::set_world(std::unique_ptr<World> new_world)
 {
+    scheduled_block_ticks.clear();
     dropped_items.clear();
     mobs.clear();
     particles.clear();
@@ -563,6 +575,7 @@ void GameEngine::tick()
     tick_mobs();
     update_leaf_decay();
     update_random_ticks();
+    run_scheduled_block_ticks();
     animate_blocks();
 }
 
@@ -968,19 +981,6 @@ namespace {
     constexpr int RANDOM_TICK_SECTION_HEIGHT = 16;
     constexpr int RANDOM_TICK_RADIUS = 8; // chunks around the player - Minecraft's simulation distance
 
-    // Grass spreading (GameEngine::update_grass()), Minecraft's rules: a
-    // grass block needs this much light above it to spread, tries this
-    // many cells per random tick, within 1 block sideways and 3 down .. 1
-    // up of itself.
-    constexpr int GRASS_SPREAD_MIN_LIGHT = 9;
-    constexpr int GRASS_SPREAD_ATTEMPTS = 4;
-
-    // 1-in-7 chance a sapling turns into a tree the random tick that
-    // actually lands on it - real Minecraft's own sapling growth odds.
-    constexpr int SAPLING_GROWTH_CHANCE_DENOMINATOR = 7;
-
-    constexpr int SAPLING_TRUNK_HEIGHT_MIN = 4;
-    constexpr int SAPLING_TRUNK_HEIGHT_MAX = 6;
 }
 
 void GameEngine::update_random_ticks()
@@ -1018,18 +1018,9 @@ void GameEngine::update_random_ticks()
                     const int world_y = MIN_WORLD_Y + local_y;
                     const int world_z = chunk_z * CHUNK_SIZE + local_z;
 
-                    // Dispatch on whatever block happens to be there - each
-                    // random-tick block adds its own case.
-                    switch (chunk->get_block(local_x, local_y, local_z)) {
-                        case BlockType::OakSapling:
-                            update_sapling_growth(world_x, world_y, world_z);
-                            break;
-                        case BlockType::Grass:
-                            update_grass(world_x, world_y, world_z);
-                            break;
-                        default:
-                            break;
-                    }
+                    // Whatever block happens to be there - its behaviors
+                    // (world/BlockBehavior.hpp) decide what that does.
+                    random_tick_block(world_x, world_y, world_z, chunk->get_block(local_x, local_y, local_z));
                 }
             }
         }
@@ -1083,68 +1074,6 @@ void GameEngine::emit_block_particles(int x, int y, int z, BlockType type)
             const Vector3 p = block_particles::emit_point(emitter, {unit(), unit(), unit()}, model, state, properties.directional);
             particles.spawn_block_particle(emitter.kind, {x + p.x, y + p.y, z + p.z}, color, type);
         }
-    }
-}
-
-bool GameEngine::grass_can_live(int x, int y, int z) const
-{
-    const BlockType above = world->get_block(x, y + 1, z);
-    if (above == BlockType::Water || above == BlockType::Lava) return false;
-    const BlockProperties& properties = get_block_properties(above);
-    if (properties.has_custom_shape) return false; // slab, stairs, bed... - covers the top
-    return !properties.solid || properties.transparent;
-}
-
-void GameEngine::update_grass(int x, int y, int z)
-{
-    // Covered up: back to dirt.
-    if (!grass_can_live(x, y, z)) {
-        world->swap_block_same_light(x, y, z, BlockType::Dirt);
-        return;
-    }
-
-    // In good light, spread onto uncovered dirt close by.
-    if (world->get_light(x, y + 1, z) < GRASS_SPREAD_MIN_LIGHT) return;
-    for (int i = 0; i < GRASS_SPREAD_ATTEMPTS; ++i) {
-        const int tx = x + GetRandomValue(-1, 1);
-        const int ty = y + GetRandomValue(-3, 1);
-        const int tz = z + GetRandomValue(-1, 1);
-        if (world->get_block(tx, ty, tz) != BlockType::Dirt || !grass_can_live(tx, ty, tz)) continue;
-        world->swap_block_same_light(tx, ty, tz, BlockType::Grass);
-    }
-}
-
-void GameEngine::update_sapling_growth(int x, int y, int z)
-{
-    if (GetRandomValue(0, SAPLING_GROWTH_CHANCE_DENOMINATOR - 1) != 0) return;
-
-    int trunk_height = GetRandomValue(SAPLING_TRUNK_HEIGHT_MIN, SAPLING_TRUNK_HEIGHT_MAX);
-    for (int dy = 1; dy <= trunk_height; ++dy) {
-        BlockType existing = world->get_block(x, y + dy, z);
-        // Blocked (something built over the trunk's own column since it
-        // was planted) - just give up silently. Unlike the old per-
-        // sapling queue, there's no retry to schedule: this exact sapling
-        // simply gets another independent 1-in-7 roll on some future
-        // random tick for free, same as a blocked vanilla sapling does.
-        if (existing != BlockType::Air && existing != BlockType::Foliage) return;
-    }
-
-    // Clear the sapling itself first (no drop/particles - it's turning
-    // into the tree, not being destroyed) so the origin block (the bottom
-    // trunk log, landing exactly on the sapling's own position) finds Air
-    // like every other block placed below, instead of World::
-    // place_structure_block() needing its own OakSapling special case.
-    world->break_block(x, y, z);
-
-    // Same template make_oak_tree()/StructureGenerator place at world-
-    // generation time, just placed here one world-space block at a time
-    // via World::place_structure_block() instead of Chunk::set_block() -
-    // this runs at an arbitrary runtime position, not bounded to one
-    // already-open Chunk the way generation is.
-    Structure tree = make_oak_tree(trunk_height);
-    for (const StructureBlock& block : tree.get_blocks()) {
-        world->place_structure_block(x + block.x, y + block.y, z + block.z,
-            block.type, block.replace_rule == StructureReplaceRule::AirOrFoliage);
     }
 }
 
@@ -1565,6 +1494,14 @@ void GameEngine::execute_chat_command(const std::string& command)
     if (name == "say") {
         if (rest.empty()) { push("command.say.usage"); return; }
         push("chat.server_message", {rest});
+        return;
+    }
+
+    if (name == "reload") {
+        // Every block behavior and Lua script, afresh - edit a script,
+        // /reload, try it, without restarting the game.
+        content::register_behaviors();
+        push("command.reload.done");
         return;
     }
 
@@ -2179,6 +2116,7 @@ void GameEngine::update(float delta_time)
                 check_attachment_support_near(hit->x, hit->y, hit->z);
                 if (*broken == BlockType::Chest) spill_chest_if_any(hit->x, hit->y, hit->z);
                 if (*broken == BlockType::Furnace || *broken == BlockType::LitFurnace) spill_furnace_if_any(hit->x, hit->y, hit->z);
+                block_broken_by_player(hit->x, hit->y, hit->z, *broken);
             }
         }
     }
@@ -2260,6 +2198,7 @@ void GameEngine::update(float delta_time)
                     if (*broken == BlockType::Furnace || *broken == BlockType::LitFurnace) {
                         spill_furnace_if_any(breaking_x, breaking_y, breaking_z);
                     }
+                    block_broken_by_player(breaking_x, breaking_y, breaking_z, *broken);
                 }
                 is_breaking = false;
                 breaking_progress = 0.0f;
@@ -2288,8 +2227,12 @@ void GameEngine::update(float delta_time)
         const BlockShapeKind targeted_kind = get_block_properties(targeted_type).shape_kind;
         bool targeted_is_door = targeted_kind == BlockShapeKind::Door;
         bool targeted_is_bed = targeted_kind == BlockShapeKind::Bed;
+        // Its behaviors get the click first (world/BlockBehavior.hpp).
+        const bool used_by_behavior = targeted_block && use_block(*targeted_block, inventory.hotbar[inventory.selected_slot]);
 
-        if (container_kind && !chest_blocked_above) {
+        if (used_by_behavior) {
+            hand.swing();
+        } else if (container_kind && !chest_blocked_above) {
             inventory_hud.open_container(*container_kind, targeted_block->x, targeted_block->y, targeted_block->z);
             hand.swing();
             EnableCursor();
@@ -2370,6 +2313,7 @@ void GameEngine::update(float delta_time)
                 // would be called with Air and silently clear out whatever
                 // was targeted).
                 bool placed = false;
+                int placed_x = targeted_block->x, placed_y = targeted_block->y, placed_z = targeted_block->z;
                 HorizontalDirection player_facing = direction_facing_player(aim);
                 const BlockShapeKind selected_kind = get_block_properties(selected.block).shape_kind;
                 HorizontalDirection facing = selected_kind == BlockShapeKind::Stairs
@@ -2386,7 +2330,11 @@ void GameEngine::update(float delta_time)
                     int place_x = targeted_block->x + (replace_target ? 0 : static_cast<int>(targeted_block->normal.x));
                     int place_y = targeted_block->y + (replace_target ? 0 : static_cast<int>(targeted_block->normal.y));
                     int place_z = targeted_block->z + (replace_target ? 0 : static_cast<int>(targeted_block->normal.z));
-                    if (!placement_hits_entity(player, mobs, selected.block, place_x, place_y, place_z, facing)) {
+                    placed_x = place_x;
+                    placed_y = place_y;
+                    placed_z = place_z;
+                    if (!placement_hits_entity(player, mobs, selected.block, place_x, place_y, place_z, facing) &&
+                        behaviors_allow_placement(selected.block, place_x, place_y, place_z)) {
                         // A two-cell block (a door, a bed) is placed as one
                         // atomic pair (World::place_pair()) rather than
                         // through the generic single-cell path below - see
@@ -2434,6 +2382,7 @@ void GameEngine::update(float delta_time)
                 // it on its own on some future random tick.
                 if (placed) hand.swing();
                 if (placed && current_game_mode == GameMode::Survival && --selected.count <= 0) selected.clear();
+                if (placed) block_placed_by_player(placed_x, placed_y, placed_z);
             }
         }
     }
@@ -2899,6 +2848,7 @@ void GameEngine::close_world()
     close_inventory_screen();
     save_player_state();
     world.reset(); // ~World() flushes any modified chunks still resident - same guarantee quitting the app outright already relies on
+    scheduled_block_ticks.clear();
     dropped_items.clear();
     mobs.clear();
     particles.clear();

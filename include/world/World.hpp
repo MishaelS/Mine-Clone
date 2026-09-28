@@ -9,6 +9,7 @@
 #include "items/Inventory.hpp"
 #include "items/Smelting.hpp"
 #include "worldgen/CustomWorld.hpp"
+#include "worldgen/Structure.hpp"
 #include "worldgen/WorldType.hpp"
 
 #include <array>
@@ -303,16 +304,14 @@ public:
     int command_clone_region(int min_x, int min_y, int min_z, int max_x, int max_y, int max_z,
                               int dest_x, int dest_y, int dest_z);
 
-    // One block of a Structure being grown at runtime (see GameEngine::
-    // update_sapling_growth) - world-space, arbitrary position, unlike
+    // One block of a Structure being grown at runtime (a sapling - see
+    // BlockApi::place_structure()) - world-space, arbitrary position, unlike
     // Chunk::set_block()'s chunk-local one StructureGenerator::place()
-    // uses at world-generation time. Same replace rule as that function:
-    // an Air target always accepts it, a Foliage target only when
-    // `allow_foliage_overwrite` is set (StructureReplaceRule::
-    // AirOrFoliage) - anything else silently does nothing, so the caller
-    // doesn't need its own pre-check. No fluid/falling scheduling (unlike
+    // uses at world-generation time. Same replace rule as that function
+    // (structure_can_replace()) - a target it may not replace silently
+    // does nothing, so the caller doesn't need its own pre-check. No fluid/falling scheduling (unlike
     // place_block()) - a tree's own blocks never need either.
-    void place_structure_block(int x, int y, int z, BlockType type, bool allow_foliage_overwrite);
+    void place_structure_block(int x, int y, int z, BlockType type, StructureReplaceRule rule);
 
     // Brings every chunk within config.loaded_radius_chunks/active_radius_chunks chunks of
     // `observer_position` (see the .cpp) up to its correct ChunkState.
@@ -465,6 +464,21 @@ public:
     // chunk.
     uint16_t get_block_state(int x, int y, int z) const;
     void set_block_state(int x, int y, int z, uint16_t packed);
+
+    // The cell's block state property values (Chunk::get_state_values() -
+    // a crop's age), packed; 0 (every default) where never set or not
+    // loaded. Setting remeshes it this frame, like set_block_state().
+    uint32_t get_state_values(int x, int y, int z) const;
+    void set_state_values(int x, int y, int z, uint32_t packed);
+
+    // Puts `type` in the cell whatever was there - what a block behavior's
+    // BlockApi::set_block() does (world/BlockBehavior.hpp). Relit only when
+    // the light could change (see swap_block_same_light()); fluids and
+    // falling blocks next to it are woken like place_block() does.
+    // `urgent`: shown this very frame (a player's click did it) rather
+    // than whenever a background remesh lands (a random tick). False
+    // outside the loaded world.
+    bool replace_block(int x, int y, int z, BlockType type, bool urgent);
 
     // This cell's current collision box list, in WORLD space (already
     // offset by x,y,z). Fast path: an ordinary solid, non-custom-shape

@@ -1496,7 +1496,7 @@ void Chunk::carve_caves(uint32_t world_seed, int chunk_x, int chunk_z, const Wor
 
 namespace {
     constexpr uint32_t CHUNK_FILE_MAGIC = 0x4D434348u; // "MCCH"
-    constexpr uint32_t CHUNK_FILE_VERSION = 4u;
+    constexpr uint32_t CHUNK_FILE_VERSION = 5u;
 }
 
 bool Chunk::save_to_file(const std::string& path) const
@@ -1542,6 +1542,15 @@ bool Chunk::save_to_file(const std::string& path) const
     uint32_t block_state_count = static_cast<uint32_t>(block_state.size());
     out.write(reinterpret_cast<const char*>(&block_state_count), sizeof(block_state_count));
     for (const auto& [local_index, packed] : block_state) {
+        int32_t index32 = static_cast<int32_t>(local_index);
+        out.write(reinterpret_cast<const char*>(&index32), sizeof(index32));
+        out.write(reinterpret_cast<const char*>(&packed), sizeof(packed));
+    }
+    // Block state property values (see get_state_values()) - the same
+    // sparse shape again, version 5+ only.
+    uint32_t state_values_count = static_cast<uint32_t>(state_values.size());
+    out.write(reinterpret_cast<const char*>(&state_values_count), sizeof(state_values_count));
+    for (const auto& [local_index, packed] : state_values) {
         int32_t index32 = static_cast<int32_t>(local_index);
         out.write(reinterpret_cast<const char*>(&index32), sizeof(index32));
         out.write(reinterpret_cast<const char*>(&packed), sizeof(packed));
@@ -1610,6 +1619,20 @@ bool Chunk::load_from_file(const std::string& path)
         if (!in) return false; // truncated - don't trust a partial read
     }
 
+    state_values.clear();
+    if (version >= 5u) {
+        uint32_t state_values_count = 0;
+        in.read(reinterpret_cast<char*>(&state_values_count), sizeof(state_values_count));
+        for (uint32_t i = 0; i < state_values_count && in; ++i) {
+            int32_t index32 = 0;
+            uint32_t packed = 0;
+            in.read(reinterpret_cast<char*>(&index32), sizeof(index32));
+            in.read(reinterpret_cast<char*>(&packed), sizeof(packed));
+            state_values[index32] = packed;
+        }
+        if (!in) return false; // truncated - don't trust a partial read
+    }
+
     highest_block_y = highest;
     return true;
 }
@@ -1648,6 +1671,7 @@ void Chunk::set_block(int x, int y, int z, BlockType type)
     // single set_block() call generate_terrain() itself makes.
     if (!orientation.empty()) orientation.erase(index(x, y, z));
     if (!block_state.empty()) block_state.erase(index(x, y, z));
+    if (!state_values.empty()) state_values.erase(index(x, y, z));
 }
 
 HorizontalDirection Chunk::get_orientation(int x, int y, int z) const
@@ -1670,6 +1694,18 @@ uint16_t Chunk::get_block_state(int x, int y, int z) const
 void Chunk::set_block_state(int x, int y, int z, uint16_t packed)
 {
     block_state[index(x, y, z)] = packed;
+}
+
+uint32_t Chunk::get_state_values(int x, int y, int z) const
+{
+    auto it = state_values.find(index(x, y, z));
+    return it != state_values.end() ? it->second : 0u;
+}
+
+void Chunk::set_state_values(int x, int y, int z, uint32_t packed)
+{
+    if (packed == 0u) state_values.erase(index(x, y, z)); // every default - nothing to keep
+    else state_values[index(x, y, z)] = packed;
 }
 
 uint8_t Chunk::get_fluid_level(int x, int y, int z) const

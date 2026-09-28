@@ -293,31 +293,45 @@ namespace {
         return false;
     }
 
-    bool has_centered_side_support(const World& world, int x, int y, int z, HorizontalDirection side)
+    // Does the block at (x, y, z) offer a whole face toward the cell next
+    // to it on `side` - vanilla's "sturdy face": its collision boxes, flush
+    // with that cell's wall, cover the wall completely (together - a
+    // stair's back is two boxes). A slab's side, a door's edge or a cake
+    // doesn't, so nothing mounted on the wall is left hanging in the air.
+    // Checked once per texture pixel of the wall (16x16), the grid every
+    // block model is made on.
+    bool has_full_side_support(const World& world, int x, int y, int z, HorizontalDirection side)
     {
         constexpr float SUPPORT_EPSILON = 0.001f;
+        constexpr int SAMPLES = 16;
         DirectionOffset step = horizontal_direction_offset(side);
         const float plane_x = step.dx > 0 ? static_cast<float>(x + 1) : static_cast<float>(x);
         const float plane_z = step.dz > 0 ? static_cast<float>(z + 1) : static_cast<float>(z);
-        const float center_y = static_cast<float>(y) + 0.5f;
-        const float center_x = static_cast<float>(x) + 0.5f;
-        const float center_z = static_cast<float>(z) + 0.5f;
         BlockShapeBoxes boxes = world.collision_boxes_at(x, y, z);
-        for (int i = 0; i < boxes.count; ++i) {
-            const BoundingBox& box = boxes.boxes[i];
-            if (center_y + SUPPORT_EPSILON < box.min.y || center_y - SUPPORT_EPSILON > box.max.y) continue;
-            if (step.dx != 0) {
-                float face_x = step.dx > 0 ? box.max.x : box.min.x;
-                if (std::fabs(face_x - plane_x) > SUPPORT_EPSILON) continue;
-                if (center_z + SUPPORT_EPSILON < box.min.z || center_z - SUPPORT_EPSILON > box.max.z) continue;
-                return true;
+        if (boxes.count == 0) return false;
+        for (int v = 0; v < SAMPLES; ++v) {
+            for (int u = 0; u < SAMPLES; ++u) {
+                // The middle of one pixel of the wall: u along it, v up it.
+                const float along = (static_cast<float>(u) + 0.5f) / SAMPLES;
+                const float py = static_cast<float>(y) + (static_cast<float>(v) + 0.5f) / SAMPLES;
+                bool covered = false;
+                for (int i = 0; i < boxes.count && !covered; ++i) {
+                    const BoundingBox& box = boxes.boxes[i];
+                    if (py < box.min.y || py > box.max.y) continue;
+                    if (step.dx != 0) {
+                        const float face_x = step.dx > 0 ? box.max.x : box.min.x;
+                        const float pz = static_cast<float>(z) + along;
+                        covered = std::fabs(face_x - plane_x) <= SUPPORT_EPSILON && pz >= box.min.z && pz <= box.max.z;
+                    } else {
+                        const float face_z = step.dz > 0 ? box.max.z : box.min.z;
+                        const float px = static_cast<float>(x) + along;
+                        covered = std::fabs(face_z - plane_z) <= SUPPORT_EPSILON && px >= box.min.x && px <= box.max.x;
+                    }
+                }
+                if (!covered) return false;
             }
-            float face_z = step.dz > 0 ? box.max.z : box.min.z;
-            if (std::fabs(face_z - plane_z) > SUPPORT_EPSILON) continue;
-            if (center_x + SUPPORT_EPSILON < box.min.x || center_x - SUPPORT_EPSILON > box.max.x) continue;
-            return true;
         }
-        return false;
+        return true;
     }
 
 }
@@ -333,11 +347,11 @@ namespace {
         if (attachment == BlockFace::Bottom) return has_centered_top_support(world, sx, sy, sz);
         if (attachment == BlockFace::Top) return has_centered_bottom_support(world, sx, sy, sz);
 
-        // A wall: the support's own side face, pointing back toward us.
+        // A wall: the support's own whole side face, pointing back toward us.
         HorizontalDirection toward_block =
             step.dx > 0 ? HorizontalDirection::West : step.dx < 0 ? HorizontalDirection::East
             : step.dz > 0 ? HorizontalDirection::North : HorizontalDirection::South;
-        return has_centered_side_support(world, sx, sy, sz, toward_block);
+        return has_full_side_support(world, sx, sy, sz, toward_block);
     }
 }
 
@@ -889,6 +903,54 @@ void World::set_block_state(int x, int y, int z, uint16_t packed)
 
 }
 
+uint32_t World::get_state_values(int x, int y, int z) const
+{
+    if (y < MIN_WORLD_Y || y >= MIN_WORLD_Y + CHUNK_HEIGHT) return 0u;
+
+    int chunk_x = floor_div(x, CHUNK_SIZE);
+    int chunk_z = floor_div(z, CHUNK_SIZE);
+    const Chunk* chunk = chunk_at(chunk_x, chunk_z);
+    if (chunk == nullptr) return 0u;
+
+    return chunk->get_state_values(x - chunk_x * CHUNK_SIZE, y - MIN_WORLD_Y, z - chunk_z * CHUNK_SIZE);
+}
+
+void World::set_state_values(int x, int y, int z, uint32_t packed)
+{
+    if (y < MIN_WORLD_Y || y >= MIN_WORLD_Y + CHUNK_HEIGHT) return;
+
+    int chunk_x = floor_div(x, CHUNK_SIZE);
+    int chunk_z = floor_div(z, CHUNK_SIZE);
+    Chunk* chunk = chunk_at(chunk_x, chunk_z);
+    if (chunk == nullptr) return;
+
+    {
+        // Same locking discipline as set_block_state().
+        std::unique_lock<std::shared_mutex> lock(chunk->data_mutex());
+        chunk->set_state_values(x - chunk_x * CHUNK_SIZE, y - MIN_WORLD_Y, z - chunk_z * CHUNK_SIZE, packed);
+        chunk->mark_modified();
+    }
+    urgent_remesh.insert(chunk_key(chunk_x, chunk_z)); // a crop's next stage shows this frame
+}
+
+bool World::replace_block(int x, int y, int z, BlockType type, bool urgent)
+{
+    if (y < MIN_WORLD_Y || y >= MIN_WORLD_Y + CHUNK_HEIGHT) return false;
+    if (chunk_at(floor_div(x, CHUNK_SIZE), floor_div(z, CHUNK_SIZE)) == nullptr) return false;
+    const BlockProperties& before = get_block_properties(get_block(x, y, z));
+    const BlockProperties& after = get_block_properties(type);
+    // Dirt to grass, dry to wet farmland: the light can't change - skip the relight.
+    if (before.transparent == after.transparent && before.luminance == after.luminance) {
+        swap_block_same_light(x, y, z, type);
+        if (urgent) remesh_after_edit(x, z);
+    } else {
+        set_block_and_rebuild(x, y, z, type);
+    }
+    schedule_fluid_neighbors(x, y, z);
+    schedule_falling_check(x, y, z);
+    return true;
+}
+
 BlockShapeBoxes World::collision_boxes_at(int x, int y, int z) const
 {
     BlockType type = get_block(x, y, z);
@@ -1368,11 +1430,9 @@ int World::command_clone_region(int min_x, int min_y, int min_z, int max_x, int 
     return placed;
 }
 
-void World::place_structure_block(int x, int y, int z, BlockType type, bool allow_foliage_overwrite)
+void World::place_structure_block(int x, int y, int z, BlockType type, StructureReplaceRule rule)
 {
-    BlockType existing = get_block(x, y, z);
-    bool can_replace = existing == BlockType::Air || (allow_foliage_overwrite && existing == BlockType::Foliage);
-    if (can_replace) set_block_and_rebuild(x, y, z, type);
+    if (structure_can_replace(rule, get_block(x, y, z))) set_block_and_rebuild(x, y, z, type);
 }
 
 void World::set_block_and_rebuild(int x, int y, int z, BlockType type)

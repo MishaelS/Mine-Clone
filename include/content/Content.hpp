@@ -76,6 +76,7 @@ public:
     BlockDef& biome_tint(int face, BiomeTint tint);                  // that face recolored by its biome
     BlockDef& placed_on(std::vector<BlockType> soil);                // placed only on (and stays only on) these
     BlockDef& particles(std::vector<BlockParticleEmitter> emitters); // what it gives off on its animate ticks
+    BlockDef& state_property(const std::string& name, int max, int default_value = 0); // a value each placed one carries (BlockStateProperty)
 
     BlockDef& attach_floor();
     BlockDef& attach_wall();
@@ -185,5 +186,10 @@ void register_items();
 void register_drops();
 void register_recipes();
 void register_smelting();
+// What blocks do (world/BlockBehavior.hpp) - src/content/Behaviors.cpp:
+// the game's own behaviors and every block file's Lua script. After the
+// blocks and the structures are loaded; calling it again reloads them all
+// (the /reload command).
+void register_behaviors();
 
 } // namespace content

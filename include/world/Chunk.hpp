@@ -407,6 +407,14 @@ public:
     uint16_t get_block_state(int x, int y, int z) const;
     void set_block_state(int x, int y, int z, uint16_t packed);
 
+    // The block's own state property values (BlockStateProperty - a crop's
+    // age, wet farmland), packed per its definition - 0 (every default)
+    // where never set. Same sparse map and same clearing on set_block() as
+    // the two above. Persisted by save_to_file()/load_from_file() (chunk
+    // file version 5+).
+    uint32_t get_state_values(int x, int y, int z) const;
+    void set_state_values(int x, int y, int z, uint32_t packed);
+
     // Exact biome-blended foliage color generated for this local (x, z)
     // column. Used by a broken foliage block so its dropped-item cube keeps
     // the same color instead of reverting to the atlas' gray tint mask.
@@ -531,6 +539,8 @@ private:
 
     // See get_block_state()/set_block_state() above.
     std::unordered_map<int, uint16_t> block_state;
+    // See get_state_values()/set_state_values() above.
+    std::unordered_map<int, uint32_t> state_values;
 
     // Packed per-cell light: upper nibble = sky light, lower nibble = block
     // light, each 0-15.
